@@ -77,6 +77,49 @@ python scripts/analysis/calibration_sweep.py --step a1   # 运行 sweep
 python scripts/analysis/multi_grid_baseline.py
 ```
 
+## Google Colab
+
+在 Colab 上运行本项目，参考 `notebooks/SA_Solar_Colab.ipynb`。
+
+### 前置准备
+
+1. **Runtime 设置**: Runtime → Change runtime type → T4 GPU
+2. **Google Drive 数据目录**（大文件不入 Git）:
+   ```
+   MyDrive/SA_Solar_Data/
+   ├── tiles/G1238/       # GeoTIFF 瓦片（~3 GB）
+   ├── checkpoints/       # 模型权重（~170 MB/个）
+   └── results/           # 检测输出（自动创建）
+   ```
+3. **一键安装**: `!bash scripts/colab_setup.sh`
+4. **挂载 + 路径配置**: `from scripts.colab_config import setup_colab; setup_colab()`
+
+### 快速流程
+
+```python
+# 在 Colab notebook 中
+!git clone https://github.com/Robertgao0818/SA_Solar.git /content/SA_Solar
+%cd /content/SA_Solar
+!bash scripts/colab_setup.sh
+
+from scripts.colab_config import setup_colab
+setup_colab()
+
+# 推理
+!python detect_and_evaluate.py --grid-id G1238
+
+# 训练
+!python export_coco_dataset.py --output-dir data/coco
+!python train.py --coco-dir data/coco --output-dir checkpoints/colab_run
+```
+
+### 注意事项
+
+- Colab 使用 `requirements.txt`（非 lock 文件），依赖 Colab 自带的 CUDA 栈
+- 通过 `scripts/colab_config.py` 自动将 `tiles/`、`checkpoints/`、`results/` 软链接到 Drive
+- 环境变量 `SOLAR_TILES_ROOT` 可覆盖瓦片路径
+- Colab 免费版 session 有时间限制，建议先用小 grid 验证
+
 ## Dataset Notes
 
 - `export_coco_dataset.py` 导出带地理参考的 `400x400` chip、`train.json` / `val.json` 和 provenance CSV
