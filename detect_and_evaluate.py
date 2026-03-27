@@ -1769,7 +1769,15 @@ def main(force: bool = False,
         pred = load_predictions()  # 重新加载以确保 CRS 统一
 
     # ── Step 2: 加载真值 ──────────────────────────────────────────────
-    gt = load_ground_truth()
+    try:
+        gt = load_ground_truth()
+    except SystemExit:
+        print("\n[INFO] 无真值数据，跳过评估 (detection-only mode)")
+        print(f"[INFO] 检测结果已保存:")
+        print(f"       GPKG: {OUTPUT_DIR / 'predictions_metric.gpkg'}")
+        print(f"       GeoJSON: {OUTPUT_DIR / 'predictions.geojson'}")
+        print(f"[INFO] 可在 QGIS 中加载 predictions_metric.gpkg 进行标注审查")
+        return
 
     # ── Step 3: 多阈值评估（两种模式对比） ───────────────────────────
     print("\n" + "=" * 60)

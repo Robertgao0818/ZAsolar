@@ -32,7 +32,11 @@ fi
 "$VENV_PATH/bin/python" -m pip install --upgrade pip setuptools wheel
 
 if [[ -f "$LOCK_FILE" ]]; then
-  "$VENV_PATH/bin/pip" install -r "$LOCK_FILE"
+  if ! "$VENV_PATH/bin/pip" install -r "$LOCK_FILE"; then
+    echo
+    echo "Lock file install failed; falling back to requirements.txt"
+    "$VENV_PATH/bin/pip" install -r "$REQ_FILE"
+  fi
 else
   "$VENV_PATH/bin/pip" install -r "$REQ_FILE"
 fi

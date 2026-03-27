@@ -457,6 +457,10 @@ def main():
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--chip-size", type=int, default=400)
+    parser.add_argument(
+        "--resume", default=None,
+        help="Path to periodic checkpoint (stage2_epochN.pth) to resume Stage 2 training",
+    )
     args = parser.parse_args()
 
     device = torch.device("cuda:0")
@@ -501,34 +505,45 @@ def main():
     best_path = output_dir / "best_model.pth"
     history = []
 
+    # ── Resume handling ──────────────────────────────────────────────
+    resume_epoch = 0
+    if args.resume:
+        print(f"\n[RESUME] Loading checkpoint: {args.resume}")
+        ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
+        model.load_state_dict(ckpt["model"])
+        resume_epoch = ckpt["epoch"]
+        best_ap50 = ckpt.get("best_ap50", best_ap50)
+        print(f"[RESUME] Will resume Stage 2 from epoch {resume_epoch + 1}, best_ap50={best_ap50:.4f}")
+
     # ── Stage 1: Heads-only ───────────────────────────────────────────
-    print("\n" + "=" * 60)
-    print(f"Stage 1: Heads-only training ({args.epochs1} epochs, LR={args.lr1})")
-    print("=" * 60)
+    if not args.resume:
+        print("\n" + "=" * 60)
+        print(f"Stage 1: Heads-only training ({args.epochs1} epochs, LR={args.lr1})")
+        print("=" * 60)
 
-    freeze_backbone(model)
-    trainable_params = [p for p in model.parameters() if p.requires_grad]
-    optimizer1 = torch.optim.SGD(
-        trainable_params, lr=args.lr1, momentum=0.9, weight_decay=1e-4
-    )
+        freeze_backbone(model)
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        optimizer1 = torch.optim.SGD(
+            trainable_params, lr=args.lr1, momentum=0.9, weight_decay=1e-4
+        )
 
-    for epoch in range(1, args.epochs1 + 1):
-        t0 = time.time()
-        avg_loss = train_one_epoch(model, optimizer1, train_loader, device, epoch)
-        dt = time.time() - t0
+        for epoch in range(1, args.epochs1 + 1):
+            t0 = time.time()
+            avg_loss = train_one_epoch(model, optimizer1, train_loader, device, epoch)
+            dt = time.time() - t0
 
-        ap50 = evaluate_coco(model, val_loader, device)
-        print(f"  Epoch {epoch}/{args.epochs1}  loss={avg_loss:.4f}  "
-              f"val_AP50={ap50:.4f}  time={dt:.0f}s")
+            ap50 = evaluate_coco(model, val_loader, device)
+            print(f"  Epoch {epoch}/{args.epochs1}  loss={avg_loss:.4f}  "
+                  f"val_AP50={ap50:.4f}  time={dt:.0f}s")
 
-        history.append({
-            "stage": 1, "epoch": epoch, "loss": avg_loss, "val_ap50": ap50
-        })
+            history.append({
+                "stage": 1, "epoch": epoch, "loss": avg_loss, "val_ap50": ap50
+            })
 
-        if ap50 > best_ap50:
-            best_ap50 = ap50
-            torch.save(model.state_dict(), best_path)
-            print(f"  >> New best AP50={ap50:.4f}, saved to {best_path}")
+            if ap50 > best_ap50:
+                best_ap50 = ap50
+                torch.save(model.state_dict(), best_path)
+                print(f"  >> New best AP50={ap50:.4f}, saved to {best_path}")
 
     # ── Stage 2: Full fine-tune ───────────────────────────────────────
     print("\n" + "=" * 60)
@@ -544,7 +559,15 @@ def main():
         optimizer2, T_max=total_steps, eta_min=1e-6
     )
 
-    for epoch in range(1, args.epochs2 + 1):
+    # Restore optimizer state and advance scheduler if resuming
+    if args.resume and "optimizer" in ckpt:
+        optimizer2.load_state_dict(ckpt["optimizer"])
+        # Advance scheduler to match completed epochs
+        for _ in range(resume_epoch * len(train_loader)):
+            scheduler.step()
+        print(f"[RESUME] Optimizer state restored, scheduler advanced to epoch {resume_epoch}")
+
+    for epoch in range(resume_epoch + 1, args.epochs2 + 1):
         t0 = time.time()
         avg_loss = train_one_epoch(
             model, optimizer2, train_loader, device, epoch, lr_scheduler=scheduler

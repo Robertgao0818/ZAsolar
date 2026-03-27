@@ -12,6 +12,8 @@ data/
     annotation_manifest.csv   — 标注 manifest (quality tier T1/T2, review status)
   coco/                       — COCO 格式训练数据（export_coco_dataset.py 生成）
 tiles/<GridID>/               — 各 Grid 的航测瓦片（数据目录，禁止放源码）
+                               本地存储: D:\ZAsolar\tiles (WSL: /mnt/d/ZAsolar/tiles)
+                               环境变量: SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles
 results/<GridID>/             — 检测结果、评估报告、图表（数据目录，禁止放源码）
   masks/                      — per-tile 检测掩膜
   vectors/                    — per-tile 矢量化结果

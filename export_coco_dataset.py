@@ -37,32 +37,35 @@ from core.grid_utils import get_grid_paths, normalize_grid_id
 BASE_DIR = Path(__file__).parent
 ANNOTATIONS_DIR = BASE_DIR / "data" / "annotations"
 
-GRID_SOURCES = {
-    "G1238": {
-        "file": ANNOTATIONS_DIR / "G1238_SAM2_260320.gpkg",
-        "layer": "SAM_Residential_merged",
-        "filter": None,
-    },
-    "G1189": {
-        "file": ANNOTATIONS_DIR / "G1189_SAM2_260320.gpkg",
-        "layer": "sam_residential_g1189_mosa_109_rgb255105180",
-        "filter": None,
-    },
-    "G1190": {
-        "file": ANNOTATIONS_DIR / "G1190_SAM2_260320.gpkg",
-        "layer": "SAM_Residential_20260320_221905",
-        "filter": None,
-    },
-}
+CLEANED_DIR = ANNOTATIONS_DIR / "cleaned"
+
+
+def _discover_cleaned_sources() -> dict[str, dict]:
+    """Auto-discover SAM2 annotation files from cleaned/ directory.
+
+    Each *_SAM2_*.gpkg is matched to a grid ID and its first layer is used.
+    """
+    import fiona
+
+    sources = {}
+    for f in sorted(CLEANED_DIR.glob("*_SAM2_*.gpkg")):
+        grid_id = f.name.split("_SAM2_")[0]
+        layers = fiona.listlayers(str(f))
+        if layers:
+            sources[grid_id] = {"file": f, "layer": layers[0]}
+    return sources
 
 
 def load_annotations() -> dict[str, gpd.GeoDataFrame]:
-    """Load per-grid annotation GeoDataFrames (EPSG:4326)."""
+    """Load per-grid annotation GeoDataFrames (EPSG:4326) from cleaned/ dir."""
+    sources = _discover_cleaned_sources()
     result = {}
-    for grid_id, src in GRID_SOURCES.items():
+    for grid_id, src in sources.items():
+        # Skip grids without tiles
+        tiles_dir = BASE_DIR / "tiles" / grid_id
+        if not tiles_dir.exists():
+            continue
         gdf = gpd.read_file(str(src["file"]), layer=src["layer"])
-        if src["filter"] is not None:
-            gdf = src["filter"](gdf).copy()
         # Drop invalid / empty geometries
         gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid & ~gdf.geometry.is_empty]
         gdf = gdf.reset_index(drop=True)

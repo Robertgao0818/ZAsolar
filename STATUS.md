@@ -1,25 +1,27 @@
 # Project Status — Cape Town Solar Panel Detection
 
-**Last Updated**: 2026-03-20
+**Last Updated**: 2026-03-25
 
 ## Current Phase
 
-V2 — SAM2 Annotation & Retrain (COMPLETE; primary metric switched to F1@IoU0.5)
+V3 — Scaled annotation (43 grids) & retrain (IN PROGRESS)
 
 ---
 
 ## Progress Tracker
 <!-- progress:status:start -->
 ### Recent Updates
+- 2026-03-25: V3 retrain on 43-grid cleaned annotations — Stage 2 epoch 4/20, val_AP50=0.788 (+0.099 vs V2)
+- 2026-03-25: export_coco_dataset.py updated to auto-discover cleaned/ annotations; 2982 polygons, 5636 train chips
+- 2026-03-25: Project cleanup: removed old COCO datasets & intermediate checkpoints (~6G freed)
+- 2026-03-24: Annotation expansion to 43 grids (data/annotations/cleaned/), cumulative 2982 installations
+- 2026-03-22: OSM building filter for tile-level selective download (82% savings)
 - 2026-03-20: V2 SAM2 annotation + retrain complete (val_AP50=0.6889, +0.268 vs V1)
-- 2026-03-20: Model-assisted annotation script for semi-auto QGIS workflow
-- 2026-03-20: Evaluation GT switched to SAM2 annotations; primary metric → F1@IoU0.5
-- 2026-03-18: Add annotation cleanup, docs restructure, JHB fine-tuned evaluation, and project configs
-- 2026-03-18: Restructure project: move shared utils to core/, group scripts by domain
 
 ### Current Ops Focus
-- Semi-automatic annotation: expand to more grids via export_hints.py + SAM2 click-segment
-- FP reduction: hard negative mining, confidence threshold tuning
+- V3 training in progress (checkpoints_cleaned/best_model.pth, AP50=0.788 at epoch 4/20)
+- Cloud migration planning: RunPod Pod + Network Volume for scalable training
+- Continue annotation expansion beyond 43 grids
 <!-- progress:status:end -->
 
 ## Evaluation Results Summary (V2, SAM2 GT, F1@IoU0.5)
@@ -98,11 +100,28 @@ Key: precision (~0.63) is now the bottleneck, not recall. Semi-auto annotation w
 
 ---
 
-## V3: Future Directions — NOT STARTED
+## V3: Scaled Annotation & Retrain — IN PROGRESS
 
-- Semi-auto annotation expansion to more grids
-- FP reduction (hard negatives, confidence tuning)
-- Detector + SAM2 inference pipeline
-- JHB cross-city transfer
-- Stronger backbone (Swin, ConvNeXt)
-- Active learning
+Expanded annotations from 3 grids (456 polygons) to 43 grids (2982 polygons) using SAM2 cleaned workflow.
+
+**Training (in progress)**: `checkpoints_cleaned/best_model.pth`
+
+| Metric | V2 (3 grids) | V3 (43 grids, epoch 4/20) | Change |
+|--------|-------------|---------------------------|--------|
+| val_AP50 | 0.6889 | 0.7880 | **+0.099** |
+| Annotations | 456 (T1 SAM2) | 2982 (T1 SAM2 cleaned) | **+553%** |
+| Train chips | ~900 | 5636 | +526% |
+
+COCO export: `data/coco_cleaned/` (28G, 74k files). Next step: WebDataset sharding for cloud training.
+
+### Infrastructure Plan
+- Local: annotation (QGIS), scripting, reports
+- RunPod (planned): export, train, evaluate — Network Volume for tiles + COCO + checkpoints
+- Old COCO datasets & intermediate epoch weights cleaned up (2026-03-25)
+
+### Next Steps
+- Complete V3 training (remaining 16 epochs)
+- Full-grid evaluation with V3 checkpoint
+- RunPod migration for faster iteration
+- Continue annotation expansion
+- FP reduction via hard negative mining

@@ -109,7 +109,8 @@ def download_grid(grid_id: str, dry_run: bool = False, tile_mask: set | None = N
     grid_id = normalize_grid_id(grid_id)
     spec = get_grid_spec(grid_id)
 
-    tiles_dir = Path(__file__).resolve().parent.parent.parent / "tiles" / grid_id
+    from core.grid_utils import TILES_ROOT
+    tiles_dir = TILES_ROOT / grid_id
     tiles_dir.mkdir(parents=True, exist_ok=True)
 
     total_all = spec.n_cols * spec.n_rows

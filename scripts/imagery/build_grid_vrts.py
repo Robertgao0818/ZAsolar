@@ -219,6 +219,14 @@ def main() -> None:
 
     print(f"[INFO] selected_grids={len(grid_ids)}")
     for grid_id in grid_ids:
+        grid_dir = Path("tiles") / grid_id
+        if not grid_dir.exists():
+            print(f"[SKIP] {grid_id}: no tiles directory")
+            continue
+        tile_paths = iter_tile_paths(grid_dir)
+        if not tile_paths:
+            print(f"[SKIP] {grid_id}: no tiles found")
+            continue
         vrt_path = build_vrt_for_grid(grid_id, force=args.force)
         width, height, count = verify_vrt(vrt_path)
         print(f"[OK] {grid_id}: {vrt_path} ({width}x{height}, bands={count})")
