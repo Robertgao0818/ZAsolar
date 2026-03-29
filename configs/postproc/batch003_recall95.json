@@ -1,0 +1,38 @@
+{
+  "post_conf_threshold": 0.89,
+  "min_object_area": 5.0,
+  "max_elongation": 8.0,
+  "_meta": {
+    "source": "calibration_sweep step b0",
+    "tag": "recall95",
+    "precision": 0.78,
+    "recall": 0.9508,
+    "f1": 0.857,
+    "n_tp": 1626,
+    "n_fp": 884,
+    "n_seg_error_excluded": 32,
+    "grids": [
+      "G1682",
+      "G1683",
+      "G1685",
+      "G1686",
+      "G1687",
+      "G1688",
+      "G1689",
+      "G1690",
+      "G1691",
+      "G1692",
+      "G1693",
+      "G1743",
+      "G1744",
+      "G1747",
+      "G1749",
+      "G1750",
+      "G1798",
+      "G1800",
+      "G1801",
+      "G1806",
+      "G1807"
+    ]
+  }
+}

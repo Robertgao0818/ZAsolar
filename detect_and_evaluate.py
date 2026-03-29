@@ -62,7 +62,7 @@ MIN_OBJECT_AREA      = 5      # 后处理面积过滤（m²），<5m² 几乎全
 MAX_ELONGATION       = 8.0    # 后处理长宽比过滤（V1.2 校准后从 4.0 放宽）
 MIN_SOLIDITY         = 0.0    # 暂不限制 solidity（TP/FP 分布重叠太大）
 SHADOW_RGB_THRESH    = 60     # RGB 三通道均 < 此值视为阴影
-POST_CONF_THRESHOLD  = 0.70   # 后处理置信度过滤（基于 mask band2 回填值）
+POST_CONF_THRESHOLD  = 0.85   # 后处理置信度过滤（V3 Model C 校准，recall≥94%）
 OVERLAP              = 0.25
 CHIP_SIZE            = (400, 400)
 BATCH_SIZE           = 4
@@ -186,6 +186,28 @@ def _json_ready(value):
     if isinstance(value, dict):
         return {k: _json_ready(v) for k, v in sorted(value.items())}
     return value
+
+
+def load_postproc_config(config_path: str | Path) -> dict:
+    """从 JSON 文件加载后处理参数，返回可用于覆盖默认值的 dict。
+
+    支持的键: post_conf_threshold, min_object_area, max_elongation
+    (未来扩展: classifier_model, nms_strategy, dual_elongation 等)
+    """
+    path = Path(config_path)
+    if not path.exists():
+        raise FileNotFoundError(f"后处理配置文件不存在: {path}")
+    with open(path, encoding="utf-8") as f:
+        cfg = json.load(f)
+    known_keys = {
+        "post_conf_threshold", "min_object_area", "max_elongation",
+    }
+    params = {k: v for k, v in cfg.items() if k in known_keys}
+    extra = set(cfg.keys()) - known_keys - {"_meta"}
+    if extra:
+        print(f"  [INFO] 后处理配置中忽略未知键: {extra}")
+    print(f"  [POSTPROC] 从 {path.name} 加载: {params}")
+    return params
 
 
 def build_detection_config(
@@ -484,6 +506,9 @@ def detect_solar_panels(
             detector_kwargs["model_path"] = model_path
             print(f"[MODEL] 使用自定义模型权重: {model_path}")
         detector = geoai.SolarPanelDetector(**detector_kwargs)
+        # Override geoai defaults with our pipeline thresholds
+        detector.confidence_threshold = _confidence_threshold
+        detector.min_object_area = _min_object_area
 
         # 预加载建筑轮廓（避免每个 tile 重复加载）
         bldg_union_cache = None
@@ -1713,6 +1738,12 @@ def parse_args():
         default="full_grid",
         help="数据范围标签，记录到 config.json",
     )
+    parser.add_argument(
+        "--postproc-config",
+        default=None,
+        help="后处理参数 JSON 文件路径（由 calibration_sweep 生成），"
+             "覆盖 post_conf_threshold / min_object_area / max_elongation",
+    )
     return parser.parse_args()
 
 
@@ -1728,7 +1759,18 @@ def main(force: bool = False,
          max_elongation: float | None = None,
          model_path: str | None = None,
          evaluation_profile: str = "installation",
-         data_scope: str = "full_grid"):
+         data_scope: str = "full_grid",
+         postproc_config: str | None = None):
+    # 后处理配置文件覆盖：文件中的值作为 fallback，CLI 显式参数优先
+    if postproc_config is not None:
+        pp = load_postproc_config(postproc_config)
+        if post_conf_threshold is None and "post_conf_threshold" in pp:
+            post_conf_threshold = pp["post_conf_threshold"]
+        if min_object_area is None and "min_object_area" in pp:
+            min_object_area = pp["min_object_area"]
+        if max_elongation is None and "max_elongation" in pp:
+            max_elongation = pp["max_elongation"]
+
     set_grid_context(normalize_grid_id(grid_id), output_subdir=output_subdir)
 
     print("╔════════════════════════════════════════════════════════╗")
@@ -1798,7 +1840,10 @@ def main(force: bool = False,
     pred_classified = classify_predictions(gt, pred, iou_threshold=DEFAULT_IOU)
 
     # ── Step 4b: 误检/漏检分类分析 ────────────────────────────────────
-    analyze_errors(gt, pred, pred_classified)
+    try:
+        analyze_errors(gt, pred, pred_classified)
+    except (KeyError, Exception) as e:
+        print(f"  [WARN] Error analysis skipped: {e}")
 
     # ── Step 5: 逐 Tile 评估 ─────────────────────────────────────────
     print("\n" + "=" * 60)
@@ -1869,6 +1914,7 @@ if __name__ == "__main__":
             model_path=args.model_path,
             evaluation_profile=args.evaluation_profile,
             data_scope=args.data_scope,
+            postproc_config=args.postproc_config,
         )
     except RuntimeError as exc:
         print(f"[ERROR] {exc}")

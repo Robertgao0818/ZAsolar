@@ -5,12 +5,14 @@ Calibration Sweep for Post-processing Thresholds
 A0: 从现有 vectors/ + masks/ 重建 pre-filter 候选集 (candidates.gpkg)
 A1: 在候选集上扫描 post_conf / min_area / max_elongation 组合
 A2: (手动) 用最优配置重跑 detect_and_evaluate.py 做 end-to-end 确认
+B0: 基于 batch 003 review 数据做 confidence 阈值校准（自动排除切割错误）
 
 用法:
   python calibration_sweep.py --step a0          # 导出 pre-filter candidates + baseline
   python calibration_sweep.py --step a1 --dry    # 打印搜索空间
   python calibration_sweep.py --step a1          # 运行 sweep
   python calibration_sweep.py --step a1 --top 10 # 运行后打印 top-10 合格组合
+  python calibration_sweep.py --step b0          # batch 003 review-based sweep
 """
 
 import argparse
@@ -465,6 +467,252 @@ def step_a1(dry_run: bool = False, top_n: int = 5):
 
 
 # ════════════════════════════════════════════════════════════════════════
+# B0: Batch 003 review-based confidence sweep
+# ════════════════════════════════════════════════════════════════════════
+
+BATCH_003_GRIDS = [
+    "G1682", "G1683", "G1685", "G1686", "G1687", "G1688", "G1689",
+    "G1690", "G1691", "G1692", "G1693", "G1743", "G1744", "G1747",
+    "G1749", "G1750", "G1798", "G1800", "G1801", "G1806", "G1807",
+]
+
+
+def _load_review_dataset() -> pd.DataFrame:
+    """加载 batch 003 全部 review 数据，标注 TP/FP/seg_error。
+
+    切割错误识别逻辑：status==delete 的预测 polygon 内部包含 FN marker 点，
+    说明该预测是检测正确但切割不佳，被 delete 后用 SAM 重新标注。
+    这类不是语义 FP，应排除出 confidence 校准。
+    """
+    rows = []
+
+    for grid_id in BATCH_003_GRIDS:
+        result_dir = BASE_DIR / "results" / grid_id
+        csv_path = result_dir / "review" / "detection_review_decisions.csv"
+        pred_path = result_dir / "predictions_metric.gpkg"
+        fn_path = result_dir / "review" / f"{grid_id}_fn_markers.gpkg"
+
+        if not csv_path.exists() or not pred_path.exists():
+            print(f"  [SKIP] {grid_id}: 缺少 review CSV 或 predictions")
+            continue
+
+        # 加载 predictions（EPSG:32734）和 review decisions
+        pred_gdf = gpd.read_file(str(pred_path))
+        review_df = pd.read_csv(str(csv_path))
+        pred_gdf = pred_gdf.merge(
+            review_df[["pred_id", "status"]],
+            left_index=True, right_on="pred_id", how="left",
+        )
+
+        # 识别切割错误：delete polygon 内包含 FN marker
+        seg_error_ids = set()
+        if fn_path.exists():
+            fn_gdf = gpd.read_file(str(fn_path))
+            if len(fn_gdf) > 0:
+                fn_gdf = fn_gdf.to_crs(pred_gdf.crs)
+                delete_mask = pred_gdf["status"] == "delete"
+                delete_preds = pred_gdf[delete_mask]
+                if len(delete_preds) > 0:
+                    # spatial join: FN points within delete polygons
+                    joined = gpd.sjoin(
+                        fn_gdf, delete_preds, predicate="within", how="inner",
+                    )
+                    seg_error_ids = set(joined["pred_id"].unique())
+
+        # 构建行记录
+        feature_cols = [
+            "confidence", "area_m2", "elongation", "solidity",
+            "mean_r", "mean_g", "mean_b",
+        ]
+        for _, row in pred_gdf.iterrows():
+            status = row.get("status")
+            if status not in ("correct", "delete"):
+                continue
+            pred_id = row.get("pred_id")
+
+            # 分类：seg_error / tp / fp
+            if status == "delete" and pred_id in seg_error_ids:
+                label = "seg_error"
+            elif status == "correct":
+                label = "tp"
+            else:
+                label = "fp"
+
+            record = {"grid_id": grid_id, "pred_id": pred_id, "label": label}
+            for col in feature_cols:
+                record[col] = row.get(col)
+            rows.append(record)
+
+    df = pd.DataFrame(rows)
+    return df
+
+
+def _sweep_confidence(
+    df: pd.DataFrame,
+    thresholds: list[float] | None = None,
+    exclude_seg_error: bool = True,
+) -> pd.DataFrame:
+    """在给定标签数据上扫描 confidence 阈值，返回 P/R/F1 表。"""
+    if thresholds is None:
+        thresholds = sorted(set(
+            [round(x, 3) for x in np.arange(0.70, 0.99, 0.005)]
+            + [0.70, 0.80, 0.825, 0.85, 0.875, 0.89, 0.90, 0.91, 0.92, 0.93, 0.95]
+        ))
+
+    work = df.copy()
+    if exclude_seg_error:
+        work = work[work["label"] != "seg_error"]
+
+    total_tp = int((work["label"] == "tp").sum())
+    total_fp = int((work["label"] == "fp").sum())
+
+    results = []
+    for thr in thresholds:
+        kept = work[work["confidence"] >= thr]
+        tp = int((kept["label"] == "tp").sum())
+        fp = int((kept["label"] == "fp").sum())
+        tp_lost = total_tp - tp
+        fp_removed = total_fp - fp
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / total_tp if total_tp > 0 else 0.0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        results.append({
+            "threshold": thr,
+            "tp": tp, "fp": fp,
+            "tp_lost": tp_lost, "fp_removed": fp_removed,
+            "precision": round(precision, 4),
+            "recall": round(recall, 4),
+            "f1": round(f1, 4),
+        })
+
+    return pd.DataFrame(results)
+
+
+def step_b0():
+    """Step B0: 基于 batch 003 review 数据做 confidence 校准。"""
+    SWEEP_DIR.mkdir(parents=True, exist_ok=True)
+
+    print("[B0] 加载 batch 003 review 数据...")
+    df = _load_review_dataset()
+
+    # 统计
+    n_tp = int((df["label"] == "tp").sum())
+    n_fp = int((df["label"] == "fp").sum())
+    n_seg = int((df["label"] == "seg_error").sum())
+    print(f"  总记录: {len(df)}  TP: {n_tp}  FP: {n_fp}  切割错误: {n_seg}")
+    print(f"  切割错误占 delete 的 {n_seg / (n_fp + n_seg) * 100:.1f}%")
+
+    # 切割错误明细
+    if n_seg > 0:
+        seg_df = df[df["label"] == "seg_error"]
+        print(f"\n  切割错误分布:")
+        for grid_id, group in seg_df.groupby("grid_id"):
+            print(f"    {grid_id}: {len(group)} 条, "
+                  f"confidence 均值={group['confidence'].mean():.3f}, "
+                  f"中位数={group['confidence'].median():.3f}")
+
+    # Confidence 分布对比
+    print(f"\n  Confidence 分布:")
+    for label in ["tp", "fp", "seg_error"]:
+        subset = df[df["label"] == label]
+        if len(subset) == 0:
+            continue
+        print(f"    {label:>10s} (n={len(subset):4d}): "
+              f"mean={subset['confidence'].mean():.3f}  "
+              f"median={subset['confidence'].median():.3f}  "
+              f"Q1={subset['confidence'].quantile(0.25):.3f}  "
+              f"Q3={subset['confidence'].quantile(0.75):.3f}")
+
+    # Sweep: 排除切割错误
+    print(f"\n[B0] Confidence 阈值扫描 (排除切割错误)...")
+    sweep_clean = _sweep_confidence(df, exclude_seg_error=True)
+    clean_path = SWEEP_DIR / "b0_sweep_clean.csv"
+    sweep_clean.to_csv(str(clean_path), index=False, encoding="utf-8-sig")
+
+    # Sweep: 不排除（对比用）
+    sweep_raw = _sweep_confidence(df, exclude_seg_error=False)
+    raw_path = SWEEP_DIR / "b0_sweep_raw.csv"
+    sweep_raw.to_csv(str(raw_path), index=False, encoding="utf-8-sig")
+
+    # 打印关键阈值
+    print(f"\n{'阈值':>6s}  {'Precision':>9s}  {'Recall':>6s}  {'F1':>6s}  "
+          f"{'FP去除':>6s}  {'TP丢失':>6s}")
+    print("-" * 52)
+    key_thresholds = [0.70, 0.80, 0.825, 0.85, 0.875, 0.89, 0.90, 0.92, 0.95]
+    for _, row in sweep_clean.iterrows():
+        if row["threshold"] in key_thresholds:
+            print(f"  {row['threshold']:.3f}  {row['precision']:>9.4f}  "
+                  f"{row['recall']:>6.4f}  {row['f1']:>6.4f}  "
+                  f"{row['fp_removed']:>6.0f}  {row['tp_lost']:>6.0f}")
+
+    # 找最优 F1
+    best = sweep_clean.loc[sweep_clean["f1"].idxmax()]
+    print(f"\n  最优 F1 阈值: {best['threshold']:.3f}  "
+          f"P={best['precision']:.4f}  R={best['recall']:.4f}  F1={best['f1']:.4f}")
+
+    # 找 recall >= 95% 的最优 precision
+    r95 = sweep_clean[sweep_clean["recall"] >= 0.95]
+    if len(r95) > 0:
+        best_r95 = r95.loc[r95["precision"].idxmax()]
+        print(f"  Recall≥95% 最优: {best_r95['threshold']:.3f}  "
+              f"P={best_r95['precision']:.4f}  R={best_r95['recall']:.4f}  "
+              f"F1={best_r95['f1']:.4f}")
+
+    # 找 recall >= 98% 的最优 precision
+    r98 = sweep_clean[sweep_clean["recall"] >= 0.98]
+    if len(r98) > 0:
+        best_r98 = r98.loc[r98["precision"].idxmax()]
+        print(f"  Recall≥98% 最优: {best_r98['threshold']:.3f}  "
+              f"P={best_r98['precision']:.4f}  R={best_r98['recall']:.4f}  "
+              f"F1={best_r98['f1']:.4f}")
+
+    # 输出推荐配置到 configs/postproc/
+    postproc_dir = BASE_DIR / "configs" / "postproc"
+    postproc_dir.mkdir(parents=True, exist_ok=True)
+
+    best_row = sweep_clean.loc[sweep_clean["f1"].idxmax()]
+    # recall >= 95% 的最优
+    r95_rows = sweep_clean[sweep_clean["recall"] >= 0.95]
+    r95_row = r95_rows.loc[r95_rows["precision"].idxmax()] if len(r95_rows) > 0 else best_row
+
+    for tag, row in [("best_f1", best_row), ("recall95", r95_row)]:
+        postproc_cfg = {
+            "post_conf_threshold": float(row["threshold"]),
+            "min_object_area": float(pipeline.MIN_OBJECT_AREA),
+            "max_elongation": float(pipeline.MAX_ELONGATION),
+            "_meta": {
+                "source": "calibration_sweep step b0",
+                "tag": tag,
+                "precision": float(row["precision"]),
+                "recall": float(row["recall"]),
+                "f1": float(row["f1"]),
+                "n_tp": int(n_tp),
+                "n_fp": int(n_fp),
+                "n_seg_error_excluded": int(n_seg),
+                "grids": BATCH_003_GRIDS,
+            },
+        }
+        cfg_path = postproc_dir / f"batch003_{tag}.json"
+        cfg_path.write_text(
+            json.dumps(postproc_cfg, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"  [OK] {cfg_path.name}: "
+              f"conf>={row['threshold']:.3f}  P={row['precision']:.4f}  "
+              f"R={row['recall']:.4f}  F1={row['f1']:.4f}")
+
+    # 保存完整数据集供后续联合分类器使用
+    dataset_path = SWEEP_DIR / "b0_review_features.csv"
+    df.to_csv(str(dataset_path), index=False, encoding="utf-8-sig")
+    print(f"\n[OK] 输出文件:")
+    print(f"  阈值扫描 (排除切割错误): {clean_path}")
+    print(f"  阈值扫描 (原始对比):     {raw_path}")
+    print(f"  特征数据集 (含标签):     {dataset_path}")
+    print(f"  后处理配置:              {postproc_dir}/batch003_*.json")
+    print(f"\n用法: python detect_and_evaluate.py --postproc-config {postproc_dir}/batch003_best_f1.json")
+
+
+# ════════════════════════════════════════════════════════════════════════
 # CLI
 # ════════════════════════════════════════════════════════════════════════
 
@@ -473,8 +721,8 @@ if __name__ == "__main__":
         description="Post-training 阈值校准扫描"
     )
     parser.add_argument(
-        "--step", required=True, choices=["a0", "a1"],
-        help="执行步骤: a0=导出候选集, a1=sweep",
+        "--step", required=True, choices=["a0", "a1", "b0"],
+        help="执行步骤: a0=导出候选集, a1=sweep, b0=batch 003 review sweep",
     )
     parser.add_argument("--dry", action="store_true", help="只打印搜索空间")
     parser.add_argument("--top", type=int, default=5, help="打印 top-N 合格组合")
@@ -485,6 +733,8 @@ if __name__ == "__main__":
             step_a0()
         elif args.step == "a1":
             step_a1(dry_run=args.dry, top_n=args.top)
+        elif args.step == "b0":
+            step_b0()
     except RuntimeError as exc:
         print(f"[ERROR] {exc}")
         sys.exit(1)
