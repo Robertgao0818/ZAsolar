@@ -60,9 +60,22 @@ CONFIDENCE_THRESHOLD = 0.3
 MASK_THRESHOLD       = 0.3
 MIN_OBJECT_AREA      = 5      # 后处理面积过滤（m²），<5m² 几乎全是碎片
 MAX_ELONGATION       = 8.0    # 后处理长宽比过滤（V1.2 校准后从 4.0 放宽）
+# 大面积检测放宽 elongation（商业长条板 elong 9-10+）
+ELONGATION_TIERED = [
+    # (min_area_m2, max_elongation)
+    (100, 15.0),   # 大型商业板
+    (0,    8.0),   # 住宅板（默认）
+]
 MIN_SOLIDITY         = 0.0    # 暂不限制 solidity（TP/FP 分布重叠太大）
 SHADOW_RGB_THRESH    = 60     # RGB 三通道均 < 此值视为阴影
 POST_CONF_THRESHOLD  = 0.85   # 后处理置信度过滤（V3 Model C 校准，recall≥94%）
+# 大面积检测使用更低的置信度阈值（商业太阳能板 confidence 系统性偏低）
+CONF_TIERED = [
+    # (min_area_m2, conf_threshold)  — 从大到小匹配，第一个命中的生效
+    (200, 0.70),   # 超大型商业板
+    (100, 0.65),   # 大型商业板
+    (0,   0.85),   # 住宅板（默认）
+]
 OVERLAP              = 0.25
 CHIP_SIZE            = (400, 400)
 BATCH_SIZE           = 4
@@ -644,13 +657,24 @@ def detect_solar_panels(
         if "area_m2" in pred_gdf.columns:
             pred_gdf = pred_gdf[pred_gdf["area_m2"] >= _min_object_area].copy()
 
-        # 长宽比过滤：去除细长条状误检
-        if "elongation" in pred_gdf.columns and _max_elongation < 999:
+        # 长宽比过滤：分面积段（大面积商业板 elongation 系统性偏高）
+        if "elongation" in pred_gdf.columns and "area_m2" in pred_gdf.columns:
+            elong_keep = pd.Series(False, index=pred_gdf.index)
+            for min_area, max_elong in ELONGATION_TIERED:
+                tier_mask = (pred_gdf["area_m2"] >= min_area) & ~elong_keep
+                elong_keep |= tier_mask & (pred_gdf["elongation"] <= max_elong)
+            pred_gdf = pred_gdf[elong_keep].copy()
+            elong_desc = ", ".join(f"≥{a}m²→≤{e}" for a, e in ELONGATION_TIERED)
+            elong_info = f"elongation({elong_desc})"
+        elif "elongation" in pred_gdf.columns and _max_elongation < 999:
             pred_gdf = pred_gdf[pred_gdf["elongation"] <= _max_elongation].copy()
+            elong_info = f"elongation<={_max_elongation}"
+        else:
+            elong_info = ""
 
         post_filter_count = len(pred_gdf)
         print(f"\n后处理过滤: {post_filter_count} / {pre_filter_count} 个多边形保留"
-              f"（area>={_min_object_area}m² + elongation<={_max_elongation}）")
+              f"（area>={_min_object_area}m² + {elong_info}）")
 
         # 确保有 confidence 字段
         if "confidence" not in pred_gdf.columns:
@@ -663,11 +687,21 @@ def detect_solar_panels(
                 print("[INFO] 未找到置信度字段，使用默认值 0.5")
                 pred_gdf["confidence"] = 0.5
 
-        # 置信度过滤：去除低置信度预测
+        # 置信度过滤：分面积段阈值（大面积商业板 confidence 系统性偏低）
         pre_conf_count = len(pred_gdf)
-        pred_gdf = pred_gdf[pred_gdf["confidence"] >= _post_conf_threshold].copy()
-        print(f"置信度过滤: {len(pred_gdf)} / {pre_conf_count} 个多边形保留"
-              f"（confidence>={_post_conf_threshold}）")
+        if "area_m2" in pred_gdf.columns:
+            keep_mask = pd.Series(False, index=pred_gdf.index)
+            for min_area, thresh in CONF_TIERED:
+                tier_mask = (pred_gdf["area_m2"] >= min_area) & ~keep_mask
+                keep_mask |= tier_mask & (pred_gdf["confidence"] >= thresh)
+            pred_gdf = pred_gdf[keep_mask].copy()
+            tier_desc = ", ".join(f"≥{a}m²→{t}" for a, t in CONF_TIERED)
+            print(f"置信度过滤(分段): {len(pred_gdf)} / {pre_conf_count} 个多边形保留"
+                  f"（{tier_desc}）")
+        else:
+            pred_gdf = pred_gdf[pred_gdf["confidence"] >= _post_conf_threshold].copy()
+            print(f"置信度过滤: {len(pred_gdf)} / {pre_conf_count} 个多边形保留"
+                  f"（confidence>={_post_conf_threshold}）")
 
         pred_gdf.to_file(str(_predictions_metric_path), driver="GPKG")
         export_gdf = to_export_crs(
@@ -1606,9 +1640,10 @@ confidence stats (IoU={DEFAULT_IOU}):
 
         report += f"""
 {'─' * 50}
-Installation Profile (V1.2):
+Installation Profile (V1.3):
   evaluation_profile : installation
-  label_definition   : installation_footprint"""
+  label_definition   : installation_footprint
+  note               : V1.3 evaluates reviewed predictions against installation-level GT"""
 
         if presence_csv.exists():
             pres_df = pd.read_csv(presence_csv)
@@ -1758,7 +1793,7 @@ def main(force: bool = False,
          post_conf_threshold: float | None = None,
          max_elongation: float | None = None,
          model_path: str | None = None,
-         evaluation_profile: str = "installation",
+         evaluation_profile: str = "installation",  # V1.3: name preserved for compatibility; evaluates reviewed predictions vs installation-level GT
          data_scope: str = "full_grid",
          postproc_config: str | None = None):
     # 后处理配置文件覆盖：文件中的值作为 fallback，CLI 显式参数优先
@@ -1864,7 +1899,7 @@ def main(force: bool = False,
         print("\n大面积面板召回（按 IoU 阈值）:")
         print(large_df[["IoU_Threshold", "size_class", "gt_count", "matched_gt", "fn_count", "recall"]].to_string(index=False))
 
-    # ── Step 5b: Installation-level 三层评估 (V1.2) ────────────────────
+    # ── Step 5b: Installation-level 三层评估 (V1.3: reviewed predictions vs installation GT) ──
     if evaluation_profile == "installation":
         print("\n" + "=" * 60)
         print("Installation-level 三层评估 (presence / footprint / area)...")

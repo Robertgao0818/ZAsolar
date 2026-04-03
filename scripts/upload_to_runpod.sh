@@ -1,13 +1,29 @@
 #!/bin/bash
 # Upload split tar parts to RunPod S3 with progress and resume support
 # Usage: bash scripts/upload_to_runpod.sh
+#
+# Required env vars (set in .env or export before running):
+#   RUNPOD_S3_KEY_ID      — RunPod S3 access key ID
+#   RUNPOD_S3_SECRET      — RunPod S3 secret access key
+#   RUNPOD_S3_ENDPOINT    — (optional) default: https://s3api-eu-ro-1.runpod.io
+#   RUNPOD_S3_BUCKET      — (optional) default: s3://k5r31jwc9k
 set -e
 
-export AWS_ACCESS_KEY_ID="user_3BPMh1M94bo0f3zzSildB4UCRhl"
-export AWS_SECRET_ACCESS_KEY="rps_HSPAQ2SVG96INNF29FGSVWOV2D9AQELOBO4CO8U5dbrs2e"
-ENDPOINT="https://s3api-eu-ro-1.runpod.io"
+# Load .env if present
+[ -f .env ] && source .env
+[ -f scripts/.env ] && source scripts/.env
+
+if [ -z "$RUNPOD_S3_KEY_ID" ] || [ -z "$RUNPOD_S3_SECRET" ]; then
+    echo "ERROR: RUNPOD_S3_KEY_ID and RUNPOD_S3_SECRET must be set."
+    echo "  Export them or create a .env file. See .env.example."
+    exit 1
+fi
+
+export AWS_ACCESS_KEY_ID="$RUNPOD_S3_KEY_ID"
+export AWS_SECRET_ACCESS_KEY="$RUNPOD_S3_SECRET"
+ENDPOINT="${RUNPOD_S3_ENDPOINT:-https://s3api-eu-ro-1.runpod.io}"
 REGION="eu-ro-1"
-BUCKET="s3://k5r31jwc9k"
+BUCKET="${RUNPOD_S3_BUCKET:-s3://k5r31jwc9k}"
 AWS="$HOME/.local/bin/aws"
 UPLOAD_DIR="/mnt/d/ZAsolar/upload_tmp"
 
@@ -90,5 +106,5 @@ echo "========================================"
 echo ""
 echo "To reassemble on RunPod Pod:"
 echo "  cd /workspace"
-echo "  cat coco_parts/coco_part_* | tar -xf - -C zasolar/"
-echo "  cat tiles_parts/tiles_part_* | tar -xf - -C zasolar/"
+echo "  cat coco_parts/coco_part_* | tar -xf - -C ZAsolar/"
+echo "  cat tiles_parts/tiles_part_* | tar -xf - -C ZAsolar/"

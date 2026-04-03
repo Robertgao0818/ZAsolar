@@ -1,0 +1,33 @@
+# Model Registry — 模型权重注册表
+# 新训练完成后在此添加一条即可参与 benchmark 对比。
+#
+# 字段说明:
+#   tag:         短标签，用于 CLI 和报告显示
+#   checkpoint:  相对于 repo root 的权重路径
+#   description: 训练配置简述
+#   coco_ap50:   训练时的验证集 COCO AP@IoU=0.5 (可选)
+
+models:
+  v1:
+    tag: "V1-FT"
+    checkpoint: "checkpoints/v1_ft_cs400_tileval_20260317_r4/best_model.pth"
+    description: "V1 fine-tune (257 weak-supervision annots, 3 grids)"
+    coco_ap50: 0.4205
+
+  v2:
+    tag: "V2-SAM2"
+    checkpoint: "checkpoints/v2_sam2_260320/best_model.pth"
+    description: "V2 SAM2 retrain (456 T1 annots, 3 grids)"
+    coco_ap50: 0.6889
+
+  v3c:
+    tag: "V3-C-HN"
+    checkpoint: "checkpoints/exp003_C_targeted_hn/best_model.pth"
+    description: "V3 targeted hard negatives (5623 images, batch 003 FPs)"
+    coco_ap50: 0.7689
+
+  v3_cleaned:
+    tag: "V3-Clean"
+    checkpoint: "checkpoints_cleaned/best_model.pth"
+    description: "V3 cleaned data (43 grids, epoch 4/20, paused)"
+    coco_ap50: 0.788

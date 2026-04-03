@@ -412,8 +412,9 @@ def collate_fn(batch):
     return tuple(zip(*batch))
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, lr_scheduler=None):
-    """Train for one epoch, return average loss."""
+def train_one_epoch(model, optimizer, data_loader, device, epoch,
+                    lr_scheduler=None, scaler=None):
+    """Train for one epoch, return average loss. Supports AMP via scaler."""
     model.train()
     total_loss = 0.0
     n_batches = 0
@@ -422,15 +423,23 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, lr_scheduler=N
         images = [img.to(device) for img in images]
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
-        # Keep empty-target images in training so the model learns true negatives.
-        loss_dict = model(images, targets)
-        losses = sum(loss for loss in loss_dict.values())
-
         optimizer.zero_grad()
-        losses.backward()
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-        optimizer.step()
+
+        if scaler is not None:
+            with torch.amp.autocast("cuda"):
+                loss_dict = model(images, targets)
+                losses = sum(loss for loss in loss_dict.values())
+            scaler.scale(losses).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss_dict = model(images, targets)
+            losses = sum(loss for loss in loss_dict.values())
+            losses.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+            optimizer.step()
 
         if lr_scheduler is not None:
             lr_scheduler.step()
@@ -454,12 +463,13 @@ def main():
     parser.add_argument("--epochs2", type=int, default=20, help="Stage 2 epochs (full fine-tune)")
     parser.add_argument("--lr1", type=float, default=1e-3, help="Stage 1 learning rate")
     parser.add_argument("--lr2", type=float, default=1e-4, help="Stage 2 learning rate")
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--num-workers", type=int, default=8)
+    parser.add_argument("--no-amp", action="store_true", help="Disable mixed precision training")
     parser.add_argument("--chip-size", type=int, default=400)
     parser.add_argument(
         "--resume", default=None,
-        help="Path to periodic checkpoint (stage2_epochN.pth) to resume Stage 2 training",
+        help="Path to checkpoint (.pth) to resume training (auto-detects stage)",
     )
     args = parser.parse_args()
 
@@ -468,10 +478,15 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── AMP setup ─────────────────────────────────────────────────────
+    use_amp = not args.no_amp
+    scaler = torch.amp.GradScaler("cuda") if use_amp else None
+    if use_amp:
+        print("[AMP] Mixed precision training enabled")
+
     # ── Resolve pretrained weights ────────────────────────────────────
     pretrained_path = args.pretrained
     if pretrained_path is None:
-        # Try to find geoai's cached weights
         from huggingface_hub import hf_hub_download
         pretrained_path = hf_hub_download(
             repo_id="giswqs/geoai",
@@ -491,10 +506,12 @@ def main():
     train_loader = torch.utils.data.DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True,
         num_workers=args.num_workers, collate_fn=collate_fn, pin_memory=True,
+        persistent_workers=True,
     )
     val_loader = torch.utils.data.DataLoader(
         val_ds, batch_size=args.batch_size, shuffle=False,
         num_workers=args.num_workers, collate_fn=collate_fn, pin_memory=True,
+        persistent_workers=True,
     )
 
     # ── Model ─────────────────────────────────────────────────────────
@@ -505,18 +522,45 @@ def main():
     best_path = output_dir / "best_model.pth"
     history = []
 
-    # ── Resume handling ──────────────────────────────────────────────
+    # ── Resume handling (auto-detect stage) ───────────────────────────
+    resume_stage = 0
     resume_epoch = 0
+    ckpt = None
     if args.resume:
         print(f"\n[RESUME] Loading checkpoint: {args.resume}")
         ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
         model.load_state_dict(ckpt["model"])
+        resume_stage = ckpt.get("stage", 2)
         resume_epoch = ckpt["epoch"]
         best_ap50 = ckpt.get("best_ap50", best_ap50)
-        print(f"[RESUME] Will resume Stage 2 from epoch {resume_epoch + 1}, best_ap50={best_ap50:.4f}")
+        if "scaler" in ckpt and scaler is not None:
+            scaler.load_state_dict(ckpt["scaler"])
+        print(f"[RESUME] Stage {resume_stage}, epoch {resume_epoch}, best_ap50={best_ap50:.4f}")
+
+    def save_checkpoint(stage, epoch, model, optimizer, best_ap50, scaler=None):
+        """Save checkpoint with all state needed for resume."""
+        ckpt_path = output_dir / f"stage{stage}_epoch{epoch}.pth"
+        state = {
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "stage": stage,
+            "epoch": epoch,
+            "best_ap50": best_ap50,
+        }
+        if scaler is not None:
+            state["scaler"] = scaler.state_dict()
+        torch.save(state, ckpt_path)
+        # Keep only last 2 checkpoints per stage to save disk
+        old = sorted(output_dir.glob(f"stage{stage}_epoch*.pth"))
+        for f in old[:-2]:
+            f.unlink()
+        return ckpt_path
 
     # ── Stage 1: Heads-only ───────────────────────────────────────────
-    if not args.resume:
+    skip_stage1 = (args.resume and resume_stage >= 2)
+    stage1_start = resume_epoch if (args.resume and resume_stage == 1) else 0
+
+    if not skip_stage1:
         print("\n" + "=" * 60)
         print(f"Stage 1: Heads-only training ({args.epochs1} epochs, LR={args.lr1})")
         print("=" * 60)
@@ -526,10 +570,15 @@ def main():
         optimizer1 = torch.optim.SGD(
             trainable_params, lr=args.lr1, momentum=0.9, weight_decay=1e-4
         )
+        if args.resume and resume_stage == 1 and ckpt and "optimizer" in ckpt:
+            optimizer1.load_state_dict(ckpt["optimizer"])
+            print(f"[RESUME] Stage 1 optimizer restored, continuing from epoch {stage1_start + 1}")
 
-        for epoch in range(1, args.epochs1 + 1):
+        for epoch in range(stage1_start + 1, args.epochs1 + 1):
             t0 = time.time()
-            avg_loss = train_one_epoch(model, optimizer1, train_loader, device, epoch)
+            avg_loss = train_one_epoch(
+                model, optimizer1, train_loader, device, epoch, scaler=scaler
+            )
             dt = time.time() - t0
 
             ap50 = evaluate_coco(model, val_loader, device)
@@ -545,10 +594,14 @@ def main():
                 torch.save(model.state_dict(), best_path)
                 print(f"  >> New best AP50={ap50:.4f}, saved to {best_path}")
 
+            save_checkpoint(1, epoch, model, optimizer1, best_ap50, scaler)
+
     # ── Stage 2: Full fine-tune ───────────────────────────────────────
     print("\n" + "=" * 60)
     print(f"Stage 2: Full fine-tune ({args.epochs2} epochs, LR={args.lr2}, cosine decay)")
     print("=" * 60)
+
+    stage2_start = resume_epoch if (args.resume and resume_stage == 2) else 0
 
     unfreeze_all(model)
     optimizer2 = torch.optim.SGD(
@@ -559,18 +612,17 @@ def main():
         optimizer2, T_max=total_steps, eta_min=1e-6
     )
 
-    # Restore optimizer state and advance scheduler if resuming
-    if args.resume and "optimizer" in ckpt:
+    if args.resume and resume_stage == 2 and ckpt and "optimizer" in ckpt:
         optimizer2.load_state_dict(ckpt["optimizer"])
-        # Advance scheduler to match completed epochs
-        for _ in range(resume_epoch * len(train_loader)):
+        for _ in range(stage2_start * len(train_loader)):
             scheduler.step()
-        print(f"[RESUME] Optimizer state restored, scheduler advanced to epoch {resume_epoch}")
+        print(f"[RESUME] Stage 2 optimizer restored, scheduler advanced to epoch {stage2_start}")
 
-    for epoch in range(resume_epoch + 1, args.epochs2 + 1):
+    for epoch in range(stage2_start + 1, args.epochs2 + 1):
         t0 = time.time()
         avg_loss = train_one_epoch(
-            model, optimizer2, train_loader, device, epoch, lr_scheduler=scheduler
+            model, optimizer2, train_loader, device, epoch,
+            lr_scheduler=scheduler, scaler=scaler,
         )
         dt = time.time() - t0
 
@@ -589,15 +641,7 @@ def main():
             torch.save(model.state_dict(), best_path)
             print(f"  >> New best AP50={ap50:.4f}, saved to {best_path}")
 
-        # Save periodic checkpoint
-        if epoch % 5 == 0:
-            ckpt_path = output_dir / f"stage2_epoch{epoch}.pth"
-            torch.save({
-                "model": model.state_dict(),
-                "optimizer": optimizer2.state_dict(),
-                "epoch": epoch,
-                "best_ap50": best_ap50,
-            }, ckpt_path)
+        save_checkpoint(2, epoch, model, optimizer2, best_ap50, scaler)
 
     # ── Save final outputs ────────────────────────────────────────────
     final_path = output_dir / "final_model.pth"

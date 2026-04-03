@@ -48,7 +48,17 @@ def get_li_grid_spec(grid_id: str, li_gdf: gpd.GeoDataFrame) -> GridSpec:
     )
 
 
-def download_li_grid(spec: GridSpec, output_root: Path):
+def _is_blank_tile(path: Path, white_threshold: int = 245) -> bool:
+    """Check if a tile is mostly white/blank (>95% white pixels)."""
+    import numpy as np
+    import rasterio
+    with rasterio.open(path) as src:
+        data = src.read()  # (bands, H, W)
+        white_mask = np.all(data >= white_threshold, axis=0)
+        return float(white_mask.mean()) > 0.95
+
+
+def download_li_grid(spec: GridSpec, output_root: Path, skip_blank: bool = False):
     import time
     grid_dir = output_root / spec.grid_id
     grid_dir.mkdir(parents=True, exist_ok=True)
@@ -58,9 +68,12 @@ def download_li_grid(spec: GridSpec, output_root: Path):
     print(f"  Bounds: ({spec.xmin:.6f}, {spec.ymin:.6f}) -> ({spec.xmax:.6f}, {spec.ymax:.6f})")
     print(f"  Tiles: {spec.n_cols} cols x {spec.n_rows} rows = {total}")
     print(f"  Output: {grid_dir}")
+    if skip_blank:
+        print(f"  Skip blank tiles: ON")
 
     downloaded = 0
     skipped = 0
+    blank_removed = 0
     errors = 0
 
     for col in range(spec.n_cols):
@@ -72,6 +85,11 @@ def download_li_grid(spec: GridSpec, output_root: Path):
                 continue
             try:
                 download_tile(spec, col, row, out_path)
+                if skip_blank and _is_blank_tile(out_path):
+                    out_path.unlink()
+                    blank_removed += 1
+                    print(f"  [{downloaded + skipped + blank_removed}/{total}] {tile_name} [BLANK, removed]")
+                    continue
                 downloaded += 1
                 print(f"  [{downloaded + skipped}/{total}] {tile_name}")
             except Exception as e:
@@ -80,13 +98,20 @@ def download_li_grid(spec: GridSpec, output_root: Path):
                 time.sleep(3)
                 try:
                     download_tile(spec, col, row, out_path, timeout=600)
+                    if skip_blank and _is_blank_tile(out_path):
+                        out_path.unlink()
+                        blank_removed += 1
+                        errors -= 1
+                        print(f"  [RETRY] {tile_name} [BLANK, removed]")
+                        continue
                     downloaded += 1
                     errors -= 1
                     print(f"  [RETRY OK] {tile_name}")
                 except Exception as e2:
                     print(f"  [RETRY FAIL] {tile_name}: {e2}")
 
-    print(f"[DONE] {spec.grid_id}: downloaded={downloaded}, skipped={skipped}, errors={errors}")
+    print(f"[DONE] {spec.grid_id}: downloaded={downloaded}, skipped={skipped}, "
+          f"blank_removed={blank_removed}, errors={errors}")
     return grid_dir
 
 
@@ -177,6 +202,8 @@ def main():
     parser.add_argument("--output-root", type=Path, default=Path("Li"))
     parser.add_argument("--grid-file", type=Path, default=LI_GRID_GPKG)
     parser.add_argument("--no-vrt", action="store_true")
+    parser.add_argument("--skip-blank", action="store_true",
+                        help="Remove downloaded tiles that are >95%% white")
     args = parser.parse_args()
 
     li_gdf = gpd.read_file(args.grid_file)
@@ -185,7 +212,8 @@ def main():
     for gid in args.grid_ids:
         gid = gid.strip().upper()
         spec = get_li_grid_spec(gid, li_gdf)
-        grid_dir = download_li_grid(spec, args.output_root)
+        grid_dir = download_li_grid(spec, args.output_root,
+                                    skip_blank=args.skip_blank)
         if not args.no_vrt:
             build_vrt_custom(gid, grid_dir)
 

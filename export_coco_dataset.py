@@ -190,20 +190,21 @@ def polygon_to_coco_segmentation(pixel_poly) -> list[list[float]]:
     return segments
 
 
-def extract_chips_from_tile(
+def scan_chips_from_tile(
     tile_path: Path,
     annotations: gpd.GeoDataFrame,
     annot_indices: list[int],
     chip_size: int,
     overlap: float,
-    output_dir: Path,
     split_name: str,
     image_id_start: int,
     annot_id_start: int,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """Extract chips from one tile.
+    """Scan chips from one tile — metadata only, no disk writes.
 
     Returns (images, annotations, provenance) for COCO JSON.
+    Chip annotation geometries are stored in images[i]["_chip_annots"]
+    for deferred writing by write_chip().
     """
     images = []
     coco_annots = []
@@ -253,42 +254,18 @@ def extract_chips_from_tile(
                     chip_annots.append((aidx, shifted))
 
                 is_positive = len(chip_annots) > 0
-
-                # Read chip image
-                window = Window(x0, y0, w, h)
-                data = src.read(window=window)  # (C, H, W)
-
-                # Pad if needed (edge chips)
-                if w < chip_size or h < chip_size:
-                    padded = np.zeros((data.shape[0], chip_size, chip_size), dtype=data.dtype)
-                    padded[:, :h, :w] = data
-                    data = padded
-
-                # Save chip image
                 chip_name = f"{tile_path.stem}__{x0}_{y0}.tif"
-                chip_path = output_dir / split_name / chip_name
-                chip_path.parent.mkdir(parents=True, exist_ok=True)
 
-                profile = src.profile.copy()
-                for key in ("photometric", "compress", "jpeg_quality", "jpegtablesmode"):
-                    profile.pop(key, None)
-                profile.update(
-                    driver="GTiff",
-                    width=chip_size,
-                    height=chip_size,
-                    transform=src.window_transform(window),
-                    compress="lzw",
-                )
-                with rasterio.open(str(chip_path), "w", **profile) as dst:
-                    dst.write(data)
-
-                # COCO image entry
+                # COCO image entry (with deferred write info)
                 images.append({
                     "id": img_id,
                     "file_name": f"{split_name}/{chip_name}",
                     "width": chip_size,
                     "height": chip_size,
                     "positive": is_positive,
+                    "_tile_path": str(tile_path),
+                    "_x0": x0, "_y0": y0, "_w": w, "_h": h,
+                    "_chip_annots": chip_annots,
                 })
 
                 provenance.append({
@@ -305,7 +282,6 @@ def extract_chips_from_tile(
 
                 # COCO annotations
                 for aidx, shifted_geom in chip_annots:
-                    # Handle MultiPolygon by splitting
                     polys = [shifted_geom] if shifted_geom.geom_type == "Polygon" else list(shifted_geom.geoms)
                     for poly in polys:
                         if poly.is_empty or poly.area < 4:
@@ -330,6 +306,58 @@ def extract_chips_from_tile(
                 img_id += 1
 
     return images, coco_annots, provenance
+
+
+def write_selected_chips(
+    images: list[dict],
+    output_dir: Path,
+    chip_size: int,
+) -> None:
+    """Write only selected chip images to disk.
+
+    Reads pixel data from source tiles and writes GeoTIFF chips.
+    Cleans up internal fields (_tile_path, _x0, etc.) from image dicts.
+    """
+    # Group by tile to minimize file opens
+    from collections import defaultdict
+    by_tile: dict[str, list[dict]] = defaultdict(list)
+    for img in images:
+        by_tile[img["_tile_path"]].append(img)
+
+    for tile_path_str, tile_images in by_tile.items():
+        tile_path = Path(tile_path_str)
+        with rasterio.open(tile_path) as src:
+            for img in tile_images:
+                x0, y0 = img["_x0"], img["_y0"]
+                w, h = img["_w"], img["_h"]
+                window = Window(x0, y0, w, h)
+                data = src.read(window=window)
+
+                if w < chip_size or h < chip_size:
+                    padded = np.zeros((data.shape[0], chip_size, chip_size), dtype=data.dtype)
+                    padded[:, :h, :w] = data
+                    data = padded
+
+                chip_path = output_dir / img["file_name"]
+                chip_path.parent.mkdir(parents=True, exist_ok=True)
+
+                profile = src.profile.copy()
+                for key in ("photometric", "compress", "jpeg_quality", "jpegtablesmode"):
+                    profile.pop(key, None)
+                profile.update(
+                    driver="GTiff",
+                    width=chip_size,
+                    height=chip_size,
+                    transform=src.window_transform(window),
+                    compress="lzw",
+                )
+                with rasterio.open(str(chip_path), "w", **profile) as dst:
+                    dst.write(data)
+
+    # Clean up internal fields from image dicts
+    for img in images:
+        for key in ("_tile_path", "_x0", "_y0", "_w", "_h", "_chip_annots"):
+            img.pop(key, None)
 
 
 def balance_chips(
@@ -486,7 +514,7 @@ def main():
             "val_stems": val_stems,
         }
 
-    # ── Extract chips ─────────────────────────────────────────────────
+    # ── Scan chips (metadata only, no disk writes) ──────────────────
     for split_name, stem_attr in [("train", "train_stems"), ("val", "val_stems")]:
         all_images = []
         all_annots = []
@@ -501,13 +529,12 @@ def main():
                 if tile_path is None:
                     continue
                 annot_indices = gd["tile_to_annots"].get(stem, [])
-                imgs, anns, prov = extract_chips_from_tile(
+                imgs, anns, prov = scan_chips_from_tile(
                     tile_path=tile_path,
                     annotations=gd["annotations"],
                     annot_indices=annot_indices,
                     chip_size=args.chip_size,
                     overlap=args.overlap,
-                    output_dir=output_dir,
                     split_name=split_name,
                     image_id_start=img_id_counter,
                     annot_id_start=ann_id_counter,
@@ -520,10 +547,10 @@ def main():
 
         n_pos = sum(1 for img in all_images if img["positive"])
         n_neg = len(all_images) - n_pos
-        print(f"[CHIPS] {split_name}: {len(all_images)} chips "
+        print(f"[SCAN] {split_name}: {len(all_images)} chips "
               f"({n_pos} positive, {n_neg} negative), {len(all_annots)} instances")
 
-        # Balance positive:negative 1:1
+        # Balance positive:negative 1:1 (before writing anything to disk)
         if not args.no_balance:
             all_images, all_annots, all_prov = balance_chips(
                 all_images, all_annots, all_prov, seed=args.seed
@@ -532,6 +559,10 @@ def main():
             n_neg2 = len(all_images) - n_pos2
             print(f"[BALANCE] {split_name}: {len(all_images)} chips after balancing "
                   f"({n_pos2} positive, {n_neg2} negative)")
+
+        # Write only selected chips to disk
+        print(f"[WRITE] {split_name}: writing {len(all_images)} chips to disk...")
+        write_selected_chips(all_images, output_dir, args.chip_size)
 
         # Write COCO JSON
         coco = build_coco_json(all_images, all_annots, split_name,

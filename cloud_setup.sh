@@ -2,8 +2,8 @@
 # RunPod training launcher — stages COCO data to local SSD for fast I/O
 set -e
 
-WORKSPACE="/workspace/zasolar"
-LOCAL_SSD="/tmp/zasolar"
+WORKSPACE="${WORKSPACE:-/workspace/ZAsolar}"
+LOCAL_SSD="/tmp/ZAsolar"
 COCO_SRC="$WORKSPACE/data/coco_cleaned"
 COCO_DST="$LOCAL_SSD/coco_cleaned"
 

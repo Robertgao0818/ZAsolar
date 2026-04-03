@@ -1,0 +1,114 @@
+# Post-Training Benchmark Preset
+# 训练后模型权重对比的标准化评估配置。
+#
+# 用法:
+#   python3 scripts/analysis/run_benchmark.py                          # 默认 preset + 默认模型
+#   python3 scripts/analysis/run_benchmark.py --models v3c exp004      # 指定模型对比
+#   python3 scripts/analysis/run_benchmark.py --suite cape_town_t1_smoke  # 只跑 smoke
+
+benchmark_id: "post_train"
+description: "Post-training model weight comparison benchmark"
+postproc_config: "configs/postproc/batch003_best_f1.json"
+
+# 默认行为 (零参数启动)
+default_models: ["v3c"]
+baseline_model: "v3c"
+
+# 统一推理参数
+default_args:
+  evaluation_profile: "installation"
+  chip_size: 400
+  overlap: 0.25
+  confidence_threshold: 0.3
+  mask_threshold: 0.3
+
+# ── Suites ──────────────────────────────────────────────────────────
+suites:
+  - suite_id: cape_town_t1_smoke
+    role: smoke
+    data_scope: full_grid
+    leakage_risk: low
+    notes: "快速回归检测，3 个早期 T1 grid"
+    grid_ids:
+      - G1189
+      - G1190
+      - G1238
+
+  - suite_id: cape_town_independent_26
+    role: primary
+    data_scope: full_grid
+    leakage_risk: low
+    notes: "主排名集，26 个独立 grid (batch 001+002)，不参与 V3 训练"
+    grid_ids:
+      - G1240
+      - G1243
+      - G1244
+      - G1245
+      - G1293
+      - G1294
+      - G1297
+      - G1298
+      - G1299
+      - G1300
+      - G1349
+      - G1354
+      - G1410
+      - G1411
+      - G1466
+      - G1467
+      - G1516
+      - G1520
+      - G1521
+      - G1522
+      - G1523
+      - G1524
+      - G1569
+      - G1570
+      - G1571
+      - G1572
+
+  - suite_id: cape_town_batch003_diagnostic
+    role: diagnostic
+    data_scope: full_grid
+    leakage_risk: high
+    notes: "训练相关诊断 (batch 003 FPs 用于 HN 训练)，不参与排名"
+    grid_ids:
+      - G1682
+      - G1683
+      - G1685
+      - G1686
+      - G1687
+      - G1688
+      - G1689
+      - G1690
+      - G1691
+      - G1692
+      - G1693
+      - G1743
+      - G1744
+      - G1747
+      - G1749
+      - G1750
+      - G1798
+      - G1800
+      - G1806
+      - G1807
+
+  - suite_id: jhb_transfer_6
+    role: secondary
+    data_scope: cross_city
+    leakage_risk: low
+    notes: "跨城市泛化测试 (Johannesburg)"
+    grid_ids:
+      - JHB01
+      - JHB02
+      - JHB03
+      - JHB04
+      - JHB05
+      - JHB06
+
+# ── Verdict 自动判定规则 ──────────────────────────────────────────
+verdict_rules:
+  improved_threshold: 0.005     # delta_f1 >= +0.005 → improved
+  regressed_threshold: -0.005   # delta_f1 <= -0.005 → regressed
+  mixed_drop_threshold: 0.02    # F1 提升但 P 或 R 任一下降 > 0.02 → mixed

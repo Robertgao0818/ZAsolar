@@ -8,7 +8,9 @@ Workflow:
 
 Usage:
   python scripts/annotations/review_detections.py --grid-id G1686
+  python scripts/annotations/review_detections.py --grid-id G1855 G1864 G1909 G1910
   python scripts/annotations/review_detections.py --grid-id G1686 --predictions results/G1686/predictions_metric.gpkg
+  python scripts/annotations/review_detections.py --max-preds 50   # auto-batch grids with ≤50 predictions
 
 Keyboard shortcuts:
   A = mark ALL predictions on current tile as correct
@@ -67,36 +69,59 @@ def utc_now_iso() -> str:
 
 
 class DetectionReviewStore:
-    """Manages prediction review state."""
+    """Manages prediction review state for one or more grids."""
 
-    def __init__(self, grid_id: str, predictions_path: Path, tiles_dir: Path):
-        self.grid_id = grid_id
-        self.tiles_dir = tiles_dir
-        self.review_dir = predictions_path.parent / "review"
-        self.review_dir.mkdir(parents=True, exist_ok=True)
-        self.decisions_path = self.review_dir / "detection_review_decisions.csv"
+    def __init__(self, grid_ids: list[str], pred_paths: list[Path], tiles_dirs: list[Path]):
+        self.grid_ids = grid_ids
+        # Map grid_id → tiles_dir for tile image lookup
+        self._tiles_dirs: dict[str, Path] = {gid: td for gid, td in zip(grid_ids, tiles_dirs)}
+        # Map grid_id → review_dir for per-grid persistence
+        self._review_dirs: dict[str, Path] = {}
+        self._decisions_paths: dict[str, Path] = {}
 
-        # Load predictions
-        self.pred_gdf = gpd.read_file(str(predictions_path))
-        if self.pred_gdf.crs and self.pred_gdf.crs.to_epsg() != 4326:
-            self.pred_gdf = self.pred_gdf.to_crs(epsg=4326)
-        print(f"  Loaded {len(self.pred_gdf)} predictions from {predictions_path.name}")
+        # Load and merge predictions from all grids
+        frames = []
+        for gid, pp in zip(grid_ids, pred_paths):
+            review_dir = pp.parent / "review"
+            review_dir.mkdir(parents=True, exist_ok=True)
+            self._review_dirs[gid] = review_dir
+            self._decisions_paths[gid] = review_dir / "detection_review_decisions.csv"
 
-        # Build tile → predictions index
-        self.spec = get_grid_spec(grid_id)
+            gdf = gpd.read_file(str(pp))
+            if gdf.crs and gdf.crs.to_epsg() != 4326:
+                gdf = gdf.to_crs(epsg=4326)
+            gdf["_source_grid"] = gid
+            print(f"  Loaded {len(gdf)} predictions from {gid}")
+            frames.append(gdf)
+
+        import pandas as pd
+        self.pred_gdf = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True))
+        print(f"  Total: {len(self.pred_gdf)} predictions across {len(grid_ids)} grid(s)")
+
+        # Build tile → predictions index (using each prediction's source grid)
+        self._specs: dict[str, object] = {}
+        for gid in grid_ids:
+            self._specs[gid] = get_grid_spec(gid)
         self.tile_preds = self._index_by_tile()
         self.decisions = self._load_decisions()
-        # If GPKG has review_status column, use it to seed decisions
+        # Seed from review_status column if present
         if "review_status" in self.pred_gdf.columns:
+            seeded = 0
             for idx, row in self.pred_gdf.iterrows():
                 st = str(row["review_status"]).strip()
                 if st and st != "unreviewed" and str(idx) not in self.decisions:
                     self.decisions[str(idx)] = st
-            print(f"  Loaded {len(self.decisions)} decisions from review_status column")
+                    seeded += 1
+            if seeded:
+                print(f"  Seeded {seeded} decisions from review_status column")
         self.fn_markers = self._load_fn_markers()
 
-        # Pre-render tile images with predictions
         self.tile_images: dict[str, bytes] = {}
+
+    def _grid_id_for_tile(self, tile_key: str) -> str:
+        """Extract grid ID from tile_key like 'G1855_3_2'."""
+        parts = tile_key.rsplit("_", 2)
+        return parts[0] if len(parts) == 3 else self.grid_ids[0]
 
     def _index_by_tile(self) -> dict[str, list[int]]:
         """Map each tile to prediction indices."""
@@ -105,13 +130,14 @@ class DetectionReviewStore:
             geom = row.geometry
             if geom is None:
                 continue
+            gid = row["_source_grid"]
+            spec = self._specs[gid]
             cx, cy = geom.centroid.x, geom.centroid.y
-            # Find which tile this prediction falls in
-            for col in range(self.spec.n_cols):
-                for r in range(self.spec.n_rows):
-                    txmin, tymin, txmax, tymax = get_tile_bounds(self.spec, col, r)
+            for col in range(spec.n_cols):
+                for r in range(spec.n_rows):
+                    txmin, tymin, txmax, tymax = get_tile_bounds(spec, col, r)
                     if txmin <= cx <= txmax and tymin <= cy <= tymax:
-                        tile_key = f"{self.grid_id}_{col}_{r}"
+                        tile_key = f"{gid}_{col}_{r}"
                         tile_preds.setdefault(tile_key, []).append(idx)
                         break
                 else:
@@ -120,25 +146,57 @@ class DetectionReviewStore:
         return tile_preds
 
     def _load_decisions(self) -> dict[str, str]:
-        """Load per-prediction decisions: pred_index -> status."""
-        if not self.decisions_path.exists():
-            return {}
+        """Load per-prediction decisions from all grids: pred_index -> status."""
         decisions = {}
-        with self.decisions_path.open("r", newline="", encoding="utf-8") as fh:
-            for row in csv.DictReader(fh):
-                decisions[row["pred_id"]] = row.get("status", "")
+        for gid in self.grid_ids:
+            dp = self._decisions_paths[gid]
+            if not dp.exists():
+                continue
+            with dp.open("r", newline="", encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    # Stored pred_id is grid-local; remap to merged index
+                    local_id = row["pred_id"]
+                    merged_id = self._local_to_merged(gid, int(local_id))
+                    if merged_id is not None:
+                        decisions[str(merged_id)] = row.get("status", "")
         return decisions
 
+    def _local_to_merged(self, grid_id: str, local_idx: int) -> int | None:
+        """Convert a grid-local prediction index to the merged dataframe index."""
+        mask = self.pred_gdf["_source_grid"] == grid_id
+        grid_indices = self.pred_gdf.index[mask].tolist()
+        if local_idx < len(grid_indices):
+            return grid_indices[local_idx]
+        return None
+
+    def _merged_to_local(self, merged_idx: int) -> tuple[str, int]:
+        """Convert merged index back to (grid_id, local_index)."""
+        gid = self.pred_gdf.at[merged_idx, "_source_grid"]
+        mask = self.pred_gdf["_source_grid"] == gid
+        grid_indices = self.pred_gdf.index[mask].tolist()
+        local_idx = grid_indices.index(merged_idx)
+        return gid, local_idx
+
     def _write_decisions(self) -> None:
-        with self.decisions_path.open("w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=["pred_id", "status", "updated_at"])
-            writer.writeheader()
-            for pred_id in sorted(self.decisions, key=lambda x: int(x)):
-                writer.writerow({
-                    "pred_id": pred_id,
-                    "status": self.decisions[pred_id],
-                    "updated_at": utc_now_iso(),
-                })
+        # Group decisions by grid, convert merged indices to local
+        per_grid: dict[str, dict[int, str]] = {gid: {} for gid in self.grid_ids}
+        for pred_id_str, status in self.decisions.items():
+            merged_idx = int(pred_id_str)
+            gid, local_idx = self._merged_to_local(merged_idx)
+            per_grid[gid][local_idx] = status
+
+        for gid in self.grid_ids:
+            dp = self._decisions_paths[gid]
+            grid_decisions = per_grid[gid]
+            with dp.open("w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=["pred_id", "status", "updated_at"])
+                writer.writeheader()
+                for local_id in sorted(grid_decisions):
+                    writer.writerow({
+                        "pred_id": local_id,
+                        "status": grid_decisions[local_id],
+                        "updated_at": utc_now_iso(),
+                    })
 
     def get_tile_list(self, include_empty: bool = False) -> list[dict]:
         """Return tiles sorted by tile key. If include_empty, also list tiles with no predictions."""
@@ -148,23 +206,29 @@ class DetectionReviewStore:
             pred_indices = self.tile_preds[tile_key]
             n_total = len(pred_indices)
             n_reviewed = sum(1 for i in pred_indices if str(i) in self.decisions and self.decisions[str(i)])
+            n_fn = sum(1 for m in self.fn_markers if m["tile_key"] == tile_key)
             tiles.append({
                 "tile_key": tile_key,
                 "n_predictions": n_total,
                 "n_reviewed": n_reviewed,
+                "n_fn": n_fn,
             })
             seen.add(tile_key)
 
         if include_empty:
             # Add all downloaded tiles that have no predictions
-            for f in sorted(self.tiles_dir.glob(f"{self.grid_id}_*_geo.tif")):
-                tile_key = f.stem.replace("_geo", "")
-                if tile_key not in seen:
-                    tiles.append({
-                        "tile_key": tile_key,
-                        "n_predictions": 0,
-                        "n_reviewed": 0,
-                    })
+            for gid in self.grid_ids:
+                td = self._tiles_dirs[gid]
+                for f in sorted(td.glob(f"{gid}_*_geo.tif")):
+                    tile_key = f.stem.replace("_geo", "")
+                    if tile_key not in seen:
+                        n_fn = sum(1 for m in self.fn_markers if m["tile_key"] == tile_key)
+                        tiles.append({
+                            "tile_key": tile_key,
+                            "n_predictions": 0,
+                            "n_reviewed": 0,
+                            "n_fn": n_fn,
+                        })
             tiles.sort(key=lambda t: t["tile_key"])
         return tiles
 
@@ -203,30 +267,37 @@ class DetectionReviewStore:
         self._write_decisions()
 
     # ── FN markers ──
-    def _fn_markers_path(self) -> Path:
-        return self.review_dir / "fn_markers.csv"
+    def _fn_markers_path(self, grid_id: str) -> Path:
+        return self._review_dirs[grid_id] / "fn_markers.csv"
 
     def _load_fn_markers(self) -> list[dict]:
-        p = self._fn_markers_path()
-        if not p.exists():
-            return []
         markers = []
-        with p.open("r", newline="", encoding="utf-8") as fh:
-            for row in csv.DictReader(fh):
-                markers.append({
-                    "tile_key": row["tile_key"],
-                    "px": float(row["px"]),
-                    "py": float(row["py"]),
-                })
+        for gid in self.grid_ids:
+            p = self._fn_markers_path(gid)
+            if not p.exists():
+                continue
+            with p.open("r", newline="", encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    markers.append({
+                        "tile_key": row["tile_key"],
+                        "px": float(row["px"]),
+                        "py": float(row["py"]),
+                    })
         return markers
 
     def _save_fn_markers(self) -> None:
-        p = self._fn_markers_path()
-        with p.open("w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=["tile_key", "px", "py"])
-            writer.writeheader()
-            for m in self.fn_markers:
-                writer.writerow(m)
+        # Group by grid and write to per-grid files
+        per_grid: dict[str, list[dict]] = {gid: [] for gid in self.grid_ids}
+        for m in self.fn_markers:
+            gid = self._grid_id_for_tile(m["tile_key"])
+            per_grid[gid].append(m)
+        for gid in self.grid_ids:
+            p = self._fn_markers_path(gid)
+            with p.open("w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=["tile_key", "px", "py"])
+                writer.writeheader()
+                for m in per_grid[gid]:
+                    writer.writerow(m)
 
     def add_fn_marker(self, tile_key: str, px: float, py: float) -> None:
         self.fn_markers.append({"tile_key": tile_key, "px": px, "py": py})
@@ -250,15 +321,25 @@ class DetectionReviewStore:
     def get_fn_markers(self, tile_key: str) -> list[dict]:
         return [m for m in self.fn_markers if m["tile_key"] == tile_key]
 
+    def _resolve_tile_path(self, tile_key: str) -> Path | None:
+        """Find the tile file path from the appropriate grid's tiles dir."""
+        gid = self._grid_id_for_tile(tile_key)
+        tiles_dir = self._tiles_dirs.get(gid)
+        if tiles_dir is None:
+            return None
+        geo_path = tiles_dir / f"{tile_key}_geo.tif"
+        if geo_path.exists():
+            return geo_path
+        alt_path = tiles_dir / f"{tile_key}.tif"
+        if alt_path.exists():
+            return alt_path
+        return None
+
     def _tile_pixel_to_geo(self, tile_key: str, px: float, py: float) -> tuple[float, float] | None:
         """Convert pixel coords to geographic coords for a tile."""
-        geo_path = self.tiles_dir / f"{tile_key}_geo.tif"
-        if not geo_path.exists():
-            alt_path = self.tiles_dir / f"{tile_key}.tif"
-            if alt_path.exists():
-                geo_path = alt_path
-            else:
-                return None
+        geo_path = self._resolve_tile_path(tile_key)
+        if geo_path is None:
+            return None
         with rasterio.open(geo_path) as ds:
             bounds = ds.bounds
             w, h = ds.width, ds.height
@@ -266,43 +347,43 @@ class DetectionReviewStore:
         lat = bounds.top - (py / h) * (bounds.top - bounds.bottom)
         return (lon, lat)
 
-    def export_fn_markers_gpkg(self) -> Path | None:
-        """Export FN markers as point GPKG for QGIS."""
+    def export_fn_markers_gpkg(self) -> list[Path]:
+        """Export FN markers as point GPKG per grid for QGIS."""
         if not self.fn_markers:
-            return None
+            return []
         from shapely.geometry import Point
-        points, tile_keys = [], []
+        per_grid: dict[str, list[tuple]] = {gid: [] for gid in self.grid_ids}
         for m in self.fn_markers:
+            gid = self._grid_id_for_tile(m["tile_key"])
             geo = self._tile_pixel_to_geo(m["tile_key"], m["px"], m["py"])
             if geo:
-                points.append(Point(geo[0], geo[1]))
-                tile_keys.append(m["tile_key"])
-        if not points:
-            return None
-        gdf = gpd.GeoDataFrame({"tile_key": tile_keys, "type": "fn_marker"},
-                               geometry=points, crs="EPSG:4326")
-        out = self.review_dir / f"{self.grid_id}_fn_markers.gpkg"
-        gdf.to_file(str(out), driver="GPKG")
-        print(f"  Exported {len(gdf)} FN markers to {out}")
-        return out
+                per_grid[gid].append((m["tile_key"], Point(geo[0], geo[1])))
+        paths = []
+        for gid, items in per_grid.items():
+            if not items:
+                continue
+            tile_keys, points = zip(*items)
+            gdf = gpd.GeoDataFrame({"tile_key": list(tile_keys), "type": "fn_marker"},
+                                   geometry=list(points), crs="EPSG:4326")
+            out = self._review_dirs[gid] / f"{gid}_fn_markers.gpkg"
+            gdf.to_file(str(out), driver="GPKG")
+            print(f"  Exported {len(gdf)} FN markers to {out}")
+            paths.append(out)
+        return paths
 
     def render_base_tile(self, tile_key: str) -> bytes:
         """Return base tile image as JPEG (no overlays — overlays drawn client-side)."""
         if tile_key in self.tile_images:
             return self.tile_images[tile_key]
 
-        geo_path = self.tiles_dir / f"{tile_key}_geo.tif"
-        if not geo_path.exists():
-            alt_path = self.tiles_dir / f"{tile_key}.tif"
-            if alt_path.exists():
-                geo_path = alt_path
-            else:
-                img = Image.new("RGB", (512, 512), (40, 40, 40))
-                draw = ImageDraw.Draw(img)
-                draw.text((200, 250), "No tile", fill=(200, 200, 200))
-                buf = BytesIO()
-                img.save(buf, format="JPEG", quality=85)
-                return buf.getvalue()
+        geo_path = self._resolve_tile_path(tile_key)
+        if geo_path is None:
+            img = Image.new("RGB", (512, 512), (40, 40, 40))
+            draw = ImageDraw.Draw(img)
+            draw.text((200, 250), "No tile", fill=(200, 200, 200))
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return buf.getvalue()
 
         with rasterio.open(geo_path) as ds:
             data = ds.read()
@@ -322,13 +403,9 @@ class DetectionReviewStore:
 
     def get_tile_polygons(self, tile_key: str) -> list[dict]:
         """Return prediction polygons as pixel-coordinate arrays for client-side rendering."""
-        geo_path = self.tiles_dir / f"{tile_key}_geo.tif"
-        if not geo_path.exists():
-            alt_path = self.tiles_dir / f"{tile_key}.tif"
-            if alt_path.exists():
-                geo_path = alt_path
-            else:
-                return []
+        geo_path = self._resolve_tile_path(tile_key)
+        if geo_path is None:
+            return []
 
         with rasterio.open(geo_path) as ds:
             bounds = ds.bounds
@@ -368,26 +445,26 @@ class DetectionReviewStore:
             })
         return polys
 
-    def export_gpkg(self, output_path: Path | None = None) -> Path:
-        """Export predictions with review_status to GPKG."""
-        if output_path is None:
-            output_path = self.review_dir / f"{self.grid_id}_reviewed.gpkg"
+    def export_gpkg(self, output_path: Path | None = None) -> list[Path]:
+        """Export predictions with review_status to per-grid GPKGs."""
+        paths = []
+        for gid in self.grid_ids:
+            mask = self.pred_gdf["_source_grid"] == gid
+            gdf = self.pred_gdf.loc[mask].copy()
+            gdf["review_status"] = gdf.index.map(
+                lambda idx: self.decisions.get(str(idx), "unreviewed")
+            )
+            gdf = gdf.drop(columns=["_source_grid"])
+            out = output_path if (output_path and len(self.grid_ids) == 1) else \
+                self._review_dirs[gid] / f"{gid}_reviewed.gpkg"
+            gdf.to_file(str(out), driver="GPKG")
+            print(f"  Exported {len(gdf)} predictions to {out}")
+            qml_path = out.with_suffix(".qml")
+            write_qml_style(qml_path)
+            paths.append(out)
 
-        gdf = self.pred_gdf.copy()
-        gdf["review_status"] = gdf.index.map(
-            lambda idx: self.decisions.get(str(idx), "unreviewed")
-        )
-        gdf.to_file(str(output_path), driver="GPKG")
-        print(f"  Exported {len(gdf)} predictions to {output_path}")
-
-        # Also write QML style
-        qml_path = output_path.with_suffix(".qml")
-        write_qml_style(qml_path)
-        print(f"  QML style: {qml_path}")
-
-        # Export FN markers
-        fn_path = self.export_fn_markers_gpkg()
-        return output_path
+        self.export_fn_markers_gpkg()
+        return paths
 
 
 def write_qml_style(qml_path: Path) -> None:
@@ -511,7 +588,7 @@ def build_html() -> str:
 <body>
 <div class="wrap">
   <div class="bar">
-    <div class="title" id="gridTitle">Detection Review</div>
+    <div class="title" id="gridTitle">Detection Review — Multi-Grid</div>
     <div class="meta" id="summary">Loading...</div>
     <div style="flex:1"></div>
     <div class="controls">
@@ -530,6 +607,7 @@ def build_html() -> str:
         <option value="all_incl_empty">All + empty tiles</option>
         <option value="unreviewed">Unreviewed</option>
         <option value="reviewed">Reviewed</option>
+        <option value="has_fn">Has FN markers</option>
         <option value="empty">Empty only</option>
       </select>
     </div>
@@ -672,6 +750,7 @@ function applyFilter() {
   else if (mode==="all_incl_empty") visible=[...tiles];
   else if (mode==="unreviewed") visible=tiles.filter(t=>t.n_reviewed<t.n_predictions && t.n_predictions>0);
   else if (mode==="reviewed") visible=tiles.filter(t=>t.n_reviewed===t.n_predictions && t.n_predictions>0);
+  else if (mode==="has_fn") visible=tiles.filter(t=>(t.n_fn||0)>0);
   else if (mode==="empty") visible=tiles.filter(t=>t.n_predictions===0);
   else visible=[...tiles];
   currentIdx = Math.min(currentIdx, Math.max(visible.length-1,0));
@@ -1135,45 +1214,103 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self._json_response({"ok": True, "removed": removed})
 
         elif path == "/api/export":
-            path = self.store.export_gpkg()
-            self._json_response({"ok": True, "path": str(path)})
+            paths = self.store.export_gpkg()
+            self._json_response({"ok": True, "path": "\n".join(str(p) for p in paths)})
 
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
 
+def _find_predictions(grid_id: str, base_dir: Path) -> Path | None:
+    """Search for predictions GPKG in local results/ then D drive."""
+    candidates = [
+        base_dir / "results" / grid_id / "predictions_metric.gpkg",
+        Path("/mnt/d/ZAsolar/results") / grid_id / "predictions_metric.gpkg",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Review model detections per tile")
-    parser.add_argument("--grid-id", required=True, help="Grid ID, e.g. G1686")
+    parser.add_argument("--grid-id", nargs="+", default=None, help="One or more Grid IDs, e.g. G1855 G1864 G1909")
+    parser.add_argument("--max-preds", type=int, default=None,
+                       help="Auto-batch: load all grids with ≤N predictions (from D drive results)")
     parser.add_argument("--predictions", type=Path, default=None,
-                       help="Path to predictions GPKG (default: results/<grid>/predictions_metric.gpkg)")
+                       help="Path to predictions GPKG (single-grid mode only)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args()
 
-    grid_id = normalize_grid_id(args.grid_id)
     base_dir = Path(__file__).resolve().parent.parent.parent
 
-    if args.predictions:
-        pred_path = args.predictions
+    # Resolve grid list
+    if args.max_preds is not None:
+        # Auto-batch: scan D drive results using ogrinfo for fast row count
+        import subprocess
+        d_results = Path("/mnt/d/ZAsolar/results")
+        grid_ids = []
+        for d in sorted(d_results.iterdir()):
+            if not d.is_dir() or not d.name.startswith("G"):
+                continue
+            pred_file = d / "predictions_metric.gpkg"
+            if not pred_file.exists():
+                continue
+            try:
+                out = subprocess.check_output(
+                    ["ogrinfo", "-so", "-al", str(pred_file)],
+                    text=True, stderr=subprocess.DEVNULL, timeout=5,
+                )
+                for line in out.splitlines():
+                    if line.strip().startswith("Feature Count:"):
+                        count = int(line.split(":")[1].strip())
+                        if count <= args.max_preds:
+                            grid_ids.append(d.name)
+                        break
+            except Exception:
+                # Fallback: read with geopandas
+                gdf = gpd.read_file(str(pred_file))
+                if len(gdf) <= args.max_preds:
+                    grid_ids.append(d.name)
+        if not grid_ids:
+            print(f"[ERROR] No grids found with ≤{args.max_preds} predictions on D drive")
+            sys.exit(1)
+        print(f"[AUTO-BATCH] Found {len(grid_ids)} grids with ≤{args.max_preds} predictions")
+    elif args.grid_id:
+        grid_ids = [normalize_grid_id(g) for g in args.grid_id]
     else:
-        pred_path = base_dir / "results" / grid_id / "predictions_metric.gpkg"
-
-    if not pred_path.exists():
-        print(f"[ERROR] Predictions not found: {pred_path}")
-        print(f"  Run: python detect_and_evaluate.py --grid-id {grid_id} --model-path checkpoints_cleaned/best_model.pth")
+        print("[ERROR] Provide --grid-id or --max-preds")
         sys.exit(1)
 
-    tiles_dir = TILES_ROOT / grid_id
-    if not tiles_dir.exists():
-        print(f"[ERROR] Tiles not found: {tiles_dir}")
+    # Resolve predictions and tiles for each grid
+    all_grid_ids, all_pred_paths, all_tiles_dirs = [], [], []
+    for gid in grid_ids:
+        if args.predictions and len(grid_ids) == 1:
+            pred_path = args.predictions
+        else:
+            pred_path = _find_predictions(gid, base_dir)
+        if pred_path is None:
+            print(f"[WARN] Predictions not found for {gid}, skipping")
+            continue
+        tiles_dir = TILES_ROOT / gid
+        if not tiles_dir.exists():
+            print(f"[WARN] Tiles not found for {gid}: {tiles_dir}, skipping")
+            continue
+        all_grid_ids.append(gid)
+        all_pred_paths.append(pred_path)
+        all_tiles_dirs.append(tiles_dir)
+
+    if not all_grid_ids:
+        print("[ERROR] No valid grids found")
         sys.exit(1)
 
-    print(f"[INIT] Grid: {grid_id}")
-    print(f"[INIT] Predictions: {pred_path}")
-    print(f"[INIT] Tiles: {tiles_dir}")
+    print(f"[INIT] Grids: {', '.join(all_grid_ids)} ({len(all_grid_ids)} total)")
+    for gid, pp in zip(all_grid_ids, all_pred_paths):
+        print(f"  {gid}: {pp}")
 
-    store = DetectionReviewStore(grid_id, pred_path, tiles_dir)
+    store = DetectionReviewStore(all_grid_ids, all_pred_paths, all_tiles_dirs)
     tile_list = store.get_tile_list()
     print(f"[INIT] {len(tile_list)} tiles with predictions")
 
