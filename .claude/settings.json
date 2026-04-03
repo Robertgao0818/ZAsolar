@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash",
+      "Read",
+      "Edit",
+      "Write",
+      "WebFetch",
+      "Grep",
+      "Glob",
+      "LS",
+      "MultiEdit",
+      "NotebookRead",
+      "NotebookEdit",
+      "TodoRead",
+      "TodoWrite",
+      "WebSearch"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"$TOOL_INPUT\" | grep -qE 'git add.*(\\.(tif|vrt|pth|jp2)|tiles/|results/|checkpoints/)' && echo 'BLOCKED: 禁止 git add 大文件或数据目录' >&2 && exit 2 || exit 0"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c '[[ \"$TOOL_INPUT\" == *CLAUDE.md* || \"$TOOL_INPUT\" == *AGENTS.md* || \"$TOOL_INPUT\" == *README.md* ]] && echo \"REMINDER: 你修改了入口文档，记得同步 CLAUDE.md / AGENTS.md / README.md 的稳定骨架\" >&2; exit 0'"
+          }
+        ]
+      }
+    ]
+  }
+}

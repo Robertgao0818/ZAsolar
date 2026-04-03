@@ -3,6 +3,8 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-04-03: Add annotation data: 82 cleaned GT + 21 reviewed prediction gpkg files
+- 2026-04-03: V1.3 task definition migration, cross-review harness, stale doc remediation
 - 2026-04-03: Code updates: benchmark runner, batch inference, hard-negative training, review GUI improvements
 
 ### Next Up

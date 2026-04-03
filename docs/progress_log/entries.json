@@ -3,5 +3,15 @@
     "timestamp": "2026-04-03T03:25:42Z",
     "source": "commit:a7a90f8c",
     "summary": "Code updates: benchmark runner, batch inference, hard-negative training, review GUI improvements"
+  },
+  {
+    "timestamp": "2026-04-03T03:26:10Z",
+    "source": "commit:c9e9d2d1",
+    "summary": "V1.3 task definition migration, cross-review harness, stale doc remediation"
+  },
+  {
+    "timestamp": "2026-04-03T03:26:29Z",
+    "source": "commit:6cec0a94",
+    "summary": "Add annotation data: 82 cleaned GT + 21 reviewed prediction gpkg files"
   }
 ]

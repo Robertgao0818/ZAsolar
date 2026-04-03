@@ -68,8 +68,9 @@ run_output.txt
 .DS_Store
 Thumbs.db
 
-# Claude Code config (local)
-.claude/
+# Claude Code config (local-only parts)
+.claude/settings.local.json
+.claude/projects/
 
 # Local cache (OSM buildings, tile masks, etc.)
 cache/
