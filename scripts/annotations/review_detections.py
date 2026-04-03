@@ -124,25 +124,50 @@ class DetectionReviewStore:
         return parts[0] if len(parts) == 3 else self.grid_ids[0]
 
     def _index_by_tile(self) -> dict[str, list[int]]:
-        """Map each tile to prediction indices."""
+        """Map each prediction to ALL tiles whose bounds intersect the polygon.
+        This ensures edge-crossing predictions are visible on every relevant tile."""
+        from shapely.geometry import box as shp_box
+        _BUFFER = 0.00005  # ~5m in degrees, absorbs CRS reprojection drift
         tile_preds: dict[str, list[int]] = {}
+        unmatched = 0
+
+        # Pre-compute tile boxes per grid
+        tile_boxes: dict[str, list[tuple[str, object]]] = {}
+        for gid in self.grid_ids:
+            spec = self._specs[gid]
+            boxes = []
+            for col in range(spec.n_cols):
+                for r in range(spec.n_rows):
+                    txmin, tymin, txmax, tymax = get_tile_bounds(spec, col, r)
+                    tile_key = f"{gid}_{col}_{r}"
+                    tile_box = shp_box(txmin - _BUFFER, tymin - _BUFFER,
+                                       txmax + _BUFFER, tymax + _BUFFER)
+                    boxes.append((tile_key, tile_box))
+            tile_boxes[gid] = boxes
+
         for idx, row in self.pred_gdf.iterrows():
             geom = row.geometry
             if geom is None:
                 continue
             gid = row["_source_grid"]
-            spec = self._specs[gid]
-            cx, cy = geom.centroid.x, geom.centroid.y
-            for col in range(spec.n_cols):
-                for r in range(spec.n_rows):
-                    txmin, tymin, txmax, tymax = get_tile_bounds(spec, col, r)
-                    if txmin <= cx <= txmax and tymin <= cy <= tymax:
-                        tile_key = f"{gid}_{col}_{r}"
-                        tile_preds.setdefault(tile_key, []).append(idx)
-                        break
+            matched = False
+
+            # Check intersection with every tile in this grid
+            for tile_key, tile_box in tile_boxes[gid]:
+                if geom.intersects(tile_box):
+                    tile_preds.setdefault(tile_key, []).append(idx)
+                    matched = True
+
+            # Fallback: source_tile (for predictions fully outside computed bounds)
+            if not matched:
+                source_tile = row.get("source_tile", "")
+                if source_tile:
+                    tile_key = source_tile.replace("_geo", "")
+                    tile_preds.setdefault(tile_key, []).append(idx)
                 else:
-                    continue
-                break
+                    unmatched += 1
+        if unmatched:
+            print(f"  [WARN] {unmatched} predictions could not be matched to any tile")
         return tile_preds
 
     def _load_decisions(self) -> dict[str, str]:
@@ -387,7 +412,6 @@ class DetectionReviewStore:
 
         with rasterio.open(geo_path) as ds:
             data = ds.read()
-            bounds = ds.bounds
 
         if data.shape[0] >= 3:
             rgb = np.transpose(data[:3], (1, 2, 0))

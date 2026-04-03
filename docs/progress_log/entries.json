@@ -13,5 +13,10 @@
     "timestamp": "2026-04-03T03:26:29Z",
     "source": "commit:6cec0a94",
     "summary": "Add annotation data: 82 cleaned GT + 21 reviewed prediction gpkg files"
+  },
+  {
+    "timestamp": "2026-04-03T03:35:42Z",
+    "source": "commit:83da56c5",
+    "summary": "Sync Claude Code agent layer to repo: skills, rules, commands, hooks config"
   }
 ]

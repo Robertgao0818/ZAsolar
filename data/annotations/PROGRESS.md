@@ -1,8 +1,8 @@
 # Annotation Progress
 
-Last updated: 2026-03-27 23:12
+Last updated: 2026-04-03 22:30
 
-**Total: 78 grids, 4924 installations**
+**Total: 106 grids, 7367 installations**
 
 ## Summary
 
@@ -14,7 +14,9 @@ Last updated: 2026-03-27 23:12
 | Batch 002 | 12 | 656 | 2026-03-22 |
 | Batch 002b | 14 | 1359 | 2026-03-23 ~ 2026-03-24 |
 | Batch 003 | 20 | 1729 | 2026-03-25 ~ 2026-03-27 |
+| Batch 004 | 31 | 2346 | 2026-04-03 |
 | JHB | 6 | 191 | - |
+| **SAM FN fills** | — | **+177** | 2026-04-03 |
 
 ## Detail
 
@@ -149,6 +151,40 @@ Last updated: 2026-03-27 23:12
 | **TOTAL** | **1,721** | **1,157** | **377** | |
 
 注: G1801 全 delete 未列入。
+
+### Batch 004
+
+- G1855: 297 installations (2026-04-03)
+- G1856: 32 installations (2026-04-03)
+- G1862: 59 installations (2026-04-03)
+- G1863: 133 installations (2026-04-03)
+- G1864: 28 installations (2026-04-03)
+- G1909: 40 installations (2026-04-03)
+- G1910: 48 installations (2026-04-03)
+- G1911: 5 installations (2026-04-03)
+- G1917: 81 installations (2026-04-03)
+- G1919: 106 installations (2026-04-03)
+- G1920: 125 installations (2026-04-03)
+- G1921: 8 installations (2026-04-03)
+- G1966: 4 installations (2026-04-03)
+- G1970: 41 installations (2026-04-03)
+- G1971: 358 installations (2026-04-03)
+- G1972: 118 installations (2026-04-03)
+- G1973: 108 installations (2026-04-03)
+- G1974: 9 installations (2026-04-03)
+- G1975: 101 installations (2026-04-03)
+- G1976: 22 installations (2026-04-03)
+- G1981: 29 installations (2026-04-03)
+- G2025: 38 installations (2026-04-03)
+- G2026: 55 installations (2026-04-03)
+- G2027: 107 installations (2026-04-03)
+- G2028: 130 installations (2026-04-03)
+- G2029: 199 installations (2026-04-03)
+- G2030: 35 installations (2026-04-03)
+- G2031: 8 installations (2026-04-03)
+- G2032: 3 installations (2026-04-03)
+- G2037: 7 installations (2026-04-03)
+- G2038: 12 installations (2026-04-03)
 
 ### JHB
 
