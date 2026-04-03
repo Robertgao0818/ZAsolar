@@ -14,7 +14,7 @@ After modifying any of the three entry-point documents, or after changing `docs/
    - **Working Constraints** (same 5 constraints)
    - **Environment** (same 3 lines)
 3. If any section is out of sync, update the stale file(s) to match the most recently modified one.
-4. Run `wc -l CLAUDE.md AGENTS.md README.md` to confirm line count targets are maintained (~46, ~36, ~43 respectively).
+4. Verify the stable skeleton sections are content-consistent (exact wording match for shared sections). Line counts may vary as docs evolve.
 5. Report what was changed.
 
 ## Constraints

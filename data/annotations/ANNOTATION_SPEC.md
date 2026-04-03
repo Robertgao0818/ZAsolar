@@ -1,12 +1,14 @@
 # Annotation Specification — Installation Footprint
 
-**Version**: 1.0 (V1.2)
-**Effective date**: 2026-03-17
+**Version**: 1.1 (V1.3)
+**Effective date**: 2026-04-03
 **Label definition**: `installation_footprint`
 
 ## Scope
 
-This specification defines the annotation standard for the Cape Town solar detection project from V1.2 onwards. All new annotations and all evaluation must conform to this spec. Historical annotations are retroactively classified under this spec with quality tiers.
+This specification defines the **ground-truth annotation standard** for the solar detection project. All new annotations and all evaluation must conform to this spec. Historical annotations are retroactively classified under this spec with quality tiers.
+
+> **V1.3 workflow note**: The pipeline task definition has shifted from "installation-level footprint segmentation" to "reviewed prediction footprint segmentation." This means the pipeline output is model predictions reviewed by humans (`batch_finalize_reviews.py` exports `review_status==correct` predictions to `cleaned/`), not installation-merged footprints. However, **this annotation spec is unchanged** — ground-truth polygons still follow installation-level merge and boundary rules below. The `installation` evaluation profile compares reviewed predictions against installation-level GT.
 
 ## Definition
 

@@ -12,8 +12,17 @@ tiles_satellite_2025/
 *.gpkg
 *.geojson
 
+# BUT keep cleaned annotations and reviewed results
+!data/annotations/cleaned/*.gpkg
+!results/*/review/*_reviewed.gpkg
+
 # 检测结果（可重新生成）
-results/
+results/*
+!results/*/
+results/*/!review
+results/*/**
+!results/*/review/
+!results/*/review/*_reviewed.gpkg
 
 # 模型权重（太大，不同步）
 checkpoints/
@@ -34,6 +43,12 @@ AGENTS.md
 
 # 个人文档
 progress.tex
+
+# Credentials / env files
+.env
+.env.*
+*.credentials
+*.secret
 
 # Python
 __pycache__/
@@ -58,6 +73,9 @@ Thumbs.db
 
 # Local cache (OSM buildings, tile masks, etc.)
 cache/
+
+# Cross-review harness runtime files
+.agents/harness/active/
 
 # Misc data files
 data/sseg_registration_geo.csv

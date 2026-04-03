@@ -11,15 +11,14 @@ After completing a significant experiment run (GPU validation, calibration sweep
 1. Collect the experiment log (metrics tables, acceptance checks, command used, timestamp).
 2. Create a new file in `docs/experiment-archive/` with a descriptive name:
    - Format: `<experiment-type>-<version-or-date>.md`
-   - Example: `gpu-integration-test-v1.2.md`, `calibration-sweep-2026-03-20.md`
+   - Example: `gpu-integration-test-v1.3.md`, `calibration-sweep-2026-03-20.md`
 3. Structure the archive file with:
    - Title and date
    - Command(s) used
    - Hardware/runtime info
    - Results tables
    - Acceptance check outcomes
-4. If the experiment log was previously inline in STATUS.md, remove the detailed log from STATUS.md and add a one-line link to the archive file.
-5. Verify STATUS.md line count stays within target (~90-100 lines).
+4. If the experiment log was previously inline in ROADMAP.md, remove the detailed log and add a one-line link to the archive file.
 
 ## Constraints
 

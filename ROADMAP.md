@@ -3,16 +3,11 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-03-20: V2 SAM2 annotation + retrain: 3 grids re-annotated with SAM2.1 (GeoSAM/QGIS), retrained model (val_AP50=0.6889), primary metric switched to F1@IoU0.5
-- 2026-03-20: Model-assisted annotation script (`scripts/annotations/export_hints.py`): confidence-tiered bbox hints for QGIS
-- 2026-03-20: GT resolution updated: evaluation now uses SAM2 annotations as ground truth
-- 2026-03-18: Add annotation cleanup, docs restructure, JHB fine-tuned evaluation, and project configs
-- 2026-03-18: Restructure project: move shared utils to core/, group scripts by domain
+- 2026-04-03: Code updates: benchmark runner, batch inference, hard-negative training, review GUI improvements
 
 ### Next Up
-- Semi-automatic annotation workflow: model detect → QGIS bbox hints → SAM2 click-segment → expand training set
-- Expand annotation to additional Cape Town grids using export_hints.py workflow
-- FP reduction: add hard negatives, raise confidence threshold
+- Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
+- Export reviewed keep/exclude decisions into a reusable grid manifest for later tile downloads.
 <!-- progress:roadmap:end -->
 
 ## V0: Baseline Detection Pipeline — DONE

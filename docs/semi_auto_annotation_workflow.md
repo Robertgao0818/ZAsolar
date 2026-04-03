@@ -6,7 +6,7 @@
 
 - Tiles 存储在 `D:\ZAsolar\tiles\` (WSL: `/mnt/d/ZAsolar/tiles/`)
 - 环境变量: `SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles`
-- Best model: `checkpoints_cleaned/best_model.pth`
+- Best model: `checkpoints/best_model.pth`
 - Python 环境: `source scripts/activate_env.sh`
 
 ## Step 1: Grid 预览筛选 + 下载
@@ -49,14 +49,14 @@ with open(decisions_path, "w", newline="") as f:
 ```bash
 # 单 grid 推理
 SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python detect_and_evaluate.py \
-  --grid-id G1686 --model-path checkpoints_cleaned/best_model.pth --force
+  --grid-id G1686 --model-path checkpoints/best_model.pth --force
 
 # 批量推理（所有新下载的 grid）
 for gid in G1682 G1683 G1685 G1686 G1687 G1688 G1689 G1690 G1691 G1692 G1693 \
            G1743 G1744 G1747 G1749 G1750 G1798 G1800 G1801 G1806 G1807; do
   echo "=== $gid ==="
   SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python detect_and_evaluate.py \
-    --grid-id $gid --model-path checkpoints_cleaned/best_model.pth --force
+    --grid-id $gid --model-path checkpoints/best_model.pth --force
 done
 ```
 
@@ -200,18 +200,18 @@ print(f'Exported {len(gt)} GT polygons')
 "
 
 # 重新导出 COCO 训练集（包含新标注）
-python export_coco_dataset.py --output-dir data/coco_cleaned
+python export_coco_dataset.py --output-dir data/coco
 ```
 
 ## Step 6: 增量训练
 
 ```bash
 # 本地
-python train.py --coco-dir data/coco_cleaned --output-dir checkpoints_cleaned \
-  --resume checkpoints_cleaned/best_model.pth
+python train.py --coco-dir data/coco --output-dir checkpoints \
+  --resume checkpoints/best_model.pth
 
 # RunPod（见 cloud_setup.sh）
-bash cloud_setup.sh --resume checkpoints_cleaned/best_model.pth
+bash cloud_setup.sh --resume checkpoints/best_model.pth
 ```
 
 ## 文件路径汇总

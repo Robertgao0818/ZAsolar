@@ -2,7 +2,7 @@
 
 所有人工标注均为弱监督标注（weak supervision）。
 
-V1.2 起，标注任务正式定义为 **installation footprint**（安装级轮廓）。详见 [ANNOTATION_SPEC.md](ANNOTATION_SPEC.md)。
+V1.3 起，流水线任务定义为 **reviewed prediction footprint segmentation**；GT 标注仍遵循 installation-level 规则。详见 [ANNOTATION_SPEC.md](ANNOTATION_SPEC.md)。
 
 ## 数据集
 
@@ -16,9 +16,9 @@ V1.2 起，标注任务正式定义为 **installation footprint**（安装级轮
 - 坐标系：EPSG:4326 (WGS84)
 - 标注对象：屋顶太阳能安装轮廓（polygon），一个 polygon = 一个 installation footprint
 - 质量级别：弱监督（人工标注，未经交叉验证）
-- 项目约定：标注文件保持 `EPSG:4326`，进入检测/评估脚本后统一重投影到 `EPSG:32734` 做米制计算
+- 项目约定：标注文件保持 `EPSG:4326`，进入检测/评估脚本后按区域重投影做米制计算（Cape Town: `EPSG:32734` UTM 34S；JHB: `EPSG:32735` UTM 35S；代码通过 `core/grid_utils.py` 动态确定 CRS）
 
-## 质量分层 (V1.2)
+## 质量分层 (V1.3)
 
 | Tier | 含义 | 用途 |
 |------|------|------|
