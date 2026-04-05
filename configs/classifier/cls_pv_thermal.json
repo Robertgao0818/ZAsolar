@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "description": "PV vs non-PV binary classifier inference config",
+    "version": "v1",
+    "status": "experimental"
+  },
+  "classifier_model": "checkpoints/cls_pv_thermal/best_cls.pth",
+  "classifier_arch": "efficientnet_b0",
+  "pv_threshold": 0.5,
+  "area_cutoff_m2": 30.0,
+  "classifier_img_size": 224,
+  "classifier_chip_size": 400
+}

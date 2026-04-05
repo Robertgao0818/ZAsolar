@@ -28,5 +28,15 @@
     "timestamp": "2026-04-03T10:16:35Z",
     "source": "commit:769497fc",
     "summary": "Update README with project status, add daily log for FN analysis + SAM review"
+  },
+  {
+    "timestamp": "2026-04-05T10:24:14Z",
+    "source": "commit:286fce21",
+    "summary": "V4/V4.1 training pipeline, benchmark holdout, parallel inference, doc sync"
+  },
+  {
+    "timestamp": "2026-04-05T10:28:40Z",
+    "source": "commit:95807650",
+    "summary": "Daily log 2026-04-05: V4/V4.1 training, benchmark, pipeline improvements"
   }
 ]

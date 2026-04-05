@@ -3,17 +3,18 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-04-05: V4.1 training (exp005): 68 grids, 15.7% combined HN (batch003+004), AP50=0.7592
-- 2026-04-05: Primary benchmark on cape_town_independent_26: V3-C F1=70.9% (best), V4.1 F1=68.3% (mixed)
-- 2026-04-05: V4 training (exp004): 94 grids + 220 small-FP HN, AP50=0.7635 — superseded by V4.1
-- 2026-04-05: Pipeline improvements: --neg-ratio/--exclude-grids in export_coco, parallel benchmark, RunPod automation
+- 2026-04-05: Daily log 2026-04-05: V4/V4.1 training, benchmark, pipeline improvements
+- 2026-04-05: V4/V4.1 training pipeline, benchmark holdout, parallel inference, doc sync
+- 2026-04-03: Update README with project status, add daily log for FN analysis + SAM review
 - 2026-04-03: Small FP analysis framework, batch004 GT annotations, V4 HN strategy
+- 2026-04-03: Sync Claude Code agent layer to repo: skills, rules, commands, hooks config
 - 2026-04-03: Add annotation data: 82 cleaned GT + 21 reviewed prediction gpkg files
+- 2026-04-03: V1.3 task definition migration, cross-review harness, stale doc remediation
+- 2026-04-03: Code updates: benchmark runner, batch inference, hard-negative training, review GUI improvements
 
 ### Next Up
-- FP reduction: binary PV vs solar-thermal classifier (77% of small FP are water heaters)
-- Training iteration: tune HN ratio (10-12%) to balance P/R trade-off
-- Batch 005 inference expansion once V4.x model stabilizes
+- Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
+- Export reviewed keep/exclude decisions into a reusable grid manifest for later tile downloads.
 <!-- progress:roadmap:end -->
 
 ## V0: Baseline Detection Pipeline — DONE

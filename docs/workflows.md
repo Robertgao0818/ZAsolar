@@ -44,7 +44,8 @@ python3 scripts/annotations/bootstrap_manifest.py
 
 # 1. 导出 COCO 数据集（排除 benchmark holdout，控制 neg 比例）
 HOLDOUT="G1240 G1243 G1244 G1245 G1293 G1294 G1297 G1298 G1299 G1300 G1349 G1354 G1410 G1411 G1466 G1467 G1516 G1520 G1521 G1522 G1523 G1524 G1569 G1570 G1571 G1572"
-python export_coco_dataset.py --output-dir data/coco --exclude-grids $HOLDOUT --neg-ratio 0.15
+python export_coco_dataset.py --output-dir data/coco --exclude-grids $HOLDOUT --neg-ratio 0.15 \
+    --audit-csv results/analysis/gt_heater_audit/heater_20260405_2141/audit_labels_phase1.csv
 
 # 1b. 合并 HN（batch 003 + batch 004）
 python scripts/training/export_v4_1_hn.py --base-coco data/coco --output-dir data/coco_hn

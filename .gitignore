@@ -30,6 +30,7 @@ checkpoints/
 
 # 训练数据（可重新生成）
 data/coco*/
+data/cls_pv_thermal/
 
 # 建筑轮廓数据（可重新生成）
 buildings.gpkg
@@ -37,6 +38,7 @@ tile_manifest.csv
 
 # JHB 数据（太大，不同步）
 johnberg/
+results_joburg/
 
 # Claude Code plugin
 AGENTS.md
