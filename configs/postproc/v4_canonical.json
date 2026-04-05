@@ -1,0 +1,9 @@
+{
+  "confidence_threshold": 0.3,
+  "mask_threshold": 0.3,
+  "post_conf_threshold": 0.85,
+  "min_object_area": 5,
+  "max_elongation": 8.0,
+  "min_solidity": 0.0,
+  "shadow_rgb_thresh": 60
+}

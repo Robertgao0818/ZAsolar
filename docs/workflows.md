@@ -42,18 +42,18 @@ python detect_and_evaluate.py --model-path checkpoints/best_model.pth --force
 # 0. 生成标注 manifest（首次或标注变更后）
 python3 scripts/annotations/bootstrap_manifest.py
 
-# 1. 导出 COCO 数据集（400×400 chips, 0.25 overlap, 80/20 split）
-python export_coco_dataset.py --output-dir data/coco
+# 1. 导出 COCO 数据集（排除 benchmark holdout，控制 neg 比例）
+HOLDOUT="G1240 G1243 G1244 G1245 G1293 G1294 G1297 G1298 G1299 G1300 G1349 G1354 G1410 G1411 G1466 G1467 G1516 G1520 G1521 G1522 G1523 G1524 G1569 G1570 G1571 G1572"
+python export_coco_dataset.py --output-dir data/coco --exclude-grids $HOLDOUT --neg-ratio 0.15
 
-# 1b. 仅用 T1 标注导出（可选）
-python export_coco_dataset.py --output-dir data/coco_t1 \
-  --manifest data/annotations/annotation_manifest.csv --tier-filter T1
+# 1b. 合并 HN（batch 003 + batch 004）
+python scripts/training/export_v4_1_hn.py --base-coco data/coco --output-dir data/coco_hn
 
 # 2. 训练前检查依赖和 CUDA
 ./scripts/check_env.sh
 
 # 3. 训练（需要 CUDA GPU）
-python train.py --coco-dir data/coco --output-dir checkpoints
+python train.py --coco-dir data/coco_hn --output-dir checkpoints
 
 # 4. 使用微调模型推理 + installation profile 评估 (V1.3)
 python detect_and_evaluate.py --model-path checkpoints/best_model.pth --force
@@ -95,20 +95,25 @@ python3 scripts/analysis/run_benchmark.py
 python3 scripts/analysis/run_benchmark.py --models v3c v3_cleaned
 
 # 临时加入新 checkpoint
-python3 scripts/analysis/run_benchmark.py --checkpoint checkpoints/exp004/best_model.pth --tag exp004
+python3 scripts/analysis/run_benchmark.py --checkpoint checkpoints/exp005_v4_1_hn/best_model.pth --tag v4_1
 
 # 只跑 smoke suite (快速回归检测)
 python3 scripts/analysis/run_benchmark.py --suite cape_town_t1_smoke
 
 # 只收集已有结果，重新生成报告
 python3 scripts/analysis/run_benchmark.py --collect-only
+
+# RunPod 上用并行加速 (默认 6 进程)
+BENCHMARK_PARALLEL=6 python3 scripts/analysis/run_benchmark.py --models v3c v4_1
 ```
 
 - **配置**: `configs/benchmarks/post_train.yaml` (preset) + `configs/model_registry.yaml` (模型注册表)
 - **Suites**: `cape_town_t1_smoke` (smoke)、`cape_town_independent_26` (primary, 排名用)、`cape_town_batch003_diagnostic` (diagnostic)、`jhb_transfer_6` (secondary)
-- **输出**: `results/benchmark/<run_id>/` — `summary.json`、`summary.md`、`by_suite.csv`、`by_grid.csv`、`plots/`
+- **并行**: 环境变量 `BENCHMARK_PARALLEL` 控制推理并行度（默认 6，RTX 5090 最优）
+- **输出**: `results/benchmark/<run_id>/` — `summary.json`、`summary.md`、`by_suite.csv`、`by_grid.csv`
 - **Per-grid 产物**: `results/<GridID>/benchmark_<run_id>_<tag>/`
 - **自动 verdict**: improved / regressed / flat / mixed / failed (基于 primary suite F1 delta)
+- **标准后处理**: 所有 benchmark 必须使用 `configs/postproc/v4_canonical.json`（post_conf=0.85 + tiered）
 
 ## Google Colab
 
@@ -152,6 +157,36 @@ setup_colab()
 - 通过 `scripts/colab_config.py` 自动将 `tiles/`、`checkpoints/`、`results/` 软链接到 Drive
 - 环境变量 `SOLAR_TILES_ROOT` 可覆盖瓦片路径
 - Colab 免费版 session 有时间限制，建议先用小 grid 验证
+
+## GT Heater Audit (训练集热水器污染清除)
+
+GT 中混入的太阳能热水器/泳池加热器会污染 PV vs heater 判别边界。审计流程在不修改 cleaned/ 原文件的前提下，从训练导出中隔离污染样本。
+
+```bash
+# 1. 构建审计队列 + 导出 400×400 chip
+python scripts/analysis/build_gt_heater_audit.py
+# 输出: results/analysis/gt_heater_audit/<run_id>/
+#   audit_queue_full.csv    — 全量 GT 记录
+#   audit_queue_phase1.csv  — 仅 tier A（compact, solidity>0.9, 5-30m²）
+#   chips/rgb/, chips/overlay/
+
+# 2. 生成 HTML 标注器（在 Windows 浏览器打开）
+python scripts/analysis/label_gt_heater_audit.py \
+    --run-dir results/analysis/gt_heater_audit/<run_id>
+# 快捷键: 1=PV  2=热水器/非PV  3=不确定  S=跳过  B=回退
+# 标完后点「导出 CSV」下载 gt_heater_audit_labeled.csv
+
+# 3. 重新导出训练集（排除 heater_or_non_pv + uncertain）
+python export_coco_dataset.py \
+    --audit-csv results/analysis/gt_heater_audit/<run_id>/gt_heater_audit_labeled.csv
+
+# 可自定义排除标签
+python export_coco_dataset.py \
+    --audit-csv <path> --exclude-audit-labels heater_or_non_pv
+```
+
+- Phase 1 仅审 tier A（~855 条），污染率显著时扩展到 tier B/C
+- `--audit-csv` 过滤发生在 tier-filter 之后、tile 分配之前，不影响 benchmark GT
 
 ## Dataset Notes
 

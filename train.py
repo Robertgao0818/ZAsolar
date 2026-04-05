@@ -506,12 +506,12 @@ def main():
     train_loader = torch.utils.data.DataLoader(
         train_ds, batch_size=args.batch_size, shuffle=True,
         num_workers=args.num_workers, collate_fn=collate_fn, pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=args.num_workers > 0,
     )
     val_loader = torch.utils.data.DataLoader(
         val_ds, batch_size=args.batch_size, shuffle=False,
         num_workers=args.num_workers, collate_fn=collate_fn, pin_memory=True,
-        persistent_workers=True,
+        persistent_workers=args.num_workers > 0,
     )
 
     # ── Model ─────────────────────────────────────────────────────────

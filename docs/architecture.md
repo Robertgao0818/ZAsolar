@@ -34,6 +34,8 @@ scripts/
     calibration_sweep.py       — 后处理阈值校准扫描
     multi_grid_baseline.py     — 多 grid baseline/泛化对比
     benchmark_weights.py       — 训练后多权重 benchmark / delta 对比
+    build_gt_heater_audit.py   — GT 加热器污染审计队列构建 + chip 导出
+    label_gt_heater_audit.py   — GT 加热器审计 HTML 标注器生成
   imagery/
     download_tiles.py          — WMS 瓦片下载 + 地理配准
     grid_preview_batch.py      — 低分辨率 grid 预览批量生成
@@ -68,9 +70,13 @@ docs/
 | Script | Description |
 |--------|-------------|
 | `detect_and_evaluate.py` | 主流程：检测→过滤→评估→可视化。支持 `--model-path`、`--evaluation-profile`、`--data-scope` |
-| `export_coco_dataset.py` | 标注→COCO 实例分割数据集导出（scan-then-write: 先扫描 metadata、balance 采样、再只写选中 chip）。支持 `--manifest`、`--tier-filter`、`--no-balance` |
-| `scripts/training/export_targeted_hn.py` | 从审核 FP 预测提取 targeted hard negative chips，合并到 no-HN 基础数据集 |
-| `scripts/analysis/run_benchmark.py` | 训练后按固定 benchmark suites 对多个模型权重做统一回归对比 (agent-first, summary.json 主输出) |
+| `export_coco_dataset.py` | 标注→COCO 数据集导出。支持 `--neg-ratio`（neg:pos 比例）、`--exclude-grids`（benchmark holdout）、`--audit-csv`（热水器过滤）、`--manifest`、`--no-balance` |
+| `scripts/training/export_targeted_hn.py` | Batch 003 审核 FP → targeted HN chips，合并到 base COCO |
+| `scripts/training/export_v4_hn.py` | Batch 004 小目标 FP shortlist → HN chips（分层采样） |
+| `scripts/training/export_v4_1_hn.py` | V4.1 合并 HN: batch 003 (ID 900000+) + batch 004 (ID 950000+) |
+| `scripts/analysis/run_benchmark.py` | 标准化 benchmark（多 suite 对比）。`BENCHMARK_PARALLEL` 环境变量控制并行推理 |
+| `scripts/runpod_pod.sh` | RunPod pod 生命周期管理（start/stop/status/ssh/init） |
+| `configs/postproc/v4_canonical.json` | 标准后处理参数（post_conf=0.85 + tiered），确保跨实验可比 |
 | `scripts/analysis/batch_inference.sh` | 并行批量推理 (canonical 入口，支持任意 grid list + 并行度) |
 | `train.py` | Mask R-CNN 微调训练（两阶段：heads-only → full fine-tune），需要 CUDA GPU |
 | `building_filter.py` | OSM+Microsoft 建筑轮廓 → buildings.gpkg + tile_manifest.csv |

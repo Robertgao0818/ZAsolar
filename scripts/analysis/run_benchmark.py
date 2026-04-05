@@ -926,19 +926,44 @@ def main():
     )
 
     # ── Run inference ─────────────────────────────────────────────
+    max_parallel = int(os.environ.get("BENCHMARK_PARALLEL", "6"))
     failures = []
     if not args.collect_only:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         for m in models:
             print(f"\n[{m['tag']}] {m['description']}")
+            # Build task list for this model
+            tasks = []
             for suite in suites:
                 grid_ids = args.grids or suite.get("grid_ids", [])
                 for gid in grid_ids:
+                    tasks.append((m, gid, suite))
+
+            if max_parallel <= 1:
+                # Serial fallback
+                for m_, gid_, suite_ in tasks:
                     fail = run_one_grid(
-                        model=m, grid_id=gid, suite=suite, preset=preset,
+                        model=m_, grid_id=gid_, suite=suite_, preset=preset,
                         run_id=run_id, force=args.force, log_dir=log_dir,
                     )
                     if fail:
                         failures.append(fail)
+            else:
+                # Parallel inference per model
+                with ThreadPoolExecutor(max_workers=max_parallel) as pool:
+                    futures = {
+                        pool.submit(
+                            run_one_grid,
+                            model=m_, grid_id=gid_, suite=suite_, preset=preset,
+                            run_id=run_id, force=args.force, log_dir=log_dir,
+                        ): gid_
+                        for m_, gid_, suite_ in tasks
+                    }
+                    for fut in as_completed(futures):
+                        fail = fut.result()
+                        if fail:
+                            failures.append(fail)
 
     # ── Collect metrics ───────────────────────────────────────────
     print("\nCollecting metrics...")

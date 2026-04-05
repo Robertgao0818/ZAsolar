@@ -31,3 +31,9 @@ models:
     checkpoint: "checkpoints_cleaned/best_model.pth"
     description: "V3 cleaned data (43 grids, epoch 4/20, paused)"
     coco_ap50: 0.788
+
+  v4_1:
+    tag: "V4.1-HN"
+    checkpoint: "checkpoints/exp005_v4_1_hn/best_model.pth"
+    description: "V4.1 combined HN (68 grids, 15.7% targeted HN, batch003+004)"
+    coco_ap50: 0.7592

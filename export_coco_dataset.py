@@ -29,7 +29,7 @@ from shapely.affinity import affine_transform
 from shapely.geometry import box, mapping, shape
 from shapely.ops import unary_union
 
-from core.grid_utils import get_grid_paths, normalize_grid_id
+from core.grid_utils import get_grid_paths, normalize_grid_id, TILES_ROOT
 
 # ════════════════════════════════════════════════════════════════════════
 # Annotation sources
@@ -56,13 +56,16 @@ def _discover_cleaned_sources() -> dict[str, dict]:
     return sources
 
 
-def load_annotations() -> dict[str, gpd.GeoDataFrame]:
+def load_annotations(exclude_grids: set[str] | None = None) -> dict[str, gpd.GeoDataFrame]:
     """Load per-grid annotation GeoDataFrames (EPSG:4326) from cleaned/ dir."""
     sources = _discover_cleaned_sources()
     result = {}
     for grid_id, src in sources.items():
-        # Skip grids without tiles
-        tiles_dir = BASE_DIR / "tiles" / grid_id
+        if exclude_grids and grid_id in exclude_grids:
+            print(f"[HOLDOUT] {grid_id}: excluded (benchmark holdout)")
+            continue
+        # Skip grids without tiles (check TILES_ROOT, not hardcoded path)
+        tiles_dir = TILES_ROOT / grid_id
         if not tiles_dir.exists():
             continue
         gdf = gpd.read_file(str(src["file"]), layer=src["layer"])
@@ -76,7 +79,7 @@ def load_annotations() -> dict[str, gpd.GeoDataFrame]:
 
 def get_geo_tiles(grid_id: str) -> list[Path]:
     """Return sorted list of *_geo.tif for a grid."""
-    tiles_dir = BASE_DIR / "tiles" / grid_id
+    tiles_dir = TILES_ROOT / grid_id
     tiles = sorted(tiles_dir.glob(f"{grid_id}_*_*_geo.tif"))
     if not tiles:
         tiles = sorted([
@@ -365,16 +368,17 @@ def balance_chips(
     annotations: list[dict],
     provenance: list[dict],
     seed: int = 42,
+    neg_ratio: float = 1.0,
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """Subsample empty chips to match positive chip count (1:1 ratio)."""
+    """Subsample empty chips. neg_ratio controls negative:positive ratio (default 1:1)."""
     pos_ids = {img["id"] for img in images if img["positive"]}
     neg_imgs = [img for img in images if not img["positive"]]
 
-    n_pos = len(pos_ids)
+    target_neg = int(len(pos_ids) * neg_ratio)
     rng = random.Random(seed)
 
-    if len(neg_imgs) > n_pos:
-        neg_imgs = rng.sample(neg_imgs, n_pos)
+    if len(neg_imgs) > target_neg:
+        neg_imgs = rng.sample(neg_imgs, target_neg)
 
     neg_ids = {img["id"] for img in neg_imgs}
     keep_ids = pos_ids | neg_ids
@@ -436,13 +440,32 @@ def main():
         "--category-name", default="solar_panel",
         help="COCO category name (default: solar_panel)",
     )
+    parser.add_argument(
+        "--neg-ratio", type=float, default=1.0,
+        help="Negative:positive chip ratio (default: 1.0 = 1:1). Use 0.15 to reduce easy negatives.",
+    )
+    parser.add_argument(
+        "--exclude-grids", nargs="+", default=None,
+        help="Grid IDs to exclude from export (e.g. benchmark holdout grids)",
+    )
+    parser.add_argument(
+        "--audit-csv", type=str, default=None,
+        help="Path to GT heater audit CSV (from build_gt_heater_audit.py). "
+             "Annotations matching --exclude-audit-labels are removed from training export.",
+    )
+    parser.add_argument(
+        "--exclude-audit-labels", nargs="+",
+        default=["heater_or_non_pv", "uncertain"],
+        help="Audit labels to exclude (default: heater_or_non_pv uncertain)",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Load annotations ──────────────────────────────────────────────
-    grid_annotations = load_annotations()
+    exclude_set = set(args.exclude_grids) if args.exclude_grids else None
+    grid_annotations = load_annotations(exclude_grids=exclude_set)
 
     # ── Manifest-based tier filtering ──────────────────────────────────
     manifest_path = Path(args.manifest) if args.manifest else None
@@ -476,6 +499,42 @@ def main():
                 del grid_annotations[gid]
     elif manifest_path and manifest_path.exists():
         print(f"[TIER] Using all tiers (T1+T2), manifest loaded: {manifest_path}")
+
+    # ── Audit-based heater filtering ──────────────────────────────────
+    if args.audit_csv:
+        audit_path = Path(args.audit_csv)
+        if not audit_path.exists():
+            print(f"[WARN] --audit-csv not found: {audit_path}")
+        else:
+            import csv as csv_mod
+            with open(audit_path, encoding="utf-8") as f:
+                audit_rows = list(csv_mod.DictReader(f))
+
+            exclude_labels = set(args.exclude_audit_labels)
+            exclude_set_audit: dict[str, set[int]] = {}
+            for row in audit_rows:
+                if row.get("audit_label", "") in exclude_labels:
+                    gid = row["grid_id"]
+                    ridx = int(row["row_index"])
+                    exclude_set_audit.setdefault(gid, set()).add(ridx)
+
+            total_excluded = 0
+            for gid in list(grid_annotations.keys()):
+                if gid in exclude_set_audit:
+                    before = len(grid_annotations[gid])
+                    mask = ~grid_annotations[gid].index.isin(exclude_set_audit[gid])
+                    grid_annotations[gid] = grid_annotations[gid][mask].reset_index(drop=True)
+                    after = len(grid_annotations[gid])
+                    removed = before - after
+                    total_excluded += removed
+                    if removed > 0:
+                        print(f"[AUDIT] {gid}: {before} → {after} ({removed} heater/uncertain removed)")
+                    if after == 0:
+                        print(f"[WARN] {gid} has 0 annotations after audit filter, skipping")
+                        del grid_annotations[gid]
+
+            print(f"[AUDIT] Total excluded: {total_excluded} annotations "
+                  f"(labels: {', '.join(sorted(exclude_labels))})")
 
     # ── Per-grid tile split ───────────────────────────────────────────
     all_train_stems = set()
@@ -550,15 +609,16 @@ def main():
         print(f"[SCAN] {split_name}: {len(all_images)} chips "
               f"({n_pos} positive, {n_neg} negative), {len(all_annots)} instances")
 
-        # Balance positive:negative 1:1 (before writing anything to disk)
+        # Balance positive:negative (before writing anything to disk)
         if not args.no_balance:
             all_images, all_annots, all_prov = balance_chips(
-                all_images, all_annots, all_prov, seed=args.seed
+                all_images, all_annots, all_prov, seed=args.seed,
+                neg_ratio=args.neg_ratio,
             )
             n_pos2 = sum(1 for img in all_images if img["positive"])
             n_neg2 = len(all_images) - n_pos2
             print(f"[BALANCE] {split_name}: {len(all_images)} chips after balancing "
-                  f"({n_pos2} positive, {n_neg2} negative)")
+                  f"({n_pos2} positive, {n_neg2} negative, ratio={args.neg_ratio})")
 
         # Write only selected chips to disk
         print(f"[WRITE] {split_name}: writing {len(all_images)} chips to disk...")

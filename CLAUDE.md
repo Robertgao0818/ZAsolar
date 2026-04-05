@@ -38,14 +38,17 @@ Cape Town rooftop solar installation detection & evaluation pipeline. Uses geoai
 ./scripts/bootstrap_env.sh && source scripts/activate_env.sh
 
 # Inference (needs GPU)
-python detect_and_evaluate.py
-python detect_and_evaluate.py --model-path checkpoints/best_model.pth --force
+python detect_and_evaluate.py --model-path checkpoints/exp003_C_targeted_hn/best_model.pth --force
+python detect_and_evaluate.py --postproc-config configs/postproc/v4_canonical.json --force
 
-# Fine-tuning (needs GPU)
-python export_coco_dataset.py --output-dir data/coco
-python train.py --coco-dir data/coco --output-dir checkpoints
+# Fine-tuning (needs GPU, exclude benchmark holdout)
+python export_coco_dataset.py --output-dir data/coco --exclude-grids G1240 G1243 ... --neg-ratio 0.15
+python scripts/training/export_v4_1_hn.py --base-coco data/coco --output-dir data/coco_hn
+python train.py --coco-dir data/coco_hn --output-dir checkpoints
 
-# Evaluation profiles
-python detect_and_evaluate.py --evaluation-profile installation      # default
-python detect_and_evaluate.py --evaluation-profile legacy_instance   # compat
+# Benchmark (V3-C is current best, primary suite = cape_town_independent_26)
+python scripts/analysis/run_benchmark.py --models v3c v4_1
+
+# RunPod pod management
+bash scripts/runpod_pod.sh start|stop|status|ssh|init
 ```

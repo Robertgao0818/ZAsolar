@@ -3,14 +3,17 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-04-03: Sync Claude Code agent layer to repo: skills, rules, commands, hooks config
+- 2026-04-05: V4.1 training (exp005): 68 grids, 15.7% combined HN (batch003+004), AP50=0.7592
+- 2026-04-05: Primary benchmark on cape_town_independent_26: V3-C F1=70.9% (best), V4.1 F1=68.3% (mixed)
+- 2026-04-05: V4 training (exp004): 94 grids + 220 small-FP HN, AP50=0.7635 — superseded by V4.1
+- 2026-04-05: Pipeline improvements: --neg-ratio/--exclude-grids in export_coco, parallel benchmark, RunPod automation
+- 2026-04-03: Small FP analysis framework, batch004 GT annotations, V4 HN strategy
 - 2026-04-03: Add annotation data: 82 cleaned GT + 21 reviewed prediction gpkg files
-- 2026-04-03: V1.3 task definition migration, cross-review harness, stale doc remediation
-- 2026-04-03: Code updates: benchmark runner, batch inference, hard-negative training, review GUI improvements
 
 ### Next Up
-- Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
-- Export reviewed keep/exclude decisions into a reusable grid manifest for later tile downloads.
+- FP reduction: binary PV vs solar-thermal classifier (77% of small FP are water heaters)
+- Training iteration: tune HN ratio (10-12%) to balance P/R trade-off
+- Batch 005 inference expansion once V4.x model stabilizes
 <!-- progress:roadmap:end -->
 
 ## V0: Baseline Detection Pipeline — DONE
@@ -187,11 +190,49 @@ Re-annotated all 3 Cape Town grids with SAM2.1 (GeoSAM plugin in QGIS), retraine
 
 ---
 
-## V3: Future Directions (not started)
+## V3: Hard Negative Mining & Scale-Up — COMPLETE
 
-- [ ] Semi-automatic annotation: expand to additional Cape Town grids via export_hints.py + SAM2 workflow
-- [ ] FP reduction: hard negative mining, confidence threshold tuning
-- [ ] Detector + SAM2 inference pipeline (bbox detection → SAM2 mask refinement)
-- [ ] JHB annotations + fine-tuning for cross-city generalization
-- [ ] Stronger backbone (Swin Transformer, ConvNeXt) if F1@IoU0.5 plateaus
-- [ ] Active learning: prioritize annotation on high-uncertainty tiles
+Expanded annotation to 94 grids (batch 001-004), introduced targeted hard negative training.
+
+### Completed
+- [x] Semi-automatic annotation: 94 grids, ~6200 polygons via SAM2 + review GUI
+- [x] V3-C (exp003): targeted HN from batch 003 FPs, AP50=0.7689, **current production model**
+- [x] Calibration sweep: tiered post-processing (conf by area, elongation by area)
+- [x] Small FP taxonomy: 77% are solar thermal water heaters, 10% roof shadows
+- [x] Standardized benchmark pipeline (`run_benchmark.py`, `cape_town_independent_26` primary)
+
+### V3-C Results (Primary Benchmark: `cape_town_independent_26`, 26 grids)
+| Model | P | R | F1 | FP | FN |
+|-------|---|---|----|----|-----|
+| V3-C  | 69.6% | 72.2% | **70.9%** | 362 | 319 |
+
+---
+
+## V4: Combined HN & Benchmark Holdout — IN PROGRESS
+
+Increased HN coverage (batch 003 + 004), introduced benchmark holdout to prevent leakage.
+
+### Completed
+- [x] V4 (exp004): 94 grids + 220 small-FP HN, AP50=0.7635 — HN diluted to 1.5%, FP suppression ineffective
+- [x] V4.1 (exp005): 68 grids (26 holdout), 15.7% combined HN (882 batch003 + 452 batch004), AP50=0.7592
+- [x] Benchmark holdout: `cape_town_independent_26` excluded from training
+- [x] `export_coco_dataset.py`: `--neg-ratio`, `--exclude-grids`, `--audit-csv` flags
+- [x] Parallel benchmark inference (`BENCHMARK_PARALLEL` env var)
+- [x] RunPod automation (`scripts/runpod_pod.sh`)
+
+### V4.1 Results (Primary Benchmark)
+| Model | P | R | F1 | FP | FN | Verdict |
+|-------|---|---|----|----|-----|---------|
+| V3-C  | 69.6% | 72.2% | **70.9%** | 362 | 319 | baseline |
+| V4.1  | **71.0%** | 65.8% | 68.3% | **309** | 393 | mixed |
+
+V4.1 improves precision (+1.4pp, FP-14.6%) but regresses recall (-6.4pp). V3-C remains best overall.
+
+### Known Issues
+- HN ratio 15.7% may be too aggressive — model becomes overly conservative
+- 5-20m² FP (water heaters) still dominant — need visual-level classification, not just HN
+
+### Next Steps
+- [ ] Binary PV vs solar-thermal classifier as post-processing plugin
+- [ ] Tune HN ratio to 10-12% for better P/R balance
+- [ ] Batch 005 inference with stabilized model
