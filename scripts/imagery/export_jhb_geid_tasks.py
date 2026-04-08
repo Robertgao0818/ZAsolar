@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
-"""Export Johannesburg CBD grid bounds as a GEID task CSV."""
+"""Export Johannesburg grid bounds as a GEID task CSV.
+
+Generates a CSV consumed by ``scripts/imagery/windows/run_geid_tasks.ps1`` to
+drive the Google Earth Images Downloader (GEID) GUI. Accepts arbitrary grid IDs
+from ``data/jhb_task_grid.gpkg`` — no hardcoded category lists.
+
+Usage:
+  # subset by id
+  python scripts/imagery/export_jhb_geid_tasks.py \\
+      --output tasks.csv --grid-id G0772 G0773 G0888
+
+  # subset from a newline-separated file
+  python scripts/imagery/export_jhb_geid_tasks.py \\
+      --output tasks.csv --grid-ids-file batch1_remaining.txt
+
+  # full coverage of jhb_task_grid.gpkg
+  python scripts/imagery/export_jhb_geid_tasks.py --output tasks.csv --all
+"""
 
 from __future__ import annotations
 
@@ -12,13 +29,6 @@ import geopandas as gpd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 JHB_GRID_PATH = PROJECT_ROOT / "data" / "jhb_task_grid.gpkg"
-CBD_GRID_IDS = [
-    "G0772", "G0773", "G0774", "G0775", "G0776",
-    "G0814", "G0815", "G0816", "G0817", "G0818",
-    "G0853", "G0854", "G0855", "G0856", "G0857",
-    "G0888", "G0889", "G0890", "G0891", "G0892",
-    "G0922", "G0923", "G0924", "G0925", "G0926",
-]
 
 
 def normalize_grid_id(value: str) -> str:
@@ -28,9 +38,21 @@ def normalize_grid_id(value: str) -> str:
     return raw
 
 
+def load_grid_ids_file(path: Path) -> list[str]:
+    ids: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        token = line.strip().split("#", 1)[0].strip()
+        if token:
+            ids.append(token)
+    if not ids:
+        raise SystemExit(f"No grid IDs found in {path}")
+    return ids
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export Joburg CBD 25-grid bounds for Google Earth Images Downloader."
+        description="Export Joburg grid bounds as a GEID task CSV.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--output",
@@ -40,13 +62,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--save-root",
-        default=r"D:\ZAsolar\joburg_cbd_geid",
+        default=r"D:\ZAsolar\joburg_geid",
         help="Windows directory root passed to GEID's 'Save to' field.",
     )
     parser.add_argument(
         "--task-root",
-        default=r"D:\ZAsolar\joburg_cbd_geid\tasks",
-        help="Windows directory root for .geid task files.",
+        default=r"D:\ZAsolar\joburg_geid\tasks",
+        help="Windows directory root for .geid task files (used to build task_name path).",
     )
     parser.add_argument(
         "--zoom-from",
@@ -70,31 +92,54 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional map type label to select in GEID. Leave blank to keep current selection.",
     )
-    parser.add_argument(
+
+    grid_group = parser.add_mutually_exclusive_group(required=True)
+    grid_group.add_argument(
         "--grid-id",
         nargs="+",
         default=None,
-        help="Optional subset of CBD grid IDs to export.",
+        help="One or more grid IDs to export (e.g. --grid-id G0772 G0773).",
     )
+    grid_group.add_argument(
+        "--grid-ids-file",
+        type=Path,
+        default=None,
+        help="Path to newline-separated grid ID list (# comments allowed).",
+    )
+    grid_group.add_argument(
+        "--all",
+        action="store_true",
+        help="Export every grid in data/jhb_task_grid.gpkg.",
+    )
+
     parser.add_argument(
         "--limit",
         type=int,
         default=None,
-        help="Optional number of rows to write after filtering.",
+        help="Optional cap on the number of rows written after filtering.",
     )
     return parser.parse_args()
+
+
+def resolve_grid_ids(args: argparse.Namespace, gdf: gpd.GeoDataFrame) -> list[str]:
+    if args.all:
+        return [normalize_grid_id(gid) for gid in gdf["gridcell_id"].tolist()]
+    if args.grid_ids_file is not None:
+        return [normalize_grid_id(gid) for gid in load_grid_ids_file(args.grid_ids_file)]
+    return [normalize_grid_id(gid) for gid in args.grid_id]
 
 
 def main() -> None:
     args = parse_args()
 
     gdf = gpd.read_file(JHB_GRID_PATH)
-    ordered_ids = [normalize_grid_id(gid) for gid in (args.grid_id or CBD_GRID_IDS)]
+    ordered_ids = resolve_grid_ids(args, gdf)
+
     wanted = set(ordered_ids)
     selected = gdf[gdf["gridcell_id"].isin(wanted)].copy()
     if len(selected) != len(wanted):
         missing = sorted(wanted - set(selected["gridcell_id"]))
-        raise SystemExit(f"Missing CBD grids in {JHB_GRID_PATH}: {missing}")
+        raise SystemExit(f"Missing grids in {JHB_GRID_PATH}: {missing}")
 
     if args.limit is not None:
         ordered_ids = ordered_ids[: args.limit]
@@ -125,7 +170,7 @@ def main() -> None:
             writer.writerow(
                 {
                     "grid_id": grid_id,
-                    "task_name": f"{grid_id}.geid",
+                    "task_name": rf"{args.task_root}\{grid_id}.geid",
                     "save_to": rf"{args.save_root}\{grid_id}",
                     "map_type": args.map_type,
                     "date": args.date,
@@ -138,7 +183,7 @@ def main() -> None:
                 }
             )
 
-    print(f"Wrote {args.output} with {len(ordered_ids)} Joburg CBD grid(s).")
+    print(f"Wrote {args.output} with {len(ordered_ids)} Joburg grid(s).")
 
 
 if __name__ == "__main__":
