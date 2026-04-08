@@ -69,9 +69,12 @@ def stitch_grid(grid_dir: Path, output: Path, force: bool) -> bool:
     if len(tiles) != expected:
         print(f"[warn] {grid_id}: have {len(tiles)} tiles, expected full grid {expected} ({cols}x{rows}) — missing tiles will be black")
 
-    # GEID tile addressing is not standard slippy XYZ — derive bounds from
-    # the manifest bbox and assume the tile_range covers it uniformly.
-    bbox = manifest["bbox_lon_lat"]  # [west, south, east, north]
+    # GEID uses an equirectangular addressing (PROTOCOL.md §"Coordinate
+    # system"): factor = 2^(z-1)/360, each tile spans 1/factor deg in BOTH
+    # lon and lat (square geographic pixels), y axis grows NORTH.
+    # Compute exact per-tile bounds — the manifest's bbox_lon_lat is the
+    # *requested* area which need not align with tile edges, so using it
+    # directly stretches the geotransform.
     tr = manifest["tile_range"]
     full_cols = tr["x"][1] - tr["x"][0] + 1
     full_rows = tr["y"][1] - tr["y"][0] + 1
@@ -80,9 +83,14 @@ def stitch_grid(grid_dir: Path, output: Path, force: bool) -> bool:
         cols, rows = full_cols, full_rows
         min_x, min_y = tr["x"][0], tr["y"][0]
         max_y = tr["y"][1]
+    factor = (1 << (zoom - 1)) / 360.0
+    west = min_x / factor - 180.0
+    east = (min_x + cols) / factor - 180.0
+    south = min_y / factor - 180.0
+    north = (min_y + rows) / factor - 180.0
     width = cols * TILE_SIZE
     height = rows * TILE_SIZE
-    transform = from_bounds(bbox[0], bbox[1], bbox[2], bbox[3], width, height)
+    transform = from_bounds(west, south, east, north, width, height)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     profile = {
