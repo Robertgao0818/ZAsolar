@@ -40,7 +40,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Build a VRT and optionally a GeoTIFF from a GEID task folder."
     )
-    parser.add_argument("task_dir", type=Path, help="GEID task directory, e.g. /mnt/d/ZAsolar/joburg_cbd_geid/G0854")
+    parser.add_argument("task_dir", type=Path, help="GEID task directory, e.g. /mnt/d/ZAsolar/geid_raw/joburg_cbd_geid/G0854")
     parser.add_argument("--zoom", type=int, default=None, help="Zoom level to stitch. Default: infer from list1")
     parser.add_argument(
         "--gdal-translate",

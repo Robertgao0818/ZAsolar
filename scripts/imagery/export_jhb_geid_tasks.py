@@ -62,13 +62,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--save-root",
-        default=r"D:\ZAsolar\joburg_geid",
+        default=r"D:\ZAsolar\geid_raw\joburg_geid",
         help="Windows directory root passed to GEID's 'Save to' field.",
-    )
-    parser.add_argument(
-        "--task-root",
-        default=r"D:\ZAsolar\joburg_geid\tasks",
-        help="Windows directory root for .geid task files (used to build task_name path).",
     )
     parser.add_argument(
         "--zoom-from",
@@ -170,7 +165,7 @@ def main() -> None:
             writer.writerow(
                 {
                     "grid_id": grid_id,
-                    "task_name": rf"{args.task_root}\{grid_id}.geid",
+                    "task_name": grid_id,
                     "save_to": rf"{args.save_root}\{grid_id}",
                     "map_type": args.map_type,
                     "date": args.date,
