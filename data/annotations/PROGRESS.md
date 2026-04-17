@@ -1,22 +1,23 @@
 # Annotation Progress
 
-Last updated: 2026-04-03 22:30
+Last updated: 2026-04-08 (Joburg CBD batch1 promoted to canonical)
 
-**Total: 106 grids, 7367 installations**
+**Total: 137 grids, 8366 installations** (Cape Town: 106 grids / 7367, Johannesburg: 31 grids / 999)
 
 ## Summary
 
-| Batch | Grids | Installations | Date |
-|-------|-------|---------------|------|
-| Legacy | 9 | 22 | - |
-| Early SAM2 | 3 | 475 | 2026-03-20 |
-| Batch 001 | 14 | 492 | 2026-03-22 |
-| Batch 002 | 12 | 656 | 2026-03-22 |
-| Batch 002b | 14 | 1359 | 2026-03-23 ~ 2026-03-24 |
-| Batch 003 | 20 | 1729 | 2026-03-25 ~ 2026-03-27 |
-| Batch 004 | 31 | 2346 | 2026-04-03 |
-| JHB | 6 | 191 | - |
-| **SAM FN fills** | — | **+177** | 2026-04-03 |
+| Region | Batch | Grids | Installations | Date |
+|--------|-------|-------|---------------|------|
+| Cape Town | Legacy | 9 | 22 | - |
+| Cape Town | Early SAM2 | 3 | 475 | 2026-03-20 |
+| Cape Town | Batch 001 | 14 | 492 | 2026-03-22 |
+| Cape Town | Batch 002 | 12 | 656 | 2026-03-22 |
+| Cape Town | Batch 002b | 14 | 1359 | 2026-03-23 ~ 2026-03-24 |
+| Cape Town | Batch 003 | 20 | 1729 | 2026-03-25 ~ 2026-03-27 |
+| Cape Town | Batch 004 | 31 | 2346 | 2026-04-03 |
+| Cape Town | **SAM FN fills** | — | **+177** | 2026-04-03 |
+| Johannesburg | JHB legacy (Li 手标) | 6 | 191 | 2026-03-14 |
+| Johannesburg | **CBD batch1 V4-reviewed** | **25** | **808** (含 146 SAM 重切) | **2026-04-07** |
 
 ## Detail
 
@@ -186,7 +187,7 @@ Last updated: 2026-04-03 22:30
 - G2037: 7 installations (2026-04-03)
 - G2038: 12 installations (2026-04-03)
 
-### JHB
+### JHB legacy (Li 手标 6-grid pilot)
 
 - JHB01: 41 installations (-)
 - JHB02: 33 installations (-)
@@ -194,3 +195,38 @@ Last updated: 2026-04-03 22:30
 - JHB04: 31 installations (-)
 - JHB05: 25 installations (-)
 - JHB06: 28 installations (-)
+
+### Joburg CBD batch1 (V4-reviewed, 2026-04-07)
+
+V4 推理 (P=68.4% / R=82.7% / F1=74.8%) → review GUI 全量 review (1003 preds, 662 correct, 317 delete) → SAM 2.1 重切 179 个 FN markers (146 个 accepted)。
+
+| Grid | Correct | SAM 重切 |
+|------|---------|---------|
+| G0772 | 16 | 0 |
+| G0773 | 11 | 0 |
+| G0774 | 36 | 3 |
+| G0775 | 23 | 4 |
+| G0776 | 3 | 0 |
+| G0814 | 45 | 2 |
+| G0815 | 9 | 1 |
+| G0816 | 56 | 24 |
+| G0817 | 32 | 3 |
+| G0818 | 30 | 1 |
+| G0853 | 8 | 2 |
+| G0854 | 28 | 0 |
+| G0855 | 20 | 4 |
+| G0856 | 21 | 0 |
+| G0857 | 35 | 3 |
+| G0888 | 27 | 3 |
+| G0889 | 47 | 6 |
+| G0890 | 43 | 3 |
+| G0891 | 2 | 0 |
+| G0892 | 7 | 0 |
+| G0922 | 121 | 33 |
+| G0923 | 103 | 32 |
+| G0924 | 49 | 12 |
+| G0925 | 28 | 9 |
+| G0926 | 8 | 1 |
+| **TOTAL** | **808** | **146** |
+
+文件: `data/annotations/Joburg/G{0772-0926}_V4_260407.gpkg`
