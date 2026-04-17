@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-04-05: Daily log 2026-04-05: V4/V4.1 training, benchmark, pipeline improvements
-- 2026-04-05: V4/V4.1 training pipeline, benchmark holdout, parallel inference, doc sync
-- 2026-04-03: Update README with project status, add daily log for FN analysis + SAM review
-- 2026-04-03: Small FP analysis framework, batch004 GT annotations, V4 HN strategy
-- 2026-04-03: Sync Claude Code agent layer to repo: skills, rules, commands, hooks config
-- 2026-04-03: Add annotation data: 82 cleaned GT + 21 reviewed prediction gpkg files
-- 2026-04-03: V1.3 task definition migration, cross-review harness, stale doc remediation
-- 2026-04-03: Code updates: benchmark runner, batch inference, hard-negative training, review GUI improvements
+- 2026-04-17: feat: add multi-city pipeline foundation
+- 2026-04-12: Cross-review harness multi-city refactor + pipeline redesign data layer (region_registry, annotation_loader, training_sets)
+- 2026-04-08: Fix GEID mosaic georeferencing (equirectangular, not bbox)
+- 2026-04-08: Joburg GEID pipeline: stitch + chip mosaics for cloud inference
+- 2026-04-08: Remove geid_reverse_engineering/ — moved to standalone sibling folder
+- 2026-04-08: Add geid_reverse_engineering/: headless GEID 6.48 client + protocol writeup
+- 2026-04-08: Update README with Joburg cross-city pilot, training-data deficit, and GT heater audit findings
+- 2026-04-08: Refactor GEID exporter to support arbitrary grid IDs
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.

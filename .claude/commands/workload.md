@@ -1,6 +1,6 @@
 统计标注工作量。
 
-扫描 `data/annotations/cleaned/` 目录下所有 `*_SAM2_*.gpkg` 文件，对每个文件：
+扫描 `data/annotations/Capetown/` 和 `data/annotations/Joburg/` 目录下所有标注文件，对每个文件：
 
 1. 读取 polygon 数量（= 标注工作量）
 2. 用 3m buffer 合并计算 installation 数量（不修改原始文件，只统计）
@@ -19,4 +19,5 @@
 - 使用区域对应的 UTM CRS 计算空间距离（Cape Town: EPSG:32734, JHB: EPSG:32735）
 - 合并距离阈值 = 3m
 - 不修改任何文件，只读取统计
-- 也扫描原始的 3 个 grid（G1238/G1189/G1190 的 `*_SAM2_260320.gpkg`），这些在 `data/annotations/` 目录下
+- Cape Town 标注全部位于 `data/annotations/Capetown/`，包含 `*_SAM2_*.gpkg`（SAM2 review 流） 和早期 legacy `G*.gpkg`
+- Joburg 标注位于 `data/annotations/Joburg/`，包含 `JHB0[1-6].gpkg` (Li 手标 legacy) 和 `G*_V4_*.gpkg` (CBD batch1 V4 review + SAM 重切)

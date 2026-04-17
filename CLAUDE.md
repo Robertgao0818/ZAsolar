@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Cape Town rooftop solar installation detection & evaluation pipeline. Uses geoai (Mask R-CNN ResNet50-FPN) to detect solar installations from aerial GeoTIFFs, evaluates against hand-labeled ground truth (weak supervision). Supports fine-tuning on Cape Town annotations.
+South Africa rooftop solar installation detection & evaluation pipeline. Uses geoai (Mask R-CNN ResNet50-FPN) to detect solar installations from aerial GeoTIFFs, evaluates against hand-labeled ground truth. Currently covers Cape Town and Johannesburg, targeting nationwide residential solar census. Supports fine-tuning on multi-city annotations.
 
 **Task definition (V1.3)**: reviewed prediction footprint segmentation — model predictions reviewed and accepted by human annotators, exported as polygons. Ground-truth annotations follow installation-level rules (see `data/annotations/ANNOTATION_SPEC.md`), but the pipeline output is reviewed predictions, not installation-merged footprints.
 
@@ -9,8 +9,9 @@ Cape Town rooftop solar installation detection & evaluation pipeline. Uses geoai
 - Architecture and directory layout: [`docs/architecture.md`](docs/architecture.md)
 - Workflows (inference, fine-tuning, analysis): [`docs/workflows.md`](docs/workflows.md)
 - Repository rules (Git, directory governance): [`docs/governance/repo-rules.md`](docs/governance/repo-rules.md)
-- Annotation specification: [`data/annotations/ANNOTATION_SPEC.md`](data/annotations/ANNOTATION_SPEC.md)
-- Dataset registry: [`configs/datasets/regions.yaml`](configs/datasets/regions.yaml)
+- Annotation specification (Two-Axis Model): [`data/annotations/ANNOTATION_SPEC.md`](data/annotations/ANNOTATION_SPEC.md)
+- Region registry (authoritative): [`configs/datasets/regions.yaml`](configs/datasets/regions.yaml)
+- Training set provenance: [`configs/datasets/training_sets.yaml`](configs/datasets/training_sets.yaml)
 - Cross-review harness: [`.agents/harness/README.md`](.agents/harness/README.md)
 
 ## Working Constraints

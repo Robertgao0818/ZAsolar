@@ -158,7 +158,7 @@
 3. 每个预测多边形会被标记为 **`correct`**、**`delete`** 或 **`edit`**。
 4. 如果模型漏掉了目标，审查员还可以放置 **false-negative markers**。
 5. 这些漏检点可以再通过 **SAM 2.1 Large** 做交互式分割。
-6. 最终保留下来的多边形导出到 `data/annotations/cleaned/`。
+6. 最终保留下来的多边形导出到 `data/annotations/Capetown/` (Cape Town) 或 `data/annotations/Joburg/` (Johannesburg)。
 
 因此，当前仓库里同时存在两类完全不同的数字：
 
@@ -197,7 +197,7 @@
 - 其中 **CBD 25 个 grid 已 100% 人工 review 完成**，共审查了 **1,003 个预测**，并放置了 180 个 false-negative markers。
 - 对 179 个 FN markers 用 SAM 2.1 Large 做了三类有针对性的重切，生成了 **136 个候选多边形**，等待清理后并入下一轮训练正样本。
 
-这些 reviewed JHB CBD 数据**目前仍存放在 `results_joburg/` 工作区**，还没有被提升到 `data/annotations/cleaned/` 的 canonical 归档；因此本节的总数仍按原 6 个 cleaned pilot grid 报告，但读者应该知道实际"被人工触碰过的 JHB 区域"已经远不止 6 个 grid。
+**2026-04-08 更新**：这些 reviewed JHB CBD 数据已被提升到 `data/annotations/Joburg/` 的 canonical 归档（25 个 `G*_V4_260407.gpkg` 文件，共 808 个 polygon，含 146 个 SAM 重切结果）。同一次重组把原 `data/annotations/cleaned/` 拆成了平行两层 `Capetown/` + `Joburg/`。
 
 可追溯来源：
 
@@ -240,18 +240,19 @@
 
 ### 3.4 标注数据汇总
 
-下表使用的是 `data/annotations/cleaned/` 中**去重后的当前文件版本**：每个 grid 只保留一个当前版本，并排除汇总文件 `all_annotations_cleaned.gpkg`。
+下表使用的是 `data/annotations/Capetown/` + `data/annotations/Joburg/` 中**去重后的当前文件版本**：每个 grid 只保留一个当前版本，并排除汇总文件 `all_annotations_cleaned.gpkg`。
 
 | 语料部分 | Grids | Polygons | 主要日期 |
 |---------|------:|---------:|---------|
-| Legacy pilot | 9 | 22 | 2026-03-20 之前 |
-| Early SAM2 | 3 | 475 | 2026-03-20 |
-| Batch 001-002 | 26 | 1,148 | 2026-03-22 |
-| Batch 002b | 14 | 1,359 | 2026-03-23 至 2026-03-24 |
-| Batch 003 | 20 | 1,731 | 2026-03-25 至 2026-03-27 审查，2026-04-03 导出 |
-| Batch 004 | 31 | 2,339 | 2026-04-03 |
-| Johannesburg cleaned pilot | 6 | 191 | 初步试点 |
-| **去重后 archive 总计** | **109** | **7,265** | 当前仓库快照 |
+| Cape Town · Legacy pilot | 9 | 22 | 2026-03-20 之前 |
+| Cape Town · Early SAM2 | 3 | 475 | 2026-03-20 |
+| Cape Town · Batch 001-002 | 26 | 1,148 | 2026-03-22 |
+| Cape Town · Batch 002b | 14 | 1,359 | 2026-03-23 至 2026-03-24 |
+| Cape Town · Batch 003 | 20 | 1,731 | 2026-03-25 至 2026-03-27 审查，2026-04-03 导出 |
+| Cape Town · Batch 004 | 31 | 2,339 | 2026-04-03 |
+| Johannesburg · Li 6-grid pilot | 6 | 191 | 初步试点 |
+| Johannesburg · CBD batch1 (V4-reviewed) | 25 | 808 (含 146 SAM 重切) | 2026-04-07 |
+| **去重后 archive 总计** | **134** | **8,073** | 当前仓库快照 |
 
 之所以这里的总数与部分旧文档中的 **7,301**、**7,367** 或 **7,447** 不完全一致，是因为历史日志混合使用了不同口径：有时把 superseded 早期文件一起算入，有时把 Joburg pilot 和 SAM false-negative fills 单独累计。上表使用的是**当前去重后的文件库存**，这比旧版 README 里的总数更适合做论文式汇报。
 

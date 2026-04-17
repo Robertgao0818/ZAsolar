@@ -71,7 +71,7 @@ python3 -c "
 import geopandas as gpd
 gdf = gpd.read_file('results/<GRID_ID>/review/<GRID_ID>_reviewed.gpkg')
 gt = gdf[gdf['review_status'] == 'correct'].copy()
-gt.to_file('data/annotations/cleaned/<GRID_ID>_SAM2_$(date +%y%m%d).gpkg', driver='GPKG')
+gt.to_file('data/annotations/Capetown/<GRID_ID>_SAM2_$(date +%y%m%d).gpkg', driver='GPKG')
 print(f'Exported {len(gt)} GT polygons')
 "
 ```

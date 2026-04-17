@@ -11,7 +11,7 @@
 - [ ] 评估用的是哪个 suite？结论是否与 suite role 对应？
   - `primary` (`cape_town_independent_26`): 用于排名决策
   - `diagnostic` (`cape_town_batch003_diagnostic`): 仅分析用途，不用于排名
-  - `secondary` (`jhb_transfer_6`): 跨城市 transfer，不参与主排名
+  - `secondary` (`jhb_transfer_6` / `jhb_cbd_reviewed_25`): 跨城市 transfer，不参与主排名
   - `smoke` (`cape_town_t1_smoke`): 快速回归检测
 - [ ] F1/Precision/Recall 数字是否与 `summary.json` 一致（reviewer 从远端独立核验）
 - [ ] auto-verdict (`improved`/`regressed`/`flat`/`mixed`/`failed`) 是否完整且用法正确
@@ -20,7 +20,9 @@
   - `flat`: delta 在 (-0.005, +0.005) 之间
   - `mixed`: F1 improves but Precision OR Recall drops > 0.02
   - `failed`: runtime errors or missing results
-- [ ] 若引用 `jhb_transfer_6`，是否明确它是 secondary / cross_city，不参与主排名
+- [ ] 若引用 `jhb_transfer_6` / `jhb_cbd_reviewed_25`，是否明确它是 secondary / cross_city，不参与主排名
+- [ ] **新模型进入 benchmark 应带 `training_set_id`**（指向 `configs/datasets/training_sets.yaml`）或等价 provenance 记录
+- [ ] **跨城市实验必须在 benchmark config 中声明 region**
 
 ## P2 — Should-fix
 
@@ -30,9 +32,10 @@
 - [ ] 结论是否过度声称（如基于 diagnostic suite 声称 generalization）
 - [ ] 若结论基于 RunPod 远端，handoff 是否给出远端路径与命令证据
 - [ ] 若使用 `legacy_instance` profile，结论是否显式标注并说明理由
+- [ ] **混合城市指标需分城市报告**（不允许混合 Cape Town + JHB 指标作为单一结论）
 
 ## P3 — Nice-to-have
 
 - [ ] 实验命名符合 `exp_NNN` 规范
 - [ ] 结果归档到 `docs/experiment-archive/`
-- [ ] `configs/model_registry.yaml` 是否更新
+- [ ] `configs/model_registry.yaml` 是否更新（含 provenance 字段）
