@@ -8,11 +8,14 @@ from pathlib import Path
 import pandas as pd
 import geopandas as gpd
 
+from core import region_registry
+
 BASE_DIR = Path(__file__).parent.parent
 TILES_ROOT = Path(os.environ.get("SOLAR_TILES_ROOT", BASE_DIR / "tiles"))
-TASK_GRID_GPKG = BASE_DIR / "data" / "task_grid.gpkg"
-JHB_TASK_GRID_GPKG = BASE_DIR / "data" / "jhb_task_grid.gpkg"
+RESULTS_ROOT = BASE_DIR / "results"
 ANNOTATIONS_DIR = BASE_DIR / "data" / "annotations"
+CAPETOWN_ANNOTATIONS_DIR = ANNOTATIONS_DIR / "Capetown"
+JOBURG_ANNOTATIONS_DIR = ANNOTATIONS_DIR / "Joburg"
 COMBINED_ANNOTATION_GPKG = ANNOTATIONS_DIR / "solarpanel_g0001_g1190.gpkg"
 
 DEFAULT_GRID_ID = "G1238"
@@ -46,14 +49,84 @@ def normalize_grid_id(grid_id: str) -> str:
     return str(grid_id).strip().upper()
 
 
+def normalize_region(region: str | None) -> str | None:
+    """Normalize region alias to short form (ct/jhb).
+
+    For the canonical regions.yaml key, use
+    ``region_registry.normalize_region_key()`` instead.
+    """
+    if region is None:
+        return None
+    value = str(region).strip().lower().replace("-", "_").replace(" ", "_")
+    if value in {"jhb", "joburg", "johannesburg"}:
+        return "jhb"
+    if value in {"ct", "cape_town", "capetown", "cape"}:
+        return "ct"
+    return value or None
+
+
+# Short alias → canonical regions.yaml key
+_ALIAS_TO_KEY = {"jhb": "johannesburg", "ct": "cape_town"}
+
+
+def _region_key(region: str | None) -> str | None:
+    """Convert a short alias (ct/jhb) to a canonical regions.yaml key."""
+    if region is None:
+        return None
+    return _ALIAS_TO_KEY.get(region, region)
+
+
 CLEANED_DIR = ANNOTATIONS_DIR / "cleaned"
 
 
-def _resolve_gt_gpkg(grid_id: str) -> Path:
+def _find_latest_gpkg(directory: Path, patterns: list[str]) -> Path | None:
+    if not directory.exists():
+        return None
+    for pattern in patterns:
+        matches = sorted(directory.glob(pattern))
+        if matches:
+            return matches[-1]
+    return None
+
+
+def _resolve_gt_gpkg(grid_id: str, *, region: str | None = None) -> Path:
     """Return the best available GT file for a grid.
 
-    Search order: cleaned/*_SAM2_*.gpkg → annotations/{grid_id}.gpkg
+    Tries region_registry first (annotation_source from regions.yaml),
+    then falls back to directory-based search.
     """
+    grid_id = normalize_grid_id(grid_id)
+    region = normalize_region(region)
+
+    # --- Try registry lookup first ---
+    rkey = _region_key(region)
+    if rkey is None:
+        rkey = region_registry.lookup_region(grid_id)
+    if rkey:
+        try:
+            source = region_registry.get_annotation_source(grid_id, rkey)
+            if source.exists():
+                return source
+        except KeyError:
+            pass
+
+    # --- Fallback: directory-based search ---
+    search_roots: list[tuple[Path, list[str]]] = []
+    if region == "jhb":
+        search_roots.append((JOBURG_ANNOTATIONS_DIR, [f"{grid_id}_*.gpkg", f"{grid_id}.gpkg"]))
+    elif region == "ct":
+        search_roots.append((CAPETOWN_ANNOTATIONS_DIR, [f"{grid_id}_SAM2_*.gpkg", f"{grid_id}.gpkg", f"{grid_id}_*.gpkg"]))
+    else:
+        search_roots.extend([
+            (CAPETOWN_ANNOTATIONS_DIR, [f"{grid_id}_SAM2_*.gpkg", f"{grid_id}.gpkg", f"{grid_id}_*.gpkg"]),
+            (JOBURG_ANNOTATIONS_DIR, [f"{grid_id}_*.gpkg", f"{grid_id}.gpkg"]),
+        ])
+
+    for directory, patterns in search_roots:
+        match = _find_latest_gpkg(directory, patterns)
+        if match is not None:
+            return match
+
     # Auto-discover SAM2 files in cleaned/ directory
     if CLEANED_DIR.exists():
         matches = sorted(CLEANED_DIR.glob(f"{grid_id}_SAM2_*.gpkg"))
@@ -61,33 +134,142 @@ def _resolve_gt_gpkg(grid_id: str) -> Path:
             return matches[-1]  # latest by filename
     # Legacy: direct annotation file
     legacy = ANNOTATIONS_DIR / f"{grid_id}.gpkg"
-    if legacy.exists():
-        return legacy
     return legacy  # return path even if missing (caller handles error)
 
 
-def get_grid_paths(grid_id: str, output_subdir: str | None = None) -> GridPaths:
+def _preferred_tiles_root(region: str | None) -> Path:
+    region = normalize_region(region)
+    env_root = os.environ.get("SOLAR_TILES_ROOT")
+
+    # Try registry
+    rkey = _region_key(region)
+    if rkey:
+        try:
+            registry_path = region_registry.get_tiles_path(rkey)
+            if registry_path.exists():
+                return registry_path
+        except KeyError:
+            pass
+
+    if region == "jhb":
+        if env_root:
+            env_path = Path(env_root)
+            name = env_path.name.lower()
+            if "joburg" in name or "jhb" in name:
+                return env_path
+        # Fallback: project-relative tiles_joburg
+        jhb_tiles = BASE_DIR / "tiles_joburg"
+        if jhb_tiles.exists():
+            return jhb_tiles
+        # Last resort: /mnt/d fallback
+        d_jhb = Path("/mnt/d/ZAsolar/tiles_joburg")
+        if d_jhb.exists():
+            return d_jhb
+        return jhb_tiles
+    return Path(env_root) if env_root else TILES_ROOT
+
+
+def get_results_root(region: str | None = None) -> Path:
+    region = normalize_region(region)
+    rkey = _region_key(region)
+    if rkey:
+        try:
+            return region_registry.get_results_path(rkey)
+        except KeyError:
+            pass
+    if region == "jhb":
+        return BASE_DIR / "results_joburg"
+    return RESULTS_ROOT
+
+
+def resolve_tiles_dir(grid_id: str, *, region: str | None = None) -> Path:
     grid_id = normalize_grid_id(grid_id)
-    output_dir = BASE_DIR / "results" / grid_id
+    region = normalize_region(region)
+
+    candidates: list[Path] = []
+    env_root = os.environ.get("SOLAR_TILES_ROOT")
+    if env_root:
+        candidates.append(Path(env_root))
+
+    # Add registry-based path
+    rkey = _region_key(region)
+    if rkey is None:
+        rkey = region_registry.lookup_region(grid_id)
+    if rkey:
+        try:
+            candidates.append(region_registry.get_tiles_path(rkey))
+        except KeyError:
+            pass
+
+    # Legacy fallbacks
+    if region == "jhb":
+        candidates.extend([
+            BASE_DIR / "tiles_joburg",
+            Path("/mnt/d/ZAsolar/tiles_joburg"),
+            TILES_ROOT,
+            Path("/mnt/d/ZAsolar/tiles"),
+        ])
+    else:
+        candidates.extend([
+            TILES_ROOT,
+            Path("/mnt/d/ZAsolar/tiles"),
+        ])
+
+    seen: set[Path] = set()
+    for root in candidates:
+        root = Path(root)
+        if root in seen:
+            continue
+        seen.add(root)
+        tile_dir = root / grid_id
+        if tile_dir.exists():
+            return tile_dir
+
+    return _preferred_tiles_root(region) / grid_id
+
+
+def get_grid_paths(
+    grid_id: str,
+    output_subdir: str | None = None,
+    *,
+    region: str | None = None,
+) -> GridPaths:
+    grid_id = normalize_grid_id(grid_id)
+    region = normalize_region(region)
+    output_dir = get_results_root(region) / grid_id
     if output_subdir:
         output_dir = output_dir / output_subdir
     return GridPaths(
         grid_id=grid_id,
-        tiles_dir=TILES_ROOT / grid_id,
+        tiles_dir=resolve_tiles_dir(grid_id, region=region),
         output_dir=output_dir,
-        gt_gpkg=_resolve_gt_gpkg(grid_id),
+        gt_gpkg=_resolve_gt_gpkg(grid_id, region=region),
         gt_geojson=ANNOTATIONS_DIR / f"{grid_id.lower()}.geojson",
     )
 
 
 def get_task_grid() -> gpd.GeoDataFrame:
+    """Load and concatenate task grids from all registered regions."""
     frames: list[gpd.GeoDataFrame] = []
-    if TASK_GRID_GPKG.exists():
-        frames.append(gpd.read_file(TASK_GRID_GPKG))
-    if JHB_TASK_GRID_GPKG.exists():
-        frames.append(gpd.read_file(JHB_TASK_GRID_GPKG))
+    for rkey in region_registry.list_regions():
+        try:
+            tg_path = region_registry.get_task_grid_path(rkey)
+            if tg_path.exists():
+                frames.append(gpd.read_file(tg_path))
+        except KeyError:
+            continue
+
+    # Fallback to hardcoded paths if registry found nothing
     if not frames:
-        raise FileNotFoundError(f"task grid not found: {TASK_GRID_GPKG}")
+        ct_tg = BASE_DIR / "data" / "task_grid.gpkg"
+        jhb_tg = BASE_DIR / "data" / "jhb_task_grid.gpkg"
+        if ct_tg.exists():
+            frames.append(gpd.read_file(ct_tg))
+        if jhb_tg.exists():
+            frames.append(gpd.read_file(jhb_tg))
+
+    if not frames:
+        raise FileNotFoundError("No task grid files found")
     if len(frames) == 1:
         return frames[0]
     return gpd.GeoDataFrame(
@@ -97,12 +279,31 @@ def get_task_grid() -> gpd.GeoDataFrame:
     )
 
 
-def get_grid_record(grid_id: str):
+def get_grid_record(grid_id: str, *, region: str | None = None):
+    """Lookup grid record. Use region='jhb' to prefer Johannesburg task grid
+    when grid IDs overlap with Cape Town."""
     grid_id = normalize_grid_id(grid_id)
+    region = normalize_region(region)
+
+    # Try region-specific task grid first
+    rkey = _region_key(region)
+    if rkey:
+        try:
+            tg_path = region_registry.get_task_grid_path(rkey)
+            if tg_path.exists():
+                tg = gpd.read_file(tg_path)
+                matches = tg.loc[tg["gridcell_id"].astype(str) == grid_id]
+                if len(matches) > 0:
+                    return matches.iloc[0]
+        except KeyError:
+            pass
+
     task_grid = get_task_grid()
     matches = task_grid.loc[task_grid["gridcell_id"].astype(str) == grid_id]
     if len(matches) == 0:
-        raise KeyError(f"grid_id not found in task_grid.gpkg: {grid_id}")
+        raise KeyError(f"grid_id not found in task_grid: {grid_id}")
+    if region == "jhb" and len(matches) > 1:
+        return matches.iloc[-1]
     return matches.iloc[0]
 
 
@@ -110,8 +311,10 @@ def get_grid_spec(
     grid_id: str,
     tile_size_deg: float = DEFAULT_TILE_SIZE_DEG,
     pixel_size: int = DEFAULT_PIXEL_SIZE,
+    region: str | None = None,
 ) -> GridSpec:
-    record = get_grid_record(grid_id)
+    region = normalize_region(region)
+    record = get_grid_record(grid_id, region=region)
     xmin, ymin, xmax, ymax = record.geometry.bounds
     width = xmax - xmin
     height = ymax - ymin
@@ -130,9 +333,10 @@ def get_grid_spec(
     )
 
 
-def get_metric_crs(grid_id: str) -> str:
+def get_metric_crs(grid_id: str, *, region: str | None = None) -> str:
     """Return a suitable UTM CRS for the given grid based on its centroid."""
-    record = get_grid_record(grid_id)
+    region = normalize_region(region)
+    record = get_grid_record(grid_id, region=region)
     centroid = record.geometry.centroid
     lon = float(centroid.x)
     lat = float(centroid.y)

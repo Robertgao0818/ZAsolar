@@ -6,12 +6,18 @@ regions:
     description: "Cape Town rooftop solar installations"
     crs_metric: "EPSG:32734"
     crs_exchange: "EPSG:4326"
+    paths:
+      tiles_root: "tiles"
+      results_root: "results"
+      annotations_dir: "data/annotations/Capetown"
+      task_grid: "data/task_grid.gpkg"
+    grid_id_pattern: "G\\d{4}"
 
     grids:
       G1238:
-        annotation_source: "data/annotations/G1238_SAM2_260320.gpkg"
+        annotation_source: "data/annotations/Capetown/G1238_SAM2_260320.gpkg"
         annotation_layer: "SAM_Residential_merged"
-        annotation_count: 248
+        annotation_count: 242
         quality_tier: "T1"
         notes: "SAM2.1 (GeoSAM/QGIS) detailed segmentation"
         baseline_metrics:
@@ -20,9 +26,9 @@ regions:
           presence_recall_iou01: 0.9268
 
       G1189:
-        annotation_source: "data/annotations/G1189_SAM2_260320.gpkg"
+        annotation_source: "data/annotations/Capetown/G1189_SAM2_260320.gpkg"
         annotation_layer: "sam_residential_g1189_mosa_109_rgb255105180"
-        annotation_count: 109
+        annotation_count: 135
         quality_tier: "T1"
         notes: "SAM2.1 (GeoSAM/QGIS) detailed segmentation"
         baseline_metrics:
@@ -31,9 +37,9 @@ regions:
           presence_recall_iou01: 0.7241
 
       G1190:
-        annotation_source: "data/annotations/G1190_SAM2_260320.gpkg"
+        annotation_source: "data/annotations/Capetown/G1190_SAM2_260320.gpkg"
         annotation_layer: "SAM_Residential_20260320_221905"
-        annotation_count: 99
+        annotation_count: 98
         quality_tier: "T1"
         notes: "SAM2.1 (GeoSAM/QGIS) detailed segmentation"
         baseline_metrics:
@@ -45,13 +51,53 @@ regions:
     description: "Johannesburg cross-city transfer test"
     crs_metric: "EPSG:32735"
     crs_exchange: "EPSG:4326"
+    paths:
+      tiles_root: "tiles_joburg"
+      results_root: "results_joburg"
+      annotations_dir: "data/annotations/Joburg"
+      task_grid: "data/jhb_task_grid.gpkg"
+    grid_id_pattern: "(JHB\\d{2}|G\\d{4})"
 
     grids:
-      JHB01: { annotation_count: 0, notes: "Transfer test only" }
-      JHB02: { annotation_count: 0, notes: "Transfer test only" }
-      JHB03: { annotation_count: 0, notes: "Transfer test only" }
-      JHB04: { annotation_count: 0, notes: "Transfer test only" }
-      JHB05: { annotation_count: 0, notes: "Transfer test only" }
-      JHB06: { annotation_count: 0, notes: "Transfer test only" }
+      # Legacy 6-grid pilot (Li manual, transfer test only)
+      JHB01: { annotation_source: "data/annotations/Joburg/JHB01.gpkg", annotation_count: 41, notes: "Legacy Li manual GT" }
+      JHB02: { annotation_source: "data/annotations/Joburg/JHB02.gpkg", annotation_count: 33, notes: "Legacy Li manual GT" }
+      JHB03: { annotation_source: "data/annotations/Joburg/JHB03.gpkg", annotation_count: 33, notes: "Legacy Li manual GT" }
+      JHB04: { annotation_source: "data/annotations/Joburg/JHB04.gpkg", annotation_count: 31, notes: "Legacy Li manual GT" }
+      JHB05: { annotation_source: "data/annotations/Joburg/JHB05.gpkg", annotation_count: 25, notes: "Legacy Li manual GT" }
+      JHB06: { annotation_source: "data/annotations/Joburg/JHB06.gpkg", annotation_count: 28, notes: "Legacy Li manual GT" }
+      # CBD batch1 (V4 inference + review + SAM 重切, 2026-04-07)
+      G0772: { annotation_source: "data/annotations/Joburg/G0772_V4_260407.gpkg", annotation_count: 16, notes: "CBD batch1 V4-reviewed" }
+      G0773: { annotation_source: "data/annotations/Joburg/G0773_V4_260407.gpkg", annotation_count: 11, notes: "CBD batch1 V4-reviewed" }
+      G0774: { annotation_source: "data/annotations/Joburg/G0774_V4_260407.gpkg", annotation_count: 36, notes: "CBD batch1 V4-reviewed" }
+      G0775: { annotation_source: "data/annotations/Joburg/G0775_V4_260407.gpkg", annotation_count: 23, notes: "CBD batch1 V4-reviewed" }
+      G0776: { annotation_source: "data/annotations/Joburg/G0776_V4_260407.gpkg", annotation_count: 3, notes: "CBD batch1 V4-reviewed (skylight FP heavy)" }
+      G0814: { annotation_source: "data/annotations/Joburg/G0814_V4_260407.gpkg", annotation_count: 45, notes: "CBD batch1 V4-reviewed" }
+      G0815: { annotation_source: "data/annotations/Joburg/G0815_V4_260407.gpkg", annotation_count: 9, notes: "CBD batch1 V4-reviewed" }
+      G0816: { annotation_source: "data/annotations/Joburg/G0816_V4_260407.gpkg", annotation_count: 56, notes: "CBD batch1 V4-reviewed" }
+      G0817: { annotation_source: "data/annotations/Joburg/G0817_V4_260407.gpkg", annotation_count: 32, notes: "CBD batch1 V4-reviewed" }
+      G0818: { annotation_source: "data/annotations/Joburg/G0818_V4_260407.gpkg", annotation_count: 30, notes: "CBD batch1 V4-reviewed" }
+      G0853: { annotation_source: "data/annotations/Joburg/G0853_V4_260407.gpkg", annotation_count: 8, notes: "CBD batch1 V4-reviewed (rack-shadow FP)" }
+      G0854: { annotation_source: "data/annotations/Joburg/G0854_V4_260407.gpkg", annotation_count: 28, notes: "CBD batch1 V4-reviewed" }
+      G0855: { annotation_source: "data/annotations/Joburg/G0855_V4_260407.gpkg", annotation_count: 20, notes: "CBD batch1 V4-reviewed" }
+      G0856: { annotation_source: "data/annotations/Joburg/G0856_V4_260407.gpkg", annotation_count: 21, notes: "CBD batch1 V4-reviewed" }
+      G0857: { annotation_source: "data/annotations/Joburg/G0857_V4_260407.gpkg", annotation_count: 35, notes: "CBD batch1 V4-reviewed" }
+      G0888: { annotation_source: "data/annotations/Joburg/G0888_V4_260407.gpkg", annotation_count: 27, notes: "CBD batch1 V4-reviewed" }
+      G0889: { annotation_source: "data/annotations/Joburg/G0889_V4_260407.gpkg", annotation_count: 47, notes: "CBD batch1 V4-reviewed" }
+      G0890: { annotation_source: "data/annotations/Joburg/G0890_V4_260407.gpkg", annotation_count: 43, notes: "CBD batch1 V4-reviewed" }
+      G0891: { annotation_source: "data/annotations/Joburg/G0891_V4_260407.gpkg", annotation_count: 2, notes: "CBD batch1 V4-reviewed (skylight FP heavy)" }
+      G0892: { annotation_source: "data/annotations/Joburg/G0892_V4_260407.gpkg", annotation_count: 7, notes: "CBD batch1 V4-reviewed" }
+      G0922: { annotation_source: "data/annotations/Joburg/G0922_V4_260407.gpkg", annotation_count: 121, notes: "CBD batch1 V4-reviewed (cleanest grid, 88% precision)" }
+      G0923: { annotation_source: "data/annotations/Joburg/G0923_V4_260407.gpkg", annotation_count: 103, notes: "CBD batch1 V4-reviewed" }
+      G0924: { annotation_source: "data/annotations/Joburg/G0924_V4_260407.gpkg", annotation_count: 49, notes: "CBD batch1 V4-reviewed" }
+      G0925: { annotation_source: "data/annotations/Joburg/G0925_V4_260407.gpkg", annotation_count: 28, notes: "CBD batch1 V4-reviewed" }
+      G0926: { annotation_source: "data/annotations/Joburg/G0926_V4_260407.gpkg", annotation_count: 8, notes: "CBD batch1 V4-reviewed" }
     baseline_metrics:
-      macro_recall: 0.281
+      legacy_macro_recall: 0.281  # 6-grid pilot baseline
+      cbd_batch1_v4:               # 25-grid CBD review (2026-04-07)
+        precision: 0.684
+        recall: 0.827
+        f1: 0.748
+        n_predictions: 1003
+        n_correct: 662
+        n_sam_recut: 146

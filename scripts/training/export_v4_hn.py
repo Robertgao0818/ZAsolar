@@ -29,10 +29,10 @@ import rasterio
 from rasterio.windows import Window
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from core.grid_utils import TILES_ROOT
+from core.grid_utils import resolve_tiles_dir, get_results_root
+from core import region_registry
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-RESULTS_DIR = PROJECT_ROOT / "results"
 
 # Predictions that were manually corrected back to "correct" during taxonomy
 # labeling — exclude from HN pool
@@ -84,7 +84,9 @@ def load_fp_geometries(
     fp_by_grid: dict[str, gpd.GeoDataFrame] = {}
 
     for grid_id, group in sampled.groupby("grid_id"):
-        pred_path = RESULTS_DIR / grid_id / "predictions_metric.gpkg"
+        rkey = region_registry.lookup_region(grid_id)
+        results_root = get_results_root(region=rkey)
+        pred_path = results_root / grid_id / "predictions_metric.gpkg"
         if not pred_path.exists():
             print(f"  WARN: {pred_path} not found, skipping {grid_id}")
             continue
@@ -112,9 +114,6 @@ def extract_hn_chips(
     tiles_root: Path | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Extract chips centered on FP centroids. Returns (images, provenance)."""
-    if tiles_root is None:
-        tiles_root = TILES_ROOT
-
     chip_dir = output_dir / "train"
     chip_dir.mkdir(parents=True, exist_ok=True)
 
@@ -221,9 +220,12 @@ def extract_hn_chips(
 
 
 def _find_tile(lon: float, lat: float, grid_id: str,
-               tiles_root: Path) -> Path | None:
+               tiles_root: Path | None = None) -> Path | None:
     """Find tile GeoTIFF containing a lon/lat point."""
-    grid_dir = tiles_root / grid_id
+    if tiles_root is not None:
+        grid_dir = tiles_root / grid_id
+    else:
+        grid_dir = resolve_tiles_dir(grid_id)
     if not grid_dir.exists():
         return None
     for tif in grid_dir.glob(f"{grid_id}_*_*_geo.tif"):

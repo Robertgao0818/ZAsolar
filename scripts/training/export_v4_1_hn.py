@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 # Reuse from existing exporters
 from scripts.training.export_targeted_hn import (
-    BATCH_003_GRIDS,
+    DEFAULT_BATCH_003_GRIDS,
     load_fp_locations,
     extract_fp_chips,
 )
@@ -152,7 +152,7 @@ def main():
 
     # ── Batch 003 HN ─────────────────────────────────────────────────
     print("[1/4] Loading batch 003 reviewed FP predictions...")
-    fp_by_grid = load_fp_locations(BATCH_003_GRIDS)
+    fp_by_grid = load_fp_locations(DEFAULT_BATCH_003_GRIDS)
     total_b3_fp = sum(len(gdf) for gdf in fp_by_grid.values())
     print(f"  Found {total_b3_fp} FPs across {len(fp_by_grid)} grids")
 

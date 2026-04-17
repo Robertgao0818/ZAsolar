@@ -1,0 +1,92 @@
+# V4.1 Combined HN — Historical Reproduction Spec (Track 1)
+#
+# Reproduces the V4.1 training dataset: 68 Cape Town grids (26 holdout
+# excluded), batch 003 reviewed-FP HN + batch 004 curated small-FP HN.
+# This spec exists to prove the declarative builder can match the
+# historical baseline.
+
+schema_version: 1
+name: v4_1_hn
+build_family: detector_train
+regions: [cape_town]
+evaluation_regime: historical_holdout
+
+selection:
+  # These 26 grids were the cape_town_independent_26 benchmark holdout.
+  # Included here to faithfully reproduce the V4.1 baseline.
+  exclude_grids:
+    - G1240
+    - G1243
+    - G1244
+    - G1245
+    - G1293
+    - G1294
+    - G1297
+    - G1298
+    - G1299
+    - G1300
+    - G1349
+    - G1354
+    - G1410
+    - G1411
+    - G1466
+    - G1467
+    - G1516
+    - G1520
+    - G1521
+    - G1522
+    - G1523
+    - G1524
+    - G1569
+    - G1570
+    - G1571
+    - G1572
+  tier_filter: T1+T2
+  audit_csv: results/analysis/gt_heater_audit/heater_20260405_2141/audit_labels_phase1.csv
+  exclude_audit_labels: [heater_or_non_pv, uncertain]
+
+chip:
+  size: 400
+  overlap: 0.25
+
+split:
+  strategy: tile_greedy_by_annotation_count
+  val_fraction: 0.2
+  seed: 42
+
+negatives:
+  easy_neg_ratio: 0.15
+
+hard_negatives:
+  - type: reviewed_fp_hn
+    region: cape_town
+    grids:
+      - G1682
+      - G1683
+      - G1685
+      - G1686
+      - G1687
+      - G1688
+      - G1689
+      - G1690
+      - G1691
+      - G1692
+      - G1693
+      - G1743
+      - G1744
+      - G1747
+      - G1749
+      - G1750
+      - G1798
+      - G1800
+      - G1806
+      - G1807
+    max_ratio: 0.10
+  - type: small_fp_hn
+    shortlist_csv: results/analysis/small_fp/taxonomy_run/hn_small_fp_shortlist.csv
+    sample_rate: 0.5
+    max_ratio: 0.04
+
+output:
+  root: ${SOLAR_ARTIFACT_ROOT:-/mnt/d/ZAsolar}
+  name_template: "coco_{name}_{date}"

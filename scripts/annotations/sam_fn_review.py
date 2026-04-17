@@ -40,26 +40,49 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-TILES_ROOT = Path("/mnt/d/ZAsolar/tiles")
+TILES_ROOT_CT = Path("/mnt/d/ZAsolar/tiles")
+TILES_ROOT_JHB = Path("/mnt/d/ZAsolar/tiles_joburg")
+RESULTS_ROOTS = [Path("results"), Path("/mnt/d/ZAsolar/results"), Path("results_joburg")]
 SAM_CHECKPOINT = Path("/mnt/c/Users/gaosh/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins/GeoOSAM/sam2/checkpoints/sam2.1_hiera_large.pt")
 SAM_CONFIG = "configs/sam2.1/sam2.1_hiera_l"
-METRIC_CRS = "EPSG:32734"
 CROP_HALF = 300  # pixels around marker for preview
 
-proj_to_metric = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:32734", always_xy=True)
-proj_to_4326 = pyproj.Transformer.from_crs("EPSG:32734", "EPSG:4326", always_xy=True)
+# CRS helpers per region (set per-marker; defaults are CT)
+def get_metric_crs(grid_id: str, region: str) -> str:
+    return "EPSG:32735" if region == "jhb" else "EPSG:32734"
+
+# Lazy transformers cache (key = metric_crs)
+_xform_cache = {}
+def to_metric(metric_crs: str):
+    if metric_crs not in _xform_cache:
+        _xform_cache[metric_crs] = pyproj.Transformer.from_crs("EPSG:4326", metric_crs, always_xy=True)
+    return _xform_cache[metric_crs]
+
+def to_4326(metric_crs: str):
+    key = metric_crs + "_back"
+    if key not in _xform_cache:
+        _xform_cache[key] = pyproj.Transformer.from_crs(metric_crs, "EPSG:4326", always_xy=True)
+    return _xform_cache[key]
 
 
 # ---------------------------------------------------------------------------
 # Data loading
 # ---------------------------------------------------------------------------
-def load_fn_markers() -> list[dict]:
-    """Load all remaining FN markers with metadata."""
+def load_fn_markers(grids_filter: set | None = None) -> list[dict]:
+    """Load all remaining FN markers with metadata.
+    Auto-detects region (CT vs JHB) from results path."""
     markers = []
     idx = 0
-    for base in [Path("results"), Path("/mnt/d/ZAsolar/results")]:
+    for base in RESULTS_ROOTS:
+        if not base.exists():
+            continue
+        is_jhb = "joburg" in str(base).lower()
+        region = "jhb" if is_jhb else "ct"
+        tiles_root = TILES_ROOT_JHB if is_jhb else TILES_ROOT_CT
         for gpkg_path in sorted(base.glob("*/review/*_fn_markers.gpkg")):
             grid = gpkg_path.parent.parent.name
+            if grids_filter and grid not in grids_filter:
+                continue
             gdf = gpd.read_file(gpkg_path)
             if len(gdf) == 0:
                 continue
@@ -85,7 +108,7 @@ def load_fn_markers() -> list[dict]:
                 if len(parts) < 3:
                     continue
                 col, r = int(parts[-2]), int(parts[-1])
-                tile_path = TILES_ROOT / grid / f"{grid}_{col}_{r}_geo.tif"
+                tile_path = tiles_root / grid / f"{grid}_{col}_{r}_geo.tif"
 
                 # Find which Edit polygon contains this marker (if any)
                 edit_poly_wkt = None
@@ -110,6 +133,8 @@ def load_fn_markers() -> list[dict]:
                 markers.append({
                     "id": idx,
                     "grid_id": grid,
+                    "region": region,
+                    "metric_crs": "EPSG:32735" if region == "jhb" else "EPSG:32734",
                     "tile_key": tile_key,
                     "tile_path": str(tile_path),
                     "px": px,
@@ -133,6 +158,11 @@ class SAMSegmenter:
     def __init__(self):
         self.model = None
         self.lock = Lock()
+        # Track which tile's embedding is currently loaded in the predictor.
+        # Within one marker's review session the user clicks many times on the
+        # same tile — set_image() is the bottleneck (~200-500ms vs predict() ~30-50ms).
+        # Skipping it on cache hits is the dominant perf win.
+        self._current_tile = None
 
     def load(self):
         from sam2.build_sam import build_sam2
@@ -142,11 +172,22 @@ class SAMSegmenter:
         self.predictor = SAM2ImagePredictor(sam2)
         print("SAM loaded.")
 
+    def _ensure_image(self, tile_path: str, image_array: np.ndarray):
+        """Set image in predictor only if it's not already the current one."""
+        if self._current_tile == tile_path:
+            return  # already embedded — skip the slow set_image()
+        self.predictor.set_image(image_array)
+        self._current_tile = tile_path
+
     def segment(self, image_array: np.ndarray,
-                positive_points: list, negative_points: list) -> tuple:
-        """Run SAM with given points. Returns (mask, score, polygon_wkt, area_m2)."""
+                positive_points: list, negative_points: list,
+                tile_path: str = None) -> tuple:
+        """Run SAM with given points. Returns (mask, score)."""
         with self.lock:
-            self.predictor.set_image(image_array)
+            if tile_path:
+                self._ensure_image(tile_path, image_array)
+            else:
+                self.predictor.set_image(image_array)
 
             points = positive_points + negative_points
             labels = [1] * len(positive_points) + [0] * len(negative_points)
@@ -167,8 +208,12 @@ class SAMSegmenter:
 
 sam_model = SAMSegmenter()
 
+# Cache tile image arrays in RAM to avoid re-reading from disk on every click
+# Each tile is ~1248x1255x3 uint8 ≈ 4.7MB; cap at 16 tiles ≈ 75MB
+_tile_array_cache: dict[str, np.ndarray] = {}
 
-def mask_to_polygon_wkt(mask: np.ndarray, tile_path: str) -> tuple:
+
+def mask_to_polygon_wkt(mask: np.ndarray, tile_path: str, metric_crs: str = "EPSG:32734") -> tuple:
     """Convert binary mask to WKT polygon in EPSG:4326, return (wkt, area_m2)."""
     from rasterio.features import shapes as rio_shapes
     with rasterio.open(tile_path) as src:
@@ -186,8 +231,8 @@ def mask_to_polygon_wkt(mask: np.ndarray, tile_path: str) -> tuple:
         return None, 0
 
     biggest = max(polys, key=lambda p: p.area)
-    # Area in metric CRS
-    metric_poly = transform(proj_to_metric.transform, biggest)
+    # Area in metric CRS (region-aware)
+    metric_poly = transform(to_metric(metric_crs).transform, biggest)
     area_m2 = metric_poly.area
 
     return biggest.wkt, area_m2
@@ -267,6 +312,25 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         m = self.markers[mid]
+        # Lazy initial segment: if no polygon yet, run SAM once with the original marker point.
+        if m["sam_wkt"] is None and Path(m["tile_path"]).exists():
+            try:
+                img_array = _tile_array_cache.get(m["tile_path"])
+                if img_array is None:
+                    with rasterio.open(m["tile_path"]) as src:
+                        img_array = np.moveaxis(src.read()[:3], 0, -1)
+                    _tile_array_cache[m["tile_path"]] = img_array
+                    if len(_tile_array_cache) > 16:
+                        _tile_array_cache.pop(next(iter(_tile_array_cache)))
+                mask, score = sam_model.segment(
+                    img_array, m["positive_points"], m["negative_points"],
+                    tile_path=m["tile_path"],
+                )
+                wkt_str, area = mask_to_polygon_wkt(mask, m["tile_path"], metric_crs=m["metric_crs"])
+                m["sam_wkt"] = wkt_str
+                m["sam_area_m2"] = area
+            except Exception as e:
+                print(f"  lazy segment failed for marker {mid}: {e}")
         self._json({
             "id": m["id"],
             "grid_id": m["grid_id"],
@@ -354,8 +418,15 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self._json({"error": "tile not found"}, 404)
             return
 
-        with rasterio.open(tile_path) as src:
-            img_array = np.moveaxis(src.read()[:3], 0, -1)
+        # Cache img_array per tile in handler to avoid re-reading from disk
+        img_array = _tile_array_cache.get(tile_path)
+        if img_array is None:
+            with rasterio.open(tile_path) as src:
+                img_array = np.moveaxis(src.read()[:3], 0, -1)
+            _tile_array_cache[tile_path] = img_array
+            # Trim cache
+            if len(_tile_array_cache) > 16:
+                _tile_array_cache.pop(next(iter(_tile_array_cache)))
 
         pos = m["positive_points"]
         neg = m["negative_points"]
@@ -363,8 +434,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self._json({"error": "no positive points"}, 400)
             return
 
-        mask, score = sam_model.segment(img_array, pos, neg)
-        wkt_str, area_m2 = mask_to_polygon_wkt(mask, tile_path)
+        mask, score = sam_model.segment(img_array, pos, neg, tile_path=tile_path)
+        wkt_str, area_m2 = mask_to_polygon_wkt(mask, tile_path, metric_crs=m.get("metric_crs", "EPSG:32734"))
 
         m["sam_wkt"] = wkt_str
         m["sam_area_m2"] = area_m2
@@ -384,48 +455,76 @@ class ReviewHandler(BaseHTTPRequestHandler):
         self._json({"ok": True, "status": decision})
 
     def _api_save(self):
-        """Save accepted SAM polygons back to reviewed GPKGs."""
-        accepted = [m for m in self.markers if m["status"] == "accepted" and m["sam_wkt"]]
-        if not accepted:
-            self._json({"saved": 0})
-            return
+        """MERGE-based save: only touch polygons from markers in this session.
+        Each SAM polygon gets a stable marker_uid; save only updates rows whose
+        marker_uid matches a marker in the current session, leaving everything else
+        in the reviewed GPKG untouched."""
+        from shapely import wkt as _wkt
+        # Build set of marker UIDs for THIS session, tagged by status
+        session_uids: dict[str, dict] = {}  # uid -> {status, m}
+        for m in self.markers:
+            uid = f"{m['grid_id']}_{m['tile_key']}_{m['px']}_{m['py']}"
+            session_uids[uid] = {"status": m["status"], "m": m}
 
-        # Group by grid
-        by_grid = {}
-        for m in accepted:
-            by_grid.setdefault(m["grid_id"], []).append(m)
+        # Group session markers by grid for per-file processing
+        by_grid: dict[str, list] = {}
+        for uid, info in session_uids.items():
+            by_grid.setdefault(info["m"]["grid_id"], []).append((uid, info))
 
         total_saved = 0
-        for grid_id, grid_markers in by_grid.items():
-            # Find reviewed gpkg
-            for base in [Path("results"), Path("/mnt/d/ZAsolar/results")]:
-                reviewed_path = base / grid_id / "review" / f"{grid_id}_reviewed.gpkg"
-                if reviewed_path.exists():
+        for grid_id, items in by_grid.items():
+            reviewed_path = None
+            for base in RESULTS_ROOTS:
+                p = base / grid_id / "review" / f"{grid_id}_reviewed.gpkg"
+                if p.exists():
+                    reviewed_path = p
                     break
-            else:
+            if reviewed_path is None:
                 continue
 
             gdf = gpd.read_file(str(reviewed_path))
             crs = gdf.crs
 
-            # Remove old SAM FN polygons
-            if "source" in gdf.columns:
-                gdf = gdf[gdf["source"] != "sam_fn_review"].copy()
+            # Ensure marker_uid column exists
+            if "marker_uid" not in gdf.columns:
+                gdf["marker_uid"] = None
 
-            new_polys = []
-            for m in grid_markers:
-                from shapely import wkt
-                poly = wkt.loads(m["sam_wkt"])
-                new_polys.append({
+            # UIDs touched by this session (any status)
+            session_uids_in_grid = {uid for uid, _ in items}
+
+            # Step 1: drop only the rows whose marker_uid is in this session
+            # (these are the rows we may want to replace or delete).
+            # Also: drop legacy sam_fn_review rows that have NO marker_uid only if they
+            # spatially match a current session marker — but legacy rows don't exist
+            # after this fix, so we just keep them.
+            if "source" in gdf.columns:
+                kept_mask = ~(
+                    (gdf["source"] == "sam_fn_review") &
+                    (gdf["marker_uid"].isin(session_uids_in_grid))
+                )
+                gdf = gdf[kept_mask].copy()
+
+            # Step 2: build new rows for accepted markers only
+            new_rows = []
+            for uid, info in items:
+                if info["status"] != "accepted":
+                    continue  # deleted/skipped/pending → not added back
+                m = info["m"]
+                if not m.get("sam_wkt"):
+                    continue
+                poly = _wkt.loads(m["sam_wkt"])
+                new_rows.append({
                     "geometry": poly,
                     "source": "sam_fn_review",
                     "tile_key": m["tile_key"],
+                    "marker_uid": uid,
                     "confidence": 1.0,
                     "review_status": "correct",
                 })
 
-            if new_polys:
-                fn_gdf = gpd.GeoDataFrame(new_polys, crs=crs)
+            if new_rows:
+                fn_gdf = gpd.GeoDataFrame(new_rows, crs=crs)
+                # Schema alignment
                 for col in gdf.columns:
                     if col not in fn_gdf.columns and col != "geometry":
                         fn_gdf[col] = None
@@ -435,8 +534,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 merged = gpd.GeoDataFrame(
                     pd.concat([gdf, fn_gdf], ignore_index=True), crs=crs
                 )
-                merged.to_file(str(reviewed_path), driver="GPKG")
-                total_saved += len(new_polys)
+            else:
+                merged = gdf
+
+            merged.to_file(str(reviewed_path), driver="GPKG")
+            total_saved += len(new_rows)
 
         # Also save decisions log
         log = []
@@ -757,39 +859,57 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--output-dir", default="results/analysis/sam_fn_review")
-    parser.add_argument("--no-presegment", action="store_true",
-                        help="Skip initial segmentation, start with empty results")
+    parser.add_argument("--grids", nargs="+", default=None,
+                        help="Restrict to specific grid IDs (e.g. G0772 G0773)")
+    parser.add_argument("--marker-ids", nargs="+", type=int, default=None,
+                        help="Restrict to specific marker IDs (post-grid-filter, by global index)")
+    parser.add_argument("--eager", action="store_true",
+                        help="Pre-segment all markers at startup (slower start, instant browsing)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    grids_filter = set(g.upper() for g in args.grids) if args.grids else None
     print("Loading FN markers...")
-    markers = load_fn_markers()
+    markers = load_fn_markers(grids_filter=grids_filter)
     print(f"Loaded {len(markers)} markers")
+    if args.marker_ids:
+        wanted = set(args.marker_ids)
+        markers = [m for m in markers if m["id"] in wanted]
+        # Renumber so the GUI's currentIdx navigation stays consistent
+        for new_i, m in enumerate(markers):
+            m["display_id"] = new_i  # for reference
+        print(f"Filtered to {len(markers)} markers (--marker-ids)")
+    if not markers:
+        print("No markers found.")
+        return
 
     sam_model.load()
 
-    # Pre-segment all markers with initial single/multi-point
-    if not args.no_presegment:
-        print(f"\nPre-segmenting {len(markers)} markers...")
+    # Eager pre-segment is now opt-in. Default = lazy (segment on first view).
+    if args.eager:
+        print(f"\nPre-segmenting {len(markers)} markers (eager mode)...")
         for i, m in enumerate(markers):
             tile_path = m["tile_path"]
             if not Path(tile_path).exists():
                 continue
             try:
-                with rasterio.open(tile_path) as src:
-                    img_array = np.moveaxis(src.read()[:3], 0, -1)
-
+                img_array = _tile_array_cache.get(tile_path)
+                if img_array is None:
+                    with rasterio.open(tile_path) as src:
+                        img_array = np.moveaxis(src.read()[:3], 0, -1)
+                    _tile_array_cache[tile_path] = img_array
+                    if len(_tile_array_cache) > 16:
+                        _tile_array_cache.pop(next(iter(_tile_array_cache)))
                 pos = m["positive_points"]
                 neg = m["negative_points"]
-                mask, score = sam_model.segment(img_array, pos, neg)
-                wkt_str, area_m2 = mask_to_polygon_wkt(mask, tile_path)
+                mask, score = sam_model.segment(img_array, pos, neg, tile_path=tile_path)
+                wkt_str, area_m2 = mask_to_polygon_wkt(mask, tile_path, metric_crs=m["metric_crs"])
                 m["sam_wkt"] = wkt_str
                 m["sam_area_m2"] = area_m2
-
-                status = f"[{i+1}/{len(markers)}] {m['grid_id']}/{m['tile_key']}: {area_m2:.0f}m² score={score:.3f}"
-                print(f"  {status}")
+                if (i+1) % 25 == 0:
+                    print(f"  [{i+1}/{len(markers)}] last: {m['grid_id']}/{m['tile_key']} {area_m2:.0f}m²")
             except Exception as e:
                 print(f"  [{i+1}/{len(markers)}] {m['grid_id']}/{m['tile_key']}: ERROR {e}")
 

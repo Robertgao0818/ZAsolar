@@ -2,18 +2,18 @@
 Export targeted hard-negative chips from reviewed FP predictions.
 
 Instead of random empty tiles, this extracts 400×400 chips centered on
-false-positive detections (review_status == "delete") from batch 003.
-These are locations where the model incorrectly predicted solar panels —
-the hardest negatives available.
+false-positive detections (review_status == "delete").  These are
+locations where the model incorrectly predicted solar panels — the
+hardest negatives available.
 
-The output merges into an existing COCO dataset (coco_v3_no_hn) to create
-a third experiment variant: coco_v3_targeted_hn.
+The output merges into an existing COCO dataset to create a training
+variant with targeted hard negatives.
 
 Usage:
     python scripts/training/export_targeted_hn.py \
         --base-coco /mnt/d/ZAsolar/coco_v3_no_hn \
         --output-dir /mnt/d/ZAsolar/coco_v3_targeted_hn \
-        --chip-size 400
+        --grids G1682 G1683 G1685 ...
 """
 
 from __future__ import annotations
@@ -31,12 +31,12 @@ from rasterio.windows import Window
 from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from core.grid_utils import TILES_ROOT
+from core.grid_utils import resolve_tiles_dir, get_results_root
+from core.annotation_loader import resolve_gt_path
+from core import region_registry
 
-RESULTS_DIR = Path(__file__).resolve().parent.parent.parent / "results"
-
-# Batch 003 grids with reviewed predictions
-BATCH_003_GRIDS = [
+# Default batch 003 grids (kept as convenience default for CLI)
+DEFAULT_BATCH_003_GRIDS = [
     "G1682", "G1683", "G1685", "G1686", "G1687", "G1688",
     "G1689", "G1690", "G1691", "G1692", "G1693",
     "G1743", "G1744", "G1747", "G1749", "G1750",
@@ -53,12 +53,13 @@ def load_fp_locations(grid_ids: list[str]) -> dict[str, gpd.GeoDataFrame]:
 
     Returns dict: grid_id -> GeoDataFrame of pure FP polygons in EPSG:4326.
     """
-    import glob
-
     fp_by_grid: dict[str, gpd.GeoDataFrame] = {}
 
     for gid in grid_ids:
-        reviewed_path = RESULTS_DIR / gid / "review" / f"{gid}_reviewed.gpkg"
+        # Region-aware results path
+        rkey = region_registry.lookup_region(gid)
+        results_root = get_results_root(region=rkey)
+        reviewed_path = results_root / gid / "review" / f"{gid}_reviewed.gpkg"
         if not reviewed_path.exists():
             continue
 
@@ -81,12 +82,10 @@ def load_fp_locations(grid_ids: list[str]) -> dict[str, gpd.GeoDataFrame]:
         if fp.crs and fp.crs.to_epsg() != 4326:
             fp = fp.to_crs(epsg=4326)
 
-        # Load ground-truth annotations for this grid
-        ann_files = glob.glob(
-            str(RESULTS_DIR.parent / f"data/annotations/cleaned/{gid}_SAM2_*.gpkg")
-        )
-        if ann_files:
-            gt = gpd.read_file(ann_files[0])
+        # Load ground-truth annotations for this grid (region-aware)
+        gt_path = resolve_gt_path(gid, region=rkey)
+        if gt_path.exists():
+            gt = gpd.read_file(str(gt_path))
             if gt.crs and gt.crs.to_epsg() != 4326:
                 gt = gt.to_crs(epsg=4326)
 
@@ -124,9 +123,12 @@ def load_fp_locations(grid_ids: list[str]) -> dict[str, gpd.GeoDataFrame]:
 
 
 def find_tile_for_point(lon: float, lat: float, grid_id: str,
-                        tiles_root: Path) -> Path | None:
+                        tiles_root: Path | None = None) -> Path | None:
     """Find the tile GeoTIFF that contains a given lon/lat point."""
-    grid_dir = tiles_root / grid_id
+    if tiles_root is not None:
+        grid_dir = tiles_root / grid_id
+    else:
+        grid_dir = resolve_tiles_dir(grid_id)
     if not grid_dir.exists():
         return None
 
@@ -148,9 +150,6 @@ def extract_fp_chips(
 
     Returns (images_list, provenance_list) for COCO integration.
     """
-    if tiles_root is None:
-        tiles_root = TILES_ROOT
-
     chip_dir = output_dir / "train"
     chip_dir.mkdir(parents=True, exist_ok=True)
 
@@ -354,13 +353,13 @@ def main():
         help="Override tiles root (default: SOLAR_TILES_ROOT or ./tiles)",
     )
     parser.add_argument(
-        "--grid-ids", nargs="+", default=BATCH_003_GRIDS,
-        help="Grid IDs to extract FPs from",
+        "--grids", nargs="+", default=DEFAULT_BATCH_003_GRIDS,
+        help="Grid IDs to extract FPs from (default: batch 003 grids)",
     )
     args = parser.parse_args()
 
     print("[1/3] Loading reviewed FP predictions...")
-    fp_by_grid = load_fp_locations(args.grid_ids)
+    fp_by_grid = load_fp_locations(args.grids)
     total_fp = sum(len(gdf) for gdf in fp_by_grid.values())
     print(f"  Found {total_fp} FPs across {len(fp_by_grid)} grids")
 

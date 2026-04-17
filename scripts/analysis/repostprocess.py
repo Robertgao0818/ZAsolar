@@ -29,32 +29,64 @@ from detect_and_evaluate import (
     SHADOW_RGB_THRESH,
     spatial_nms,
 )
-from core.grid_utils import TILES_ROOT
+from core.grid_utils import (
+    get_metric_crs,
+    normalize_region,
+    resolve_tiles_dir,
+)
 
-RESULTS_DIRS = [
-    Path("/mnt/d/ZAsolar/results"),
-    Path(__file__).resolve().parent.parent.parent / "results",
-]
-METRIC_CRS = "EPSG:32734"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
-def find_results_dir(grid_id: str) -> Path | None:
-    for d in RESULTS_DIRS:
+def _results_root_candidates(region: str | None = None) -> list[Path]:
+    region = normalize_region(region)
+    if region == "jhb":
+        roots = [
+            Path("/mnt/d/ZAsolar/results_joburg"),
+            PROJECT_ROOT / "results_joburg",
+        ]
+    elif region == "ct":
+        roots = [
+            Path("/mnt/d/ZAsolar/results"),
+            PROJECT_ROOT / "results",
+        ]
+    else:
+        roots = [
+            Path("/mnt/d/ZAsolar/results"),
+            PROJECT_ROOT / "results",
+            Path("/mnt/d/ZAsolar/results_joburg"),
+            PROJECT_ROOT / "results_joburg",
+        ]
+    seen = []
+    for root in roots:
+        if root not in seen:
+            seen.append(root)
+    return seen
+
+
+def _infer_region_from_results_dir(results_dir: Path) -> str | None:
+    return "jhb" if "results_joburg" in str(results_dir) else None
+
+
+def find_results_dir(grid_id: str, *, region: str | None = None) -> tuple[Path | None, str | None]:
+    for d in _results_root_candidates(region):
         p = d / grid_id
         if (p / "vectors").exists() and (p / "masks").exists():
-            return p
-    return None
+            return p, _infer_region_from_results_dir(d)
+    return None, normalize_region(region)
 
 
-def repostprocess_grid(grid_id: str, dry_run: bool = False) -> dict | None:
-    gdir = find_results_dir(grid_id)
+def repostprocess_grid(grid_id: str, *, region: str | None = None, dry_run: bool = False) -> dict | None:
+    gdir, resolved_region = find_results_dir(grid_id, region=region)
     if gdir is None:
         print(f"  [SKIP] {grid_id}: no vectors/masks found")
         return None
 
+    resolved_region = normalize_region(resolved_region)
+    metric_crs = get_metric_crs(grid_id, region=resolved_region)
     vectors_dir = gdir / "vectors"
     masks_dir = gdir / "masks"
-    tiles_dir = TILES_ROOT / grid_id
+    tiles_dir = resolve_tiles_dir(grid_id, region=resolved_region)
 
     all_gdfs = []
     for vf in sorted(vectors_dir.glob("*_vectors.geojson")):
@@ -92,7 +124,7 @@ def repostprocess_grid(grid_id: str, dry_run: bool = False) -> dict | None:
                 gdf = geoai.add_geometric_properties(gdf)
             except Exception:
                 # Fallback: compute basic metrics manually
-                gdf_proj = gdf.to_crs(METRIC_CRS)
+                gdf_proj = gdf.to_crs(metric_crs)
                 gdf["area_m2"] = gdf_proj.geometry.area
             gdf["source_tile"] = tile_name
             all_gdfs.append(gdf)
@@ -103,8 +135,8 @@ def repostprocess_grid(grid_id: str, dry_run: bool = False) -> dict | None:
 
     pred_gdf = gpd.GeoDataFrame(pd.concat(all_gdfs, ignore_index=True))
     if pred_gdf.crs is None:
-        pred_gdf = pred_gdf.set_crs(METRIC_CRS)
-    pred_gdf = pred_gdf.to_crs(METRIC_CRS)
+        pred_gdf = pred_gdf.set_crs(metric_crs)
+    pred_gdf = pred_gdf.to_crs(metric_crs)
 
     raw_count = len(pred_gdf)
 
@@ -175,6 +207,7 @@ def repostprocess_grid(grid_id: str, dry_run: bool = False) -> dict | None:
 
     result = {
         "grid": grid_id,
+        "region": resolved_region or "ct",
         "raw": raw_count,
         "post_filter": len(pred_gdf),
         "recovered": n_recovered,
@@ -194,12 +227,19 @@ def main():
     parser = argparse.ArgumentParser(description="Re-run post-processing with tiered confidence")
     parser.add_argument("--grids", nargs="+", help="Grid IDs to reprocess")
     parser.add_argument("--all", action="store_true", help="Reprocess all grids on D drive")
+    parser.add_argument("--region", default=None, help="区域提示，例如 jhb")
     parser.add_argument("--dry-run", action="store_true", help="Preview only, don't write files")
     args = parser.parse_args()
+    region = normalize_region(args.region)
 
     if args.all:
-        d = Path("/mnt/d/ZAsolar/results")
-        grids = sorted(g.name for g in d.iterdir() if g.is_dir() and g.name.startswith("G") and (g / "vectors").exists())
+        grids = sorted({
+            g.name
+            for root in _results_root_candidates(region)
+            if root.exists()
+            for g in root.iterdir()
+            if g.is_dir() and g.name.startswith("G") and (g / "vectors").exists()
+        })
     elif args.grids:
         grids = args.grids
     else:
@@ -209,16 +249,21 @@ def main():
     tier_desc = ", ".join(f"≥{a}m²→conf≥{t}" for a, t in CONF_TIERED)
     print(f"Tiered confidence: {tier_desc}")
     print(f"Area ≥ {MIN_OBJECT_AREA}m², elongation ≤ {MAX_ELONGATION}")
+    if region:
+        print(f"Region: {region}")
     print(f"{'Dry run' if args.dry_run else 'Writing results'}")
     print(f"Grids: {len(grids)}\n")
 
     results = []
     for gid in grids:
         print(f"Processing {gid}...")
-        r = repostprocess_grid(gid, dry_run=args.dry_run)
+        r = repostprocess_grid(gid, region=region, dry_run=args.dry_run)
         if r:
             results.append(r)
-            print(f"  raw={r['raw']} → final={r['post_filter']} (recovered={r['recovered']})")
+            print(
+                f"  region={r['region']} raw={r['raw']} → final={r['post_filter']} "
+                f"(recovered={r['recovered']})"
+            )
 
     if results:
         total_recovered = sum(r["recovered"] for r in results)

@@ -45,6 +45,8 @@ MANIFEST_COLUMNS = [
     "review_status",
     "issue_type",
     "split_scope",
+    "label_source",
+    "semantic_confidence",
 ]
 
 
@@ -83,6 +85,8 @@ def bootstrap(output_path: Path) -> None:
                 "review_status": "unreviewed",
                 "issue_type": "",
                 "split_scope": "",
+                "label_source": "human_manual_sam_assisted",
+                "semantic_confidence": "A2",
             })
 
         print(f"[MANIFEST] {grid_id}: {len(gdf)} annotations")

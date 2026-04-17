@@ -1,6 +1,7 @@
 """
-Export Cape Town solar panel annotations → COCO instance segmentation dataset.
+Export solar panel annotations → COCO instance segmentation dataset.
 
+Supports multi-region export (Cape Town, Johannesburg, or both).
 Produces 400×400 chips with 0.25 overlap from GeoTIFF tiles, matching
 annotations to chips via spatial intersection. Outputs:
   - COCO JSON (train / val)
@@ -10,6 +11,7 @@ annotations to chips via spatial intersection. Outputs:
 Usage:
     python export_coco_dataset.py [--output-dir data/coco] [--chip-size 400]
                                   [--overlap 0.25] [--seed 42]
+                                  [--regions cape_town johannesburg]
 """
 
 import argparse
@@ -29,57 +31,53 @@ from shapely.affinity import affine_transform
 from shapely.geometry import box, mapping, shape
 from shapely.ops import unary_union
 
-from core.grid_utils import get_grid_paths, normalize_grid_id, TILES_ROOT
+from core.grid_utils import get_grid_paths, normalize_grid_id, TILES_ROOT, resolve_tiles_dir
+from core.annotation_loader import discover_annotations, load_annotation_gdf, AnnotationEntry
 
-# ════════════════════════════════════════════════════════════════════════
-# Annotation sources
-# ════════════════════════════════════════════════════════════════════════
 BASE_DIR = Path(__file__).parent
-ANNOTATIONS_DIR = BASE_DIR / "data" / "annotations"
-
-CLEANED_DIR = ANNOTATIONS_DIR / "cleaned"
 
 
-def _discover_cleaned_sources() -> dict[str, dict]:
-    """Auto-discover SAM2 annotation files from cleaned/ directory.
+# ════════════════════════════════════════════════════════════════════════
+# Annotation loading (registry-based, multi-region)
+# ════════════════════════════════════════════════════════════════════════
 
-    Each *_SAM2_*.gpkg is matched to a grid ID and its first layer is used.
+def load_annotations(
+    regions: list[str] | None = None,
+    exclude_grids: set[str] | None = None,
+) -> tuple[dict[str, gpd.GeoDataFrame], dict[str, str]]:
+    """Load per-grid annotation GeoDataFrames via the annotation registry.
+
+    Returns:
+        (grid_annotations, grid_regions) where:
+        - grid_annotations: dict grid_id → GeoDataFrame (EPSG:4326)
+        - grid_regions: dict grid_id → region_key (for tile resolution)
     """
-    import fiona
+    entries = discover_annotations(regions=regions, exclude_grids=exclude_grids)
 
-    sources = {}
-    for f in sorted(CLEANED_DIR.glob("*_SAM2_*.gpkg")):
-        grid_id = f.name.split("_SAM2_")[0]
-        layers = fiona.listlayers(str(f))
-        if layers:
-            sources[grid_id] = {"file": f, "layer": layers[0]}
-    return sources
+    grid_annotations: dict[str, gpd.GeoDataFrame] = {}
+    grid_regions: dict[str, str] = {}
 
-
-def load_annotations(exclude_grids: set[str] | None = None) -> dict[str, gpd.GeoDataFrame]:
-    """Load per-grid annotation GeoDataFrames (EPSG:4326) from cleaned/ dir."""
-    sources = _discover_cleaned_sources()
-    result = {}
-    for grid_id, src in sources.items():
-        if exclude_grids and grid_id in exclude_grids:
-            print(f"[HOLDOUT] {grid_id}: excluded (benchmark holdout)")
-            continue
-        # Skip grids without tiles (check TILES_ROOT, not hardcoded path)
-        tiles_dir = TILES_ROOT / grid_id
+    for grid_id, entry in entries.items():
+        # Skip grids without tiles
+        tiles_dir = resolve_tiles_dir(grid_id, region=entry.region_key)
         if not tiles_dir.exists():
             continue
-        gdf = gpd.read_file(str(src["file"]), layer=src["layer"])
-        # Drop invalid / empty geometries
-        gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid & ~gdf.geometry.is_empty]
-        gdf = gdf.reset_index(drop=True)
-        result[grid_id] = gdf
-        print(f"[ANNOT] {grid_id}: {len(gdf)} polygons from {src['file'].name}")
-    return result
+
+        gdf = load_annotation_gdf(entry)
+        if len(gdf) == 0:
+            continue
+
+        grid_annotations[grid_id] = gdf
+        grid_regions[grid_id] = entry.region_key
+        print(f"[ANNOT] {grid_id} ({entry.region_key}): {len(gdf)} polygons "
+              f"from {entry.path.name}")
+
+    return grid_annotations, grid_regions
 
 
-def get_geo_tiles(grid_id: str) -> list[Path]:
-    """Return sorted list of *_geo.tif for a grid."""
-    tiles_dir = TILES_ROOT / grid_id
+def get_geo_tiles(grid_id: str, *, region: str | None = None) -> list[Path]:
+    """Return sorted list of *_geo.tif for a grid (region-aware)."""
+    tiles_dir = resolve_tiles_dir(grid_id, region=region)
     tiles = sorted(tiles_dir.glob(f"{grid_id}_*_*_geo.tif"))
     if not tiles:
         tiles = sorted([
@@ -391,11 +389,13 @@ def balance_chips(
 
 
 def build_coco_json(images: list[dict], annotations: list[dict], split: str,
-                    category_name: str = "solar_panel") -> dict:
+                    category_name: str = "solar_panel",
+                    regions: list[str] | None = None) -> dict:
     """Build COCO-format JSON dict."""
+    region_desc = ", ".join(regions) if regions else "Cape Town"
     return {
         "info": {
-            "description": f"Cape Town Solar Panel Detection - {split}",
+            "description": f"{region_desc} Solar Panel Detection - {split}",
             "version": "1.0",
             "year": 2026,
             "date_created": datetime.now(timezone.utc).isoformat(),
@@ -412,9 +412,252 @@ def build_coco_json(images: list[dict], annotations: list[dict], split: str,
 # ════════════════════════════════════════════════════════════════════════
 # Main
 # ════════════════════════════════════════════════════════════════════════
+def build_base_coco(params: dict) -> dict:
+    """Build a base COCO dataset from parameters.
+
+    This is the public API for programmatic use (called by the dataset
+    builder).  The CLI ``main()`` is a thin wrapper around this function.
+
+    Args:
+        params: Dict with keys matching CLI args:
+            regions, output_dir, chip_size, overlap, val_fraction, seed,
+            no_balance, manifest, tier_filter, category_name, neg_ratio,
+            exclude_grids, audit_csv, exclude_audit_labels.
+
+    Returns:
+        Dict with build results: output_dir, train_images, val_images,
+        train_annotations, val_annotations, grid_data, grid_regions.
+    """
+    regions = params.get("regions", ["cape_town"])
+    output_dir = Path(params.get("output_dir", "data/coco"))
+    chip_size = params.get("chip_size", 400)
+    overlap = params.get("overlap", 0.25)
+    val_fraction = params.get("val_fraction", 0.2)
+    seed = params.get("seed", 42)
+    no_balance = params.get("no_balance", False)
+    manifest_path_str = params.get("manifest")
+    tier_filter = params.get("tier_filter", "T1+T2")
+    category_name = params.get("category_name", "solar_panel")
+    neg_ratio = params.get("neg_ratio", 1.0)
+    exclude_grids_list = params.get("exclude_grids")
+    audit_csv_str = params.get("audit_csv")
+    exclude_audit_labels = params.get("exclude_audit_labels",
+                                      ["heater_or_non_pv", "uncertain"])
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # ── Load annotations ──────────────────────────────────────────────
+    exclude_set = set(exclude_grids_list) if exclude_grids_list else None
+    grid_annotations, grid_regions = load_annotations(
+        regions=regions, exclude_grids=exclude_set,
+    )
+
+    # ── Manifest-based tier filtering ──────────────────────────────────
+    manifest_path = Path(manifest_path_str) if manifest_path_str else None
+    if manifest_path and manifest_path.exists() and tier_filter != "T1+T2":
+        import csv as csv_mod
+        with open(manifest_path, encoding="utf-8") as f:
+            manifest_rows = list(csv_mod.DictReader(f))
+
+        # Build set of (grid_id, row_index) to keep
+        allowed_tiers = set(tier_filter.split("+"))
+        keep_set: dict[str, set[int]] = {}
+        for row in manifest_rows:
+            if row["quality_tier"] in allowed_tiers:
+                gid = row["grid_id"]
+                # annotation_id format: {grid_id}_{idx:03d}
+                idx = int(row["annotation_id"].split("_")[-1])
+                keep_set.setdefault(gid, set()).add(idx)
+
+        for gid in list(grid_annotations.keys()):
+            if gid in keep_set:
+                mask = grid_annotations[gid].index.isin(keep_set[gid])
+                before = len(grid_annotations[gid])
+                grid_annotations[gid] = grid_annotations[gid][mask].reset_index(drop=True)
+                after = len(grid_annotations[gid])
+                print(f"[TIER] {gid}: {before} → {after} (tier={tier_filter})")
+                if after == 0:
+                    print(f"[WARN] {gid} has 0 annotations after tier filter, skipping")
+                    del grid_annotations[gid]
+            else:
+                print(f"[WARN] {gid} not in manifest, removing")
+                del grid_annotations[gid]
+    elif manifest_path and manifest_path.exists():
+        print(f"[TIER] Using all tiers (T1+T2), manifest loaded: {manifest_path}")
+
+    # ── Audit-based heater filtering ──────────────────────────────────
+    if audit_csv_str:
+        audit_path = Path(audit_csv_str)
+        if not audit_path.exists():
+            print(f"[WARN] --audit-csv not found: {audit_path}")
+        else:
+            import csv as csv_mod
+            with open(audit_path, encoding="utf-8") as f:
+                audit_rows = list(csv_mod.DictReader(f))
+
+            exclude_labels_set = set(exclude_audit_labels)
+            exclude_set_audit: dict[str, set[int]] = {}
+            for row in audit_rows:
+                if row.get("audit_label", "") in exclude_labels_set:
+                    gid = row["grid_id"]
+                    ridx = int(row["row_index"])
+                    exclude_set_audit.setdefault(gid, set()).add(ridx)
+
+            total_excluded = 0
+            for gid in list(grid_annotations.keys()):
+                if gid in exclude_set_audit:
+                    before = len(grid_annotations[gid])
+                    mask = ~grid_annotations[gid].index.isin(exclude_set_audit[gid])
+                    grid_annotations[gid] = grid_annotations[gid][mask].reset_index(drop=True)
+                    after = len(grid_annotations[gid])
+                    removed = before - after
+                    total_excluded += removed
+                    if removed > 0:
+                        print(f"[AUDIT] {gid}: {before} → {after} ({removed} heater/uncertain removed)")
+                    if after == 0:
+                        print(f"[WARN] {gid} has 0 annotations after audit filter, skipping")
+                        del grid_annotations[gid]
+
+            print(f"[AUDIT] Total excluded: {total_excluded} annotations "
+                  f"(labels: {', '.join(sorted(exclude_labels_set))})")
+
+    # ── Per-grid tile split ───────────────────────────────────────────
+    all_train_stems = set()
+    all_val_stems = set()
+    # Collect per-grid data for processing
+    grid_data = {}
+
+    for grid_id, annots in grid_annotations.items():
+        region = grid_regions.get(grid_id)
+        tiles = get_geo_tiles(grid_id, region=region)
+        if not tiles:
+            print(f"[WARN] No tiles found for {grid_id}, skipping")
+            continue
+
+        tile_map = {t.stem: t for t in tiles}
+        tile_to_annots = assign_annotations_to_tiles(annots, tiles)
+        train_stems, val_stems = split_tiles(
+            tile_to_annots, val_fraction=val_fraction, seed=seed
+        )
+
+        # Verify no overlap
+        overlap_check = set(train_stems) & set(val_stems)
+        assert not overlap_check, f"Tile overlap in splits: {overlap_check}"
+
+        n_train_annots = sum(len(tile_to_annots[s]) for s in train_stems if s in tile_to_annots)
+        n_val_annots = sum(len(tile_to_annots[s]) for s in val_stems if s in tile_to_annots)
+        print(f"[SPLIT] {grid_id}: train={len(train_stems)} tiles ({n_train_annots} annots), "
+              f"val={len(val_stems)} tiles ({n_val_annots} annots)")
+
+        all_train_stems.update(train_stems)
+        all_val_stems.update(val_stems)
+        grid_data[grid_id] = {
+            "annotations": annots,
+            "tile_map": tile_map,
+            "tile_to_annots": tile_to_annots,
+            "train_stems": train_stems,
+            "val_stems": val_stems,
+            "region": region,
+        }
+
+    # ── Scan chips (metadata only, no disk writes) ──────────────────
+    for split_name, stem_attr in [("train", "train_stems"), ("val", "val_stems")]:
+        all_images = []
+        all_annots = []
+        all_prov = []
+        img_id_counter = 1
+        ann_id_counter = 1
+
+        for grid_id, gd in grid_data.items():
+            stems = gd[stem_attr]
+            for stem in stems:
+                tile_path = gd["tile_map"].get(stem)
+                if tile_path is None:
+                    continue
+                annot_indices = gd["tile_to_annots"].get(stem, [])
+                imgs, anns, prov = scan_chips_from_tile(
+                    tile_path=tile_path,
+                    annotations=gd["annotations"],
+                    annot_indices=annot_indices,
+                    chip_size=chip_size,
+                    overlap=overlap,
+                    split_name=split_name,
+                    image_id_start=img_id_counter,
+                    annot_id_start=ann_id_counter,
+                )
+                # Add region to provenance rows
+                grid_region = gd.get("region", "")
+                for p in prov:
+                    p["region"] = grid_region or ""
+                img_id_counter += len(imgs)
+                ann_id_counter += len(anns)
+                all_images.extend(imgs)
+                all_annots.extend(anns)
+                all_prov.extend(prov)
+
+        n_pos = sum(1 for img in all_images if img["positive"])
+        n_neg = len(all_images) - n_pos
+        print(f"[SCAN] {split_name}: {len(all_images)} chips "
+              f"({n_pos} positive, {n_neg} negative), {len(all_annots)} instances")
+
+        # Balance positive:negative (before writing anything to disk)
+        if not no_balance:
+            all_images, all_annots, all_prov = balance_chips(
+                all_images, all_annots, all_prov, seed=seed,
+                neg_ratio=neg_ratio,
+            )
+            n_pos2 = sum(1 for img in all_images if img["positive"])
+            n_neg2 = len(all_images) - n_pos2
+            print(f"[BALANCE] {split_name}: {len(all_images)} chips after balancing "
+                  f"({n_pos2} positive, {n_neg2} negative, ratio={neg_ratio})")
+
+        # Write only selected chips to disk
+        print(f"[WRITE] {split_name}: writing {len(all_images)} chips to disk...")
+        write_selected_chips(all_images, output_dir, chip_size)
+
+        # Write COCO JSON
+        coco = build_coco_json(all_images, all_annots, split_name,
+                              category_name=category_name,
+                              regions=regions)
+        json_path = output_dir / f"{split_name}.json"
+        json_path.write_text(
+            json.dumps(coco, indent=2) + "\n", encoding="utf-8"
+        )
+        print(f"[SAVE] {json_path} ({len(all_images)} images, {len(all_annots)} annotations)")
+
+        # Write provenance manifest
+        import csv
+        prov_path = output_dir / f"{split_name}_provenance.csv"
+        if all_prov:
+            keys = all_prov[0].keys()
+            with open(prov_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=keys)
+                writer.writeheader()
+                writer.writerows(all_prov)
+            print(f"[SAVE] {prov_path}")
+
+    # ── Summary ───────────────────────────────────────────────────────
+    print("\n" + "=" * 60)
+    print(f"Export complete! Regions: {', '.join(regions)}")
+    print(f"  Output: {output_dir}")
+    for grid_id, gd in grid_data.items():
+        print(f"  {grid_id}: train tiles = {gd['train_stems']}")
+        print(f"  {grid_id}: val tiles   = {gd['val_stems']}")
+
+    return {
+        "output_dir": output_dir,
+        "grid_data": grid_data,
+        "grid_regions": grid_regions,
+        "regions": regions,
+    }
+
+
+# ════════════════════════════════════════════════════════════════════════
+# CLI entry point
+# ════════════════════════════════════════════════════════════════════════
 def main():
     parser = argparse.ArgumentParser(
-        description="Export Cape Town annotations to COCO instance segmentation dataset"
+        description="Export solar panel annotations to COCO instance segmentation dataset"
     )
     parser.add_argument(
         "--output-dir", default="data/coco",
@@ -458,199 +701,29 @@ def main():
         default=["heater_or_non_pv", "uncertain"],
         help="Audit labels to exclude (default: heater_or_non_pv uncertain)",
     )
+    parser.add_argument(
+        "--regions", nargs="+", default=["cape_town"],
+        help="Region(s) to include (default: cape_town). "
+             "Use 'cape_town johannesburg' for multi-region export.",
+    )
     args = parser.parse_args()
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # ── Load annotations ──────────────────────────────────────────────
-    exclude_set = set(args.exclude_grids) if args.exclude_grids else None
-    grid_annotations = load_annotations(exclude_grids=exclude_set)
-
-    # ── Manifest-based tier filtering ──────────────────────────────────
-    manifest_path = Path(args.manifest) if args.manifest else None
-    if manifest_path and manifest_path.exists() and args.tier_filter != "T1+T2":
-        import csv as csv_mod
-        with open(manifest_path, encoding="utf-8") as f:
-            manifest_rows = list(csv_mod.DictReader(f))
-
-        # Build set of (grid_id, row_index) to keep
-        allowed_tiers = set(args.tier_filter.split("+"))
-        keep_set: dict[str, set[int]] = {}
-        for row in manifest_rows:
-            if row["quality_tier"] in allowed_tiers:
-                gid = row["grid_id"]
-                # annotation_id format: {grid_id}_{idx:03d}
-                idx = int(row["annotation_id"].split("_")[-1])
-                keep_set.setdefault(gid, set()).add(idx)
-
-        for gid in list(grid_annotations.keys()):
-            if gid in keep_set:
-                mask = grid_annotations[gid].index.isin(keep_set[gid])
-                before = len(grid_annotations[gid])
-                grid_annotations[gid] = grid_annotations[gid][mask].reset_index(drop=True)
-                after = len(grid_annotations[gid])
-                print(f"[TIER] {gid}: {before} → {after} (tier={args.tier_filter})")
-                if after == 0:
-                    print(f"[WARN] {gid} has 0 annotations after tier filter, skipping")
-                    del grid_annotations[gid]
-            else:
-                print(f"[WARN] {gid} not in manifest, removing")
-                del grid_annotations[gid]
-    elif manifest_path and manifest_path.exists():
-        print(f"[TIER] Using all tiers (T1+T2), manifest loaded: {manifest_path}")
-
-    # ── Audit-based heater filtering ──────────────────────────────────
-    if args.audit_csv:
-        audit_path = Path(args.audit_csv)
-        if not audit_path.exists():
-            print(f"[WARN] --audit-csv not found: {audit_path}")
-        else:
-            import csv as csv_mod
-            with open(audit_path, encoding="utf-8") as f:
-                audit_rows = list(csv_mod.DictReader(f))
-
-            exclude_labels = set(args.exclude_audit_labels)
-            exclude_set_audit: dict[str, set[int]] = {}
-            for row in audit_rows:
-                if row.get("audit_label", "") in exclude_labels:
-                    gid = row["grid_id"]
-                    ridx = int(row["row_index"])
-                    exclude_set_audit.setdefault(gid, set()).add(ridx)
-
-            total_excluded = 0
-            for gid in list(grid_annotations.keys()):
-                if gid in exclude_set_audit:
-                    before = len(grid_annotations[gid])
-                    mask = ~grid_annotations[gid].index.isin(exclude_set_audit[gid])
-                    grid_annotations[gid] = grid_annotations[gid][mask].reset_index(drop=True)
-                    after = len(grid_annotations[gid])
-                    removed = before - after
-                    total_excluded += removed
-                    if removed > 0:
-                        print(f"[AUDIT] {gid}: {before} → {after} ({removed} heater/uncertain removed)")
-                    if after == 0:
-                        print(f"[WARN] {gid} has 0 annotations after audit filter, skipping")
-                        del grid_annotations[gid]
-
-            print(f"[AUDIT] Total excluded: {total_excluded} annotations "
-                  f"(labels: {', '.join(sorted(exclude_labels))})")
-
-    # ── Per-grid tile split ───────────────────────────────────────────
-    all_train_stems = set()
-    all_val_stems = set()
-    # Collect per-grid data for processing
-    grid_data = {}
-
-    for grid_id, annots in grid_annotations.items():
-        tiles = get_geo_tiles(grid_id)
-        if not tiles:
-            print(f"[WARN] No tiles found for {grid_id}, skipping")
-            continue
-
-        tile_map = {t.stem: t for t in tiles}
-        tile_to_annots = assign_annotations_to_tiles(annots, tiles)
-        train_stems, val_stems = split_tiles(
-            tile_to_annots, val_fraction=args.val_fraction, seed=args.seed
-        )
-
-        # Verify no overlap
-        overlap_check = set(train_stems) & set(val_stems)
-        assert not overlap_check, f"Tile overlap in splits: {overlap_check}"
-
-        n_train_annots = sum(len(tile_to_annots[s]) for s in train_stems if s in tile_to_annots)
-        n_val_annots = sum(len(tile_to_annots[s]) for s in val_stems if s in tile_to_annots)
-        print(f"[SPLIT] {grid_id}: train={len(train_stems)} tiles ({n_train_annots} annots), "
-              f"val={len(val_stems)} tiles ({n_val_annots} annots)")
-
-        all_train_stems.update(train_stems)
-        all_val_stems.update(val_stems)
-        grid_data[grid_id] = {
-            "annotations": annots,
-            "tile_map": tile_map,
-            "tile_to_annots": tile_to_annots,
-            "train_stems": train_stems,
-            "val_stems": val_stems,
-        }
-
-    # ── Scan chips (metadata only, no disk writes) ──────────────────
-    for split_name, stem_attr in [("train", "train_stems"), ("val", "val_stems")]:
-        all_images = []
-        all_annots = []
-        all_prov = []
-        img_id_counter = 1
-        ann_id_counter = 1
-
-        for grid_id, gd in grid_data.items():
-            stems = gd[stem_attr]
-            for stem in stems:
-                tile_path = gd["tile_map"].get(stem)
-                if tile_path is None:
-                    continue
-                annot_indices = gd["tile_to_annots"].get(stem, [])
-                imgs, anns, prov = scan_chips_from_tile(
-                    tile_path=tile_path,
-                    annotations=gd["annotations"],
-                    annot_indices=annot_indices,
-                    chip_size=args.chip_size,
-                    overlap=args.overlap,
-                    split_name=split_name,
-                    image_id_start=img_id_counter,
-                    annot_id_start=ann_id_counter,
-                )
-                img_id_counter += len(imgs)
-                ann_id_counter += len(anns)
-                all_images.extend(imgs)
-                all_annots.extend(anns)
-                all_prov.extend(prov)
-
-        n_pos = sum(1 for img in all_images if img["positive"])
-        n_neg = len(all_images) - n_pos
-        print(f"[SCAN] {split_name}: {len(all_images)} chips "
-              f"({n_pos} positive, {n_neg} negative), {len(all_annots)} instances")
-
-        # Balance positive:negative (before writing anything to disk)
-        if not args.no_balance:
-            all_images, all_annots, all_prov = balance_chips(
-                all_images, all_annots, all_prov, seed=args.seed,
-                neg_ratio=args.neg_ratio,
-            )
-            n_pos2 = sum(1 for img in all_images if img["positive"])
-            n_neg2 = len(all_images) - n_pos2
-            print(f"[BALANCE] {split_name}: {len(all_images)} chips after balancing "
-                  f"({n_pos2} positive, {n_neg2} negative, ratio={args.neg_ratio})")
-
-        # Write only selected chips to disk
-        print(f"[WRITE] {split_name}: writing {len(all_images)} chips to disk...")
-        write_selected_chips(all_images, output_dir, args.chip_size)
-
-        # Write COCO JSON
-        coco = build_coco_json(all_images, all_annots, split_name,
-                              category_name=args.category_name)
-        json_path = output_dir / f"{split_name}.json"
-        json_path.write_text(
-            json.dumps(coco, indent=2) + "\n", encoding="utf-8"
-        )
-        print(f"[SAVE] {json_path} ({len(all_images)} images, {len(all_annots)} annotations)")
-
-        # Write provenance manifest
-        import csv
-        prov_path = output_dir / f"{split_name}_provenance.csv"
-        if all_prov:
-            keys = all_prov[0].keys()
-            with open(prov_path, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=keys)
-                writer.writeheader()
-                writer.writerows(all_prov)
-            print(f"[SAVE] {prov_path}")
-
-    # ── Summary ───────────────────────────────────────────────────────
-    print("\n" + "=" * 60)
-    print("Export complete!")
-    print(f"  Output: {output_dir}")
-    for grid_id, gd in grid_data.items():
-        print(f"  {grid_id}: train tiles = {gd['train_stems']}")
-        print(f"  {grid_id}: val tiles   = {gd['val_stems']}")
+    build_base_coco({
+        "regions": args.regions,
+        "output_dir": args.output_dir,
+        "chip_size": args.chip_size,
+        "overlap": args.overlap,
+        "val_fraction": args.val_fraction,
+        "seed": args.seed,
+        "no_balance": args.no_balance,
+        "manifest": args.manifest,
+        "tier_filter": args.tier_filter,
+        "category_name": args.category_name,
+        "neg_ratio": args.neg_ratio,
+        "exclude_grids": args.exclude_grids,
+        "audit_csv": args.audit_csv,
+        "exclude_audit_labels": args.exclude_audit_labels,
+    })
 
 
 if __name__ == "__main__":

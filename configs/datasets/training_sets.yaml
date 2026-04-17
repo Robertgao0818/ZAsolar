@@ -1,0 +1,70 @@
+# Training Set Registry — Dataset Recipe Provenance
+# 每个训练集条目记录构建参数和数据来源，供 model_registry 和 harness 追踪。
+#
+# 字段说明:
+#   id:                       唯一标识符
+#   description:              训练集描述
+#   region_scope:             覆盖区域 (对应 regions.yaml 的 region key)
+#   source_family:            标注来源族系 (哪些 label_source 参与)
+#   annotation_source_policy: 标注源选取策略（文字描述）
+#   tier_policy:              质量等级筛选策略
+#   audit_policy:             审计策略（如热水器过滤）
+#   easy_negative_ratio:      负样本比例
+#   hn_policy:                hard negative 策略
+#   output_dir:               COCO 数据集输出路径
+#   notes:                    备注（含历史实验上下文）
+
+training_sets:
+  v3c_base:
+    id: "v3c_base"
+    description: "V3 base COCO — 43 grids, batch 001-003, Cape Town only"
+    region_scope: [cape_town]
+    source_family: [human_manual_sam_assisted]
+    annotation_source_policy: "all cleaned SAM2 annotations in Capetown/"
+    tier_policy: "all tiers (T1+T2)"
+    audit_policy: null
+    easy_negative_ratio: 0.15
+    hn_policy: null
+    output_dir: "/mnt/d/ZAsolar/coco_v3_no_hn"
+    notes: >
+      Base dataset for V3-C training; no hard negatives.
+      Historical benchmark used cape_town_independent_26 (26 grids) as holdout.
+
+  v3c_targeted_hn:
+    id: "v3c_targeted_hn"
+    description: "V3-C with batch 003 targeted HN"
+    region_scope: [cape_town]
+    source_family: [human_manual_sam_assisted]
+    annotation_source_policy: "v3c_base + batch 003 FP hard negatives"
+    tier_policy: "all tiers (T1+T2)"
+    audit_policy: null
+    easy_negative_ratio: 0.15
+    hn_policy: "batch 003 reviewed FPs (export_targeted_hn.py)"
+    output_dir: "/mnt/d/ZAsolar/coco_v3_targeted_hn"
+    notes: "5623 images total; produced V3-C-HN checkpoint"
+
+  v4_base:
+    id: "v4_base"
+    description: "V4 base COCO — 68 grids, batch 001-004"
+    region_scope: [cape_town]
+    source_family: [human_manual_sam_assisted]
+    annotation_source_policy: "all cleaned SAM2 annotations in Capetown/"
+    tier_policy: "all tiers (T1+T2)"
+    audit_policy: null
+    easy_negative_ratio: 0.15
+    hn_policy: null
+    output_dir: "/mnt/d/ZAsolar/coco_v4_base"
+    notes: "Expanded with batch 004 (25 additional grids)"
+
+  v4_1_hn:
+    id: "v4_1_hn"
+    description: "V4.1 combined HN — batch 003 + batch 004 hard negatives"
+    region_scope: [cape_town]
+    source_family: [human_manual_sam_assisted]
+    annotation_source_policy: "v4_base + combined targeted HN"
+    tier_policy: "all tiers (T1+T2)"
+    audit_policy: null
+    easy_negative_ratio: 0.15
+    hn_policy: "batch 003 (ID 900000+) + batch 004 (ID 950000+)"
+    output_dir: "/mnt/d/ZAsolar/coco_v4_1_hn"
+    notes: "15.7% targeted HN ratio; produced V4.1-HN checkpoint"

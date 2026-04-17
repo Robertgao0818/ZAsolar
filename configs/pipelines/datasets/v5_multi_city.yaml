@@ -1,0 +1,45 @@
+# V5 Multi-City — Future Recipe (Track 2)
+#
+# First multi-region training dataset: Cape Town + Johannesburg.
+# No holdout exclusion — evaluation uses parallel-RA independent
+# annotation (a second RA annotates evaluation grids separately).
+
+schema_version: 1
+name: v5_multi_city
+build_family: detector_train
+regions: [cape_town, johannesburg]
+evaluation_regime: parallel_ra_independent_eval
+
+selection:
+  # No exclude_grids — all annotated grids go into training.
+  tier_filter: T1+T2
+  audit_csv: results/analysis/gt_heater_audit/heater_20260405_2141/audit_labels_phase1.csv
+  exclude_audit_labels: [heater_or_non_pv, uncertain]
+
+chip:
+  size: 400
+  overlap: 0.25
+
+split:
+  strategy: tile_greedy_by_annotation_count
+  val_fraction: 0.2
+  seed: 42
+
+negatives:
+  easy_neg_ratio: 0.15
+
+hard_negatives:
+  - type: reviewed_fp_hn
+    region: cape_town
+    grids:
+      - G1682
+      - G1683
+      - G1685
+      - G1686
+      - G1687
+      - G1688
+    max_ratio: 0.10
+
+output:
+  root: ${SOLAR_ARTIFACT_ROOT:-/mnt/d/ZAsolar}
+  name_template: "coco_{name}_{date}"

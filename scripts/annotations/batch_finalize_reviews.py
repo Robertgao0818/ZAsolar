@@ -24,7 +24,7 @@ from PIL import Image
 BASE_DIR = Path(__file__).resolve().parents[2]
 TILES_ROOT = Path("/mnt/d/ZAsolar/tiles")
 RESULTS_DIR = BASE_DIR / "results"
-CLEANED_DIR = BASE_DIR / "data" / "annotations" / "cleaned"
+CLEANED_DIR = BASE_DIR / "data" / "annotations" / "Capetown"
 THUMBNAILS_ROOT = Path("/mnt/d/ZAsolar/review_thumbnails")
 
 # Date suffix for cleaned filenames
@@ -32,7 +32,7 @@ DATE_SUFFIX = datetime.now().strftime("%y%m%d")
 
 
 def find_pending_grids() -> list[str]:
-    """Find grids with review files but no cleaned output."""
+    """Find Cape Town grids with review files but no cleaned output."""
     pending = []
     for review_dir in sorted(RESULTS_DIR.glob("G*/review")):
         grid_id = review_dir.parent.name

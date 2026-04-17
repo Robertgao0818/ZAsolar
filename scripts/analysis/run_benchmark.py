@@ -35,6 +35,11 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from core.grid_utils import get_results_root, normalize_region
+
 DEFAULT_PRESET = ROOT / "configs" / "benchmarks" / "post_train.yaml"
 MODEL_REGISTRY = ROOT / "configs" / "model_registry.yaml"
 DETECT_SCRIPT = ROOT / "detect_and_evaluate.py"
@@ -181,6 +186,10 @@ def build_output_subdir(run_id: str, tag: str) -> str:
     return f"benchmark_{run_id}_{tag}"
 
 
+def get_suite_region(suite: dict) -> str | None:
+    return normalize_region(suite.get("region"))
+
+
 def run_one_grid(
     *,
     model: dict,
@@ -207,6 +216,10 @@ def run_one_grid(
         "--evaluation-profile", args.get("evaluation_profile", "installation"),
         "--data-scope", suite.get("data_scope", "full_grid"),
     ]
+
+    suite_region = get_suite_region(suite)
+    if suite_region:
+        cmd += ["--region", suite_region]
 
     # Postproc config
     postproc = preset.get("postproc_config")
@@ -260,7 +273,7 @@ def collect_grid_metrics(
 ) -> dict | None:
     """Read metrics CSVs for one model x one grid. Returns None if missing."""
     subdir = build_output_subdir(run_id, model["tag"])
-    result_dir = ROOT / "results" / grid_id / subdir
+    result_dir = get_results_root(get_suite_region(suite)) / grid_id / subdir
 
     # Presence metrics (required)
     presence_csv = result_dir / "presence_metrics.csv"
@@ -291,6 +304,7 @@ def collect_grid_metrics(
         "suite_id": suite["suite_id"],
         "suite_role": suite.get("role", ""),
         "leakage_risk": suite.get("leakage_risk", ""),
+        "region": get_suite_region(suite) or "",
         "grid_id": grid_id,
         "output_subdir": subdir,
         "gt_count": gt,

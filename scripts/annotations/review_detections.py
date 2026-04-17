@@ -38,16 +38,117 @@ import geopandas as gpd
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import rasterio
-from rasterio.transform import from_bounds
-from shapely.geometry import box, mapping
+from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, box
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.grid_utils import (
-    TILES_ROOT,
     get_grid_spec,
     get_tile_bounds,
     normalize_grid_id,
+    normalize_region,
+    resolve_tiles_dir,
 )
+
+# ── SAM 2.1 integration (lazy loaded) ──
+SAM_CHECKPOINT = Path("/mnt/c/Users/gaosh/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins/GeoOSAM/sam2/checkpoints/sam2.1_hiera_large.pt")
+SAM_CONFIG = "configs/sam2.1/sam2.1_hiera_l"
+
+_sam_predictor = None
+_sam_available: bool | None = None  # None = not checked
+_sam_current_tile: str | None = None
+_sam_tile_cache: dict[str, np.ndarray] = {}
+
+
+def _sam_ensure_loaded() -> bool:
+    """Lazy-load SAM 2.1.  Returns True if SAM is ready."""
+    global _sam_predictor, _sam_available
+    if _sam_available is not None:
+        return _sam_available
+    if not SAM_CHECKPOINT.exists():
+        print("[SAM] Checkpoint not found, SAM disabled")
+        _sam_available = False
+        return False
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            print("[SAM] No CUDA, SAM disabled")
+            _sam_available = False
+            return False
+        from sam2.build_sam import build_sam2
+        from sam2.sam2_image_predictor import SAM2ImagePredictor
+        print("[SAM] Loading SAM 2.1 Large...")
+        sam2 = build_sam2(SAM_CONFIG, str(SAM_CHECKPOINT), device="cuda")
+        _sam_predictor = SAM2ImagePredictor(sam2)
+        _sam_available = True
+        print("[SAM] Ready")
+        return True
+    except Exception as e:
+        print(f"[SAM] Failed to load: {e}")
+        _sam_available = False
+        return False
+
+
+def _sam_segment(tile_path: str, positive_points: list, negative_points: list):
+    """Run SAM segmentation.  Returns (mask, score).  Caches tile embedding."""
+    global _sam_current_tile
+    # Cache tile array
+    img_array = _sam_tile_cache.get(tile_path)
+    if img_array is None:
+        with rasterio.open(tile_path) as src:
+            img_array = np.moveaxis(src.read()[:3], 0, -1)
+        _sam_tile_cache[tile_path] = img_array
+        if len(_sam_tile_cache) > 8:
+            _sam_tile_cache.pop(next(iter(_sam_tile_cache)))
+    # Set image only if tile changed
+    if _sam_current_tile != tile_path:
+        _sam_predictor.set_image(img_array)
+        _sam_current_tile = tile_path
+    points = positive_points + negative_points
+    labels = [1] * len(positive_points) + [0] * len(negative_points)
+    # SAM2: use multimask only for single-point prompts; for multi-point
+    # (including negative points) use single-mask mode so negatives are respected.
+    multi = len(points) == 1
+    masks, scores, _ = _sam_predictor.predict(
+        point_coords=np.array(points, dtype=np.float32),
+        point_labels=np.array(labels, dtype=np.int32),
+        multimask_output=multi,
+    )
+    best = int(np.argmax(scores))
+    return masks[best], float(scores[best])
+
+
+def _mask_to_pixel_coords(mask: np.ndarray) -> list[list[float]] | None:
+    """Convert binary mask to pixel-coord polygon (largest component)."""
+    from rasterio.features import shapes as rio_shapes
+    from rasterio.transform import Affine
+    polys = []
+    for geom, val in rio_shapes(mask.astype(np.uint8), mask=mask > 0,
+                                 transform=Affine.identity()):
+        if val > 0:
+            p = Polygon(geom["coordinates"][0])
+            if p.is_valid and p.area > 0:
+                polys.append(p)
+    if not polys:
+        return None
+    biggest = max(polys, key=lambda p: p.area)
+    return [[round(x, 1), round(y, 1)] for x, y in biggest.exterior.coords]
+
+
+def _mask_to_geo_polygon(mask: np.ndarray, tile_path: str) -> Polygon | None:
+    """Convert binary mask to EPSG:4326 polygon using tile geotransform."""
+    from rasterio.features import shapes as rio_shapes
+    with rasterio.open(tile_path) as src:
+        tf = src.transform
+    polys = []
+    for geom, val in rio_shapes(mask.astype(np.uint8), mask=mask > 0, transform=tf):
+        if val > 0:
+            p = Polygon(geom["coordinates"][0])
+            if p.is_valid and p.area > 0:
+                polys.append(p)
+    if not polys:
+        return None
+    return max(polys, key=lambda p: p.area)
+
 
 STATUS_VALUES = {"correct", "delete", "edit", ""}
 STATUS_COLORS = {
@@ -71,13 +172,17 @@ def utc_now_iso() -> str:
 class DetectionReviewStore:
     """Manages prediction review state for one or more grids."""
 
-    def __init__(self, grid_ids: list[str], pred_paths: list[Path], tiles_dirs: list[Path]):
+    def __init__(self, grid_ids: list[str], pred_paths: list[Path], tiles_dirs: list[Path],
+                 region: str | None = None):
         self.grid_ids = grid_ids
+        self._region = region
         # Map grid_id → tiles_dir for tile image lookup
         self._tiles_dirs: dict[str, Path] = {gid: td for gid, td in zip(grid_ids, tiles_dirs)}
         # Map grid_id → review_dir for per-grid persistence
         self._review_dirs: dict[str, Path] = {}
         self._decisions_paths: dict[str, Path] = {}
+        self._tile_meta_cache: dict[str, dict[str, object]] = {}
+        self._grid_tile_boxes_cache: dict[str, list[tuple[str, object]]] = {}
 
         # Load and merge predictions from all grids
         frames = []
@@ -101,7 +206,8 @@ class DetectionReviewStore:
         # Build tile → predictions index (using each prediction's source grid)
         self._specs: dict[str, object] = {}
         for gid in grid_ids:
-            self._specs[gid] = get_grid_spec(gid)
+            self._specs[gid] = get_grid_spec(gid, region=region)
+        self._filter_buffer_only_preds()
         self.tile_preds = self._index_by_tile()
         self.decisions = self._load_decisions()
         # Seed from review_status column if present
@@ -123,27 +229,116 @@ class DetectionReviewStore:
         parts = tile_key.rsplit("_", 2)
         return parts[0] if len(parts) == 3 else self.grid_ids[0]
 
+    def _get_tile_meta(self, tile_key: str) -> dict[str, object] | None:
+        """Return cached raster metadata for a tile."""
+        if tile_key in self._tile_meta_cache:
+            return self._tile_meta_cache[tile_key]
+
+        geo_path = self._resolve_tile_path(tile_key)
+        if geo_path is None:
+            return None
+
+        with rasterio.open(geo_path) as ds:
+            meta = {
+                "path": geo_path,
+                "bounds": ds.bounds,
+                "width": ds.width,
+                "height": ds.height,
+                "transform": ds.transform,
+                "tile_box": box(ds.bounds.left, ds.bounds.bottom, ds.bounds.right, ds.bounds.top),
+            }
+        self._tile_meta_cache[tile_key] = meta
+        return meta
+
+    def _grid_tile_boxes(self, gid: str) -> list[tuple[str, object]]:
+        """Return tile bounding boxes for a grid, preferring raster-native bounds."""
+        if gid in self._grid_tile_boxes_cache:
+            return self._grid_tile_boxes_cache[gid]
+
+        spec = self._specs[gid]
+        boxes = []
+        for col in range(spec.n_cols):
+            for row in range(spec.n_rows):
+                tile_key = f"{gid}_{col}_{row}"
+                meta = self._get_tile_meta(tile_key)
+                if meta is not None:
+                    tile_box = meta["tile_box"]
+                else:
+                    txmin, tymin, txmax, tymax = get_tile_bounds(spec, col, row)
+                    tile_box = box(txmin, tymin, txmax, tymax)
+                boxes.append((tile_key, tile_box))
+        self._grid_tile_boxes_cache[gid] = boxes
+        return boxes
+
+    @staticmethod
+    def _polygonal_geom(geom):
+        """Keep only polygonal parts of a geometry collection/intersection result."""
+        if geom is None or geom.is_empty:
+            return None
+        if isinstance(geom, Polygon):
+            return geom if geom.area > 0 else None
+        if isinstance(geom, MultiPolygon):
+            parts = [g for g in geom.geoms if g.area > 0]
+            if not parts:
+                return None
+            return parts[0] if len(parts) == 1 else MultiPolygon(parts)
+        if isinstance(geom, GeometryCollection):
+            parts = []
+            for g in geom.geoms:
+                poly = DetectionReviewStore._polygonal_geom(g)
+                if poly is None:
+                    continue
+                if isinstance(poly, Polygon):
+                    parts.append(poly)
+                else:
+                    parts.extend([p for p in poly.geoms if p.area > 0])
+            if not parts:
+                return None
+            return parts[0] if len(parts) == 1 else MultiPolygon(parts)
+        return None
+
+    @staticmethod
+    def _largest_ring(geom) -> list[tuple[float, float]] | None:
+        """Return the largest exterior ring from a polygonal geometry."""
+        poly = DetectionReviewStore._polygonal_geom(geom)
+        if poly is None:
+            return None
+        if isinstance(poly, Polygon):
+            return list(poly.exterior.coords)
+        largest = max(poly.geoms, key=lambda g: g.area)
+        return list(largest.exterior.coords)
+
+    def _filter_buffer_only_preds(self) -> None:
+        """Remove predictions whose centroid falls outside ALL tile bounds for their grid.
+        These are buffer-zone artifacts that cannot be visually reviewed."""
+        to_drop = []
+        for idx, row in self.pred_gdf.iterrows():
+            geom = row.geometry
+            if geom is None:
+                to_drop.append(idx)
+                continue
+            gid = row["_source_grid"]
+            centroid = geom.centroid
+            inside = False
+            for _, tile_box in self._grid_tile_boxes(gid):
+                if tile_box.covers(centroid):
+                    inside = True
+                    break
+            if not inside:
+                to_drop.append(idx)
+        if to_drop:
+            print(f"  Filtered {len(to_drop)} buffer-only predictions (not visible on any tile)")
+            self.pred_gdf = self.pred_gdf.drop(to_drop).reset_index(drop=True)
+
     def _index_by_tile(self) -> dict[str, list[int]]:
         """Map each prediction to ALL tiles whose bounds intersect the polygon.
         This ensures edge-crossing predictions are visible on every relevant tile."""
-        from shapely.geometry import box as shp_box
-        _BUFFER = 0.00005  # ~5m in degrees, absorbs CRS reprojection drift
         tile_preds: dict[str, list[int]] = {}
         unmatched = 0
 
-        # Pre-compute tile boxes per grid
-        tile_boxes: dict[str, list[tuple[str, object]]] = {}
-        for gid in self.grid_ids:
-            spec = self._specs[gid]
-            boxes = []
-            for col in range(spec.n_cols):
-                for r in range(spec.n_rows):
-                    txmin, tymin, txmax, tymax = get_tile_bounds(spec, col, r)
-                    tile_key = f"{gid}_{col}_{r}"
-                    tile_box = shp_box(txmin - _BUFFER, tymin - _BUFFER,
-                                       txmax + _BUFFER, tymax + _BUFFER)
-                    boxes.append((tile_key, tile_box))
-            tile_boxes[gid] = boxes
+        tile_boxes: dict[str, list[tuple[str, object]]] = {
+            gid: self._grid_tile_boxes(gid) for gid in self.grid_ids
+        }
 
         for idx, row in self.pred_gdf.iterrows():
             geom = row.geometry
@@ -154,7 +349,8 @@ class DetectionReviewStore:
 
             # Check intersection with every tile in this grid
             for tile_key, tile_box in tile_boxes[gid]:
-                if geom.intersects(tile_box):
+                clipped = self._polygonal_geom(geom.intersection(tile_box))
+                if clipped is not None:
                     tile_preds.setdefault(tile_key, []).append(idx)
                     matched = True
 
@@ -228,6 +424,9 @@ class DetectionReviewStore:
         tiles = []
         seen = set()
         for tile_key in sorted(self.tile_preds.keys()):
+            # Skip tiles with no imagery file (e.g. narrow edge columns)
+            if self._resolve_tile_path(tile_key) is None:
+                continue
             pred_indices = self.tile_preds[tile_key]
             n_total = len(pred_indices)
             n_reviewed = sum(1 for i in pred_indices if str(i) in self.decisions and self.decisions[str(i)])
@@ -362,14 +561,10 @@ class DetectionReviewStore:
 
     def _tile_pixel_to_geo(self, tile_key: str, px: float, py: float) -> tuple[float, float] | None:
         """Convert pixel coords to geographic coords for a tile."""
-        geo_path = self._resolve_tile_path(tile_key)
-        if geo_path is None:
+        meta = self._get_tile_meta(tile_key)
+        if meta is None:
             return None
-        with rasterio.open(geo_path) as ds:
-            bounds = ds.bounds
-            w, h = ds.width, ds.height
-        lon = bounds.left + (px / w) * (bounds.right - bounds.left)
-        lat = bounds.top - (py / h) * (bounds.top - bounds.bottom)
+        lon, lat = meta["transform"] * (px, py)
         return (lon, lat)
 
     def export_fn_markers_gpkg(self) -> list[Path]:
@@ -395,6 +590,73 @@ class DetectionReviewStore:
             print(f"  Exported {len(gdf)} FN markers to {out}")
             paths.append(out)
         return paths
+
+    # ── SAM polygon acceptance / undo ──
+    _last_sam_accept: dict | None = None  # for undo
+
+    def accept_sam_polygon(self, tile_key: str, geo_polygon: Polygon) -> int:
+        """Add a SAM-segmented polygon as a new correct prediction.  Returns new pred_id."""
+        import pandas as pd
+        gid = self._grid_id_for_tile(tile_key)
+        # Compute area in metric CRS
+        import pyproj
+        from shapely.ops import transform as shp_transform
+        spec = self._specs[gid]
+        metric_crs = str(spec.crs_metric) if hasattr(spec, "crs_metric") else "EPSG:32734"
+        try:
+            tfm = pyproj.Transformer.from_crs("EPSG:4326", metric_crs, always_xy=True)
+            metric_poly = shp_transform(tfm.transform, geo_polygon)
+            area_m2 = metric_poly.area
+        except Exception:
+            area_m2 = 0.0
+
+        new_row = {
+            "geometry": geo_polygon,
+            "confidence": 1.0,
+            "area_m2": area_m2,
+            "source": "sam_fn_review",
+            "review_status": "correct",
+            "_source_grid": gid,
+        }
+        new_idx = len(self.pred_gdf)
+        self.pred_gdf = gpd.GeoDataFrame(
+            pd.concat([self.pred_gdf, gpd.GeoDataFrame([new_row], crs="EPSG:4326")],
+                      ignore_index=True),
+            crs="EPSG:4326",
+        )
+        # Update tile index
+        meta = self._get_tile_meta(tile_key)
+        if meta:
+            tile_box = meta["tile_box"]
+            clipped = self._polygonal_geom(geo_polygon.intersection(tile_box))
+            if clipped:
+                self.tile_preds.setdefault(tile_key, []).append(new_idx)
+        # Mark as correct
+        self.decisions[str(new_idx)] = "correct"
+        self._write_decisions()
+        self._last_sam_accept = {"idx": new_idx, "tile_key": tile_key}
+        return new_idx
+
+    def undo_last_sam_polygon(self) -> bool:
+        """Remove the last SAM-accepted polygon. Returns True if undone."""
+        if self._last_sam_accept is None:
+            print("[SAM-UNDO] Nothing to undo")
+            return False
+        idx = self._last_sam_accept["idx"]
+        tile_key = self._last_sam_accept["tile_key"]
+        print(f"[SAM-UNDO] Removing pred #{idx} from tile {tile_key}")
+        # Remove from all tile indices
+        for tk, preds in self.tile_preds.items():
+            if idx in preds:
+                preds.remove(idx)
+        # Remove decision
+        self.decisions.pop(str(idx), None)
+        # Drop from pred_gdf (last row, no reindex needed)
+        if idx in self.pred_gdf.index:
+            self.pred_gdf = self.pred_gdf.drop(index=idx)
+        self._write_decisions()
+        self._last_sam_accept = None
+        return True
 
     def render_base_tile(self, tile_key: str) -> bytes:
         """Return base tile image as JPEG (no overlays — overlays drawn client-side)."""
@@ -427,13 +689,12 @@ class DetectionReviewStore:
 
     def get_tile_polygons(self, tile_key: str) -> list[dict]:
         """Return prediction polygons as pixel-coordinate arrays for client-side rendering."""
-        geo_path = self._resolve_tile_path(tile_key)
-        if geo_path is None:
+        meta = self._get_tile_meta(tile_key)
+        if meta is None:
             return []
 
-        with rasterio.open(geo_path) as ds:
-            bounds = ds.bounds
-            w, h = ds.width, ds.height
+        tile_box = meta["tile_box"]
+        transform = meta["transform"]
 
         indices = self.tile_preds.get(tile_key, [])
         polys = []
@@ -443,17 +704,13 @@ class DetectionReviewStore:
             if geom is None:
                 continue
 
-            if geom.geom_type == "Polygon":
-                ring = list(geom.exterior.coords)
-            elif geom.geom_type == "MultiPolygon":
-                ring = list(geom.geoms[0].exterior.coords)
-            else:
+            ring = self._largest_ring(geom.intersection(tile_box))
+            if not ring:
                 continue
 
             coords = []
             for x, y in ring:
-                px = (x - bounds.left) / (bounds.right - bounds.left) * w
-                py = (bounds.top - y) / (bounds.top - bounds.bottom) * h
+                px, py = (~transform) * (x, y)
                 coords.append([round(px, 1), round(py, 1)])
 
             status = self.decisions.get(str(idx), "")
@@ -674,8 +931,15 @@ def build_html() -> str:
         <span class="kbd">E</span> edit,
         <span class="kbd">C</span> clear<br>
         <span class="kbd">Q</span> all correct (quick pass)<br>
-        <span class="kbd">M</span> toggle FN marker mode (click to place, right-click to remove)<br>
-        <span class="kbd">&larr;</span>/<span class="kbd">&rarr;</span> prev/next tile
+        <span class="kbd">M</span> toggle SAM FN mode<br>
+        <span class="kbd">&larr;</span>/<span class="kbd">&rarr;</span> prev/next tile<br>
+        <hr style="border:0;border-top:1px solid #efe5d6;margin:6px 0;">
+        <b>SAM FN mode:</b><br>
+        Left-click: + point, Right-click: - point<br>
+        <span class="kbd">Enter</span>/<span class="kbd">A</span> accept polygon<br>
+        <span class="kbd">Z</span> undo last accept<br>
+        <span class="kbd">Esc</span> reject,
+        <span class="kbd">R</span> reset points
       </div>
     </div>
   </div>
@@ -694,6 +958,9 @@ let tiles=[], visible=[], currentIdx=0;
 let polys=[], selectedIdx=-1;
 let baseImage=null, markers=[];
 let markerMode=false;
+let samAvailable=false;
+let samPolygon=null;   // {coords:[[x,y],...], score, area_m2}
+let samPoints={pos:[], neg:[]};  // pixel coords for display
 const canvas = document.getElementById("tileCanvas");
 const ctx = canvas.getContext("2d");
 
@@ -704,6 +971,9 @@ const MIN_SCALE=0.5, MAX_SCALE=12;
 
 function updateMarkerBtn() {
   const btn=document.getElementById("markerBtn");
+  btn.innerHTML = samAvailable
+    ? (markerMode ? 'SAM FN <span class="kbd">M</span>' : 'SAM FN <span class="kbd">M</span>')
+    : 'Mark FN <span class="kbd">M</span>';
   if(markerMode) {
     btn.style.background="#fef3c7"; btn.style.fontWeight="700";
     canvas.style.cursor="cell";
@@ -711,6 +981,12 @@ function updateMarkerBtn() {
     btn.style.background="#fff"; btn.style.fontWeight="normal";
     canvas.style.cursor="crosshair";
   }
+}
+
+function clearSamState() {
+  samPolygon=null; samPoints={pos:[],neg:[]};
+  fetch("/api/sam_clear",{method:"POST"});
+  drawCanvas();
 }
 
 function resetView() { scale=1; panX=0; panY=0; resizeCanvas(); }
@@ -792,6 +1068,7 @@ function updateSummary() {
 
 async function loadCurrentTile() {
   selectedIdx=-1;
+  samPolygon=null; samPoints={pos:[],neg:[]};
   updateSummary();
   const tile=visible[currentIdx];
   if(!tile){document.getElementById("tileKey").textContent="No tiles";return;}
@@ -912,16 +1189,60 @@ function drawCanvas() {
     ctx.fillText("FN",mx,my);
   });
 
+  // Draw SAM polygon (cyan) + prompt points
+  if(samPolygon && samPolygon.coords) {
+    ctx.beginPath();
+    samPolygon.coords.forEach(([x,y],j) => { j===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+    ctx.closePath();
+    ctx.fillStyle="rgba(0,220,220,0.25)";
+    ctx.fill();
+    ctx.strokeStyle="#00e5e5";
+    ctx.lineWidth=Math.max(2, 3/scale);
+    ctx.stroke();
+    // Area label
+    const fs2=Math.max(10, 14/scale);
+    let cx2=0,cy2=0;
+    samPolygon.coords.forEach(([x,y])=>{cx2+=x;cy2+=y;});
+    cx2/=samPolygon.coords.length; cy2/=samPolygon.coords.length;
+    ctx.font=`bold ${fs2}px Georgia`;
+    ctx.fillStyle="rgba(0,0,0,0.7)";
+    const label2=`${samPolygon.area_m2.toFixed(1)}m²`;
+    const tw2=ctx.measureText(label2).width;
+    ctx.fillRect(cx2-tw2/2-4, cy2-fs2/2-3, tw2+8, fs2+6);
+    ctx.fillStyle="#00e5e5";
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText(label2, cx2, cy2);
+  }
+  // SAM prompt points
+  if(samPoints.pos.length || samPoints.neg.length) {
+    const pr=Math.max(4, 6/scale);
+    samPoints.pos.forEach(([x,y]) => {
+      ctx.beginPath(); ctx.arc(x,y,pr,0,Math.PI*2);
+      ctx.fillStyle="lime"; ctx.fill();
+      ctx.strokeStyle="#fff"; ctx.lineWidth=Math.max(1,1.5/scale); ctx.stroke();
+    });
+    samPoints.neg.forEach(([x,y]) => {
+      ctx.beginPath(); ctx.arc(x,y,pr,0,Math.PI*2);
+      ctx.fillStyle="red"; ctx.fill();
+      ctx.strokeStyle="#fff"; ctx.lineWidth=Math.max(1,1.5/scale); ctx.stroke();
+    });
+  }
+
   ctx.restore();
 
-  // Marker mode indicator
+  // Marker/SAM mode indicator
   if(markerMode) {
-    ctx.fillStyle="rgba(249,115,22,0.85)";
-    ctx.fillRect(cw-130,8,122,26);
-    ctx.fillStyle="#fff";
+    const hasActive = samPolygon && samPolygon.coords;
+    const txt = hasActive ? "SAM ACTIVE — Enter=accept, Esc=clear"
+                : (samAvailable ? "SAM FN MODE — click to segment" : "FN MARKER MODE");
+    const bg = hasActive ? "rgba(0,180,180,0.9)" : "rgba(249,115,22,0.85)";
     ctx.font="bold 13px Georgia";
+    const tw3 = ctx.measureText(txt).width;
+    ctx.fillStyle=bg;
+    ctx.fillRect(cw-tw3-24,8,tw3+16,26);
+    ctx.fillStyle="#fff";
     ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText("FN MARKER MODE",cw-69,21);
+    ctx.fillText(txt, cw-tw3/2-16, 21);
   }
 
   // Zoom indicator
@@ -1021,12 +1342,31 @@ canvas.addEventListener("mouseup", e => {
   isDragging = false;
   canvas.style.cursor = "crosshair";
 
+  // Right-click is handled by contextmenu; ignore here so it doesn't double-fire as a left-click
+  // (would add a positive SAM point at the same pixel as the negative point and cancel it out)
+  if(e.button !== 0) return;
+
   // If barely moved, treat as click
   if(dx < 4 && dy < 4) {
     const [ix, iy] = screenToImage(e.clientX, e.clientY);
 
-    if(markerMode) {
-      // Place FN marker
+    if(markerMode && samAvailable) {
+      // SAM FN mode: click → segment
+      const tile=visible[currentIdx];
+      if(tile) {
+        fetch("/api/sam_click", {
+          method:"POST", headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({tile_key:tile.tile_key, px:Math.round(ix), py:Math.round(iy), button:"left"})
+        }).then(r=>r.json()).then(d=>{
+          if(d.polygon) {
+            samPolygon={coords:d.polygon, score:d.score, area_m2:d.area_m2};
+            samPoints={pos:d.pos||[], neg:d.neg||[]};
+            drawCanvas();
+          }
+        });
+      }
+    } else if(markerMode) {
+      // Legacy marker mode (no SAM)
       const tile=visible[currentIdx];
       if(tile) {
         fetch("/api/add_marker", {
@@ -1055,18 +1395,32 @@ canvas.addEventListener("mouseup", e => {
 
 canvas.addEventListener("mouseleave", () => { isDragging=false; canvas.style.cursor=markerMode?"cell":"crosshair"; });
 
-// Right-click to remove nearest FN marker
+// Right-click: SAM negative point or remove FN marker
 canvas.addEventListener("contextmenu", e => {
   e.preventDefault();
   if(!markerMode) return;
   const [ix, iy] = screenToImage(e.clientX, e.clientY);
   const tile=visible[currentIdx];
   if(!tile) return;
-  fetch("/api/remove_marker", {
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({tile_key:tile.tile_key, px:ix, py:iy})
-  }).then(()=>fetch(`/api/tile_markers/${tile.tile_key}`))
-    .then(r=>r.json()).then(d=>{markers=d; drawCanvas();});
+  if(samAvailable) {
+    // SAM negative point
+    fetch("/api/sam_click", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({tile_key:tile.tile_key, px:Math.round(ix), py:Math.round(iy), button:"right"})
+    }).then(r=>r.json()).then(d=>{
+      if(d.polygon) {
+        samPolygon={coords:d.polygon, score:d.score, area_m2:d.area_m2};
+        samPoints={pos:d.pos||[], neg:d.neg||[]};
+        drawCanvas();
+      }
+    });
+  } else {
+    fetch("/api/remove_marker", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({tile_key:tile.tile_key, px:ix, py:iy})
+    }).then(()=>fetch(`/api/tile_markers/${tile.tile_key}`))
+      .then(r=>r.json()).then(d=>{markers=d; drawCanvas();});
+  }
 });
 
 // Double-click to reset view
@@ -1134,13 +1488,65 @@ document.addEventListener("keydown", e => {
   switch(e.key) {
     case "ArrowLeft":  if(currentIdx>0){currentIdx--;loadCurrentTile();} e.preventDefault(); break;
     case "ArrowRight": if(currentIdx<visible.length-1){currentIdx++;loadCurrentTile();} e.preventDefault(); break;
-    case "a": case "A": setSelectedStatus("correct"); e.preventDefault(); break;
+    case "a": case "A":
+      if(markerMode && samPolygon && samPolygon.coords) {
+        // Accept SAM polygon
+        fetch("/api/sam_accept",{method:"POST"}).then(r=>r.json()).then(d=>{
+          samPolygon=null; samPoints={pos:[],neg:[]};
+          loadCurrentTile();  // refresh to show new polygon
+        });
+      } else { setSelectedStatus("correct"); }
+      e.preventDefault(); break;
     case "d":           setSelectedStatus("delete"); e.preventDefault(); break;
     case "e": case "E": setSelectedStatus("edit"); e.preventDefault(); break;
     case "c":           setSelectedStatus(""); e.preventDefault(); break;
     case "q": case "Q": markAllTile("correct"); e.preventDefault(); break;
-    case "m": case "M": markerMode=!markerMode; updateMarkerBtn(); drawCanvas(); e.preventDefault(); break;
-    case "Escape":      selectedIdx=-1; markerMode=false; updateMarkerBtn(); resetView(); renderPredList(); e.preventDefault(); break;
+    case "m": case "M":
+      markerMode=!markerMode;
+      if(!markerMode) clearSamState();
+      updateMarkerBtn(); drawCanvas(); e.preventDefault(); break;
+    case "Escape":
+      if(samPolygon) { clearSamState(); }
+      else { selectedIdx=-1; markerMode=false; updateMarkerBtn(); resetView(); renderPredList(); }
+      e.preventDefault(); break;
+    case "Enter":
+      if(markerMode && samPolygon && samPolygon.coords) {
+        fetch("/api/sam_accept",{method:"POST"}).then(r=>r.json()).then(d=>{
+          samPolygon=null; samPoints={pos:[],neg:[]};
+          loadCurrentTile();
+        });
+        e.preventDefault();
+      }
+      break;
+    case "r": case "R":
+      if(markerMode && samAvailable && samPoints.pos.length>0) {
+        // Reset to last positive point only
+        const lastPt = samPoints.pos[samPoints.pos.length-1];
+        const tile=visible[currentIdx];
+        if(tile) {
+          fetch("/api/sam_clear",{method:"POST"}).then(()=>
+            fetch("/api/sam_click",{
+              method:"POST", headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({tile_key:tile.tile_key, px:lastPt[0], py:lastPt[1], button:"left"})
+            })
+          ).then(r=>r.json()).then(d=>{
+            if(d.polygon) {
+              samPolygon={coords:d.polygon, score:d.score, area_m2:d.area_m2};
+              samPoints={pos:d.pos||[], neg:d.neg||[]};
+              drawCanvas();
+            }
+          });
+        }
+        e.preventDefault();
+      }
+      break;
+    case "z": case "Z":
+      fetch("/api/sam_undo",{method:"POST"}).then(r=>r.json()).then(d=>{
+        if(d.ok) { clearSamState(); loadCurrentTile(); console.log("Undo OK"); }
+        else { console.log("Nothing to undo"); }
+      });
+      e.preventDefault();
+      break;
     case "f": case "F": if(selectedIdx>=0) zoomToSelected(); else resetView(); e.preventDefault(); break;
   }
 });
@@ -1148,6 +1554,12 @@ document.addEventListener("keydown", e => {
 // Handle window resize
 window.addEventListener("resize", () => { resizeCanvas(); });
 
+// Check SAM availability + load tiles
+fetch("/api/sam_status").then(r=>r.json()).then(d=>{
+  samAvailable=d.available;
+  updateMarkerBtn();
+  console.log("SAM available:", samAvailable);
+}).catch(()=>{});
 loadTiles(false);
 </script>
 </body>
@@ -1156,6 +1568,10 @@ loadTiles(false);
 
 class ReviewHandler(BaseHTTPRequestHandler):
     store: DetectionReviewStore
+    _sam_state: dict = {
+        "tile_key": None, "pos": [], "neg": [],
+        "pixel_coords": None, "geo_poly": None, "score": None, "area_m2": None,
+    }
 
     def log_message(self, format, *args):
         pass  # suppress request logs
@@ -1210,6 +1626,10 @@ class ReviewHandler(BaseHTTPRequestHandler):
             tile_key = path.split("/")[-1].split("?")[0]
             self._json_response(self.store.get_fn_markers(tile_key))
 
+        elif path == "/api/sam_status":
+            avail = _sam_available if _sam_available is not None else False
+            self._json_response({"available": avail})
+
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -1241,16 +1661,98 @@ class ReviewHandler(BaseHTTPRequestHandler):
             paths = self.store.export_gpkg()
             self._json_response({"ok": True, "path": "\n".join(str(p) for p in paths)})
 
+        elif path == "/api/sam_click":
+            data = json.loads(self._read_body())
+            tile_key = data["tile_key"]
+            px, py = float(data["px"]), float(data["py"])
+            button = data.get("button", "left")
+            if not _sam_available:
+                self._json_response({"error": "SAM not available"}, 503)
+                return
+            # Reset state if tile changed
+            st = ReviewHandler._sam_state
+            if st["tile_key"] != tile_key:
+                st.update(tile_key=tile_key, pos=[], neg=[],
+                          pixel_coords=None, geo_poly=None, score=None, area_m2=None)
+            if button == "right":
+                st["neg"].append([px, py])
+            else:
+                st["pos"].append([px, py])
+            tile_path = self.store._resolve_tile_path(tile_key)
+            if tile_path is None:
+                self._json_response({"error": "tile not found"}, 404)
+                return
+            try:
+                mask, score = _sam_segment(str(tile_path), st["pos"], st["neg"])
+                pixel_coords = _mask_to_pixel_coords(mask)
+                geo_poly = _mask_to_geo_polygon(mask, str(tile_path))
+                area_m2 = 0.0
+                if geo_poly:
+                    import pyproj
+                    from shapely.ops import transform as shp_transform
+                    gid = self.store._grid_id_for_tile(tile_key)
+                    spec = self.store._specs[gid]
+                    mcrs = str(spec.crs_metric) if hasattr(spec, "crs_metric") else "EPSG:32734"
+                    try:
+                        tfm = pyproj.Transformer.from_crs("EPSG:4326", mcrs, always_xy=True)
+                        area_m2 = shp_transform(tfm.transform, geo_poly).area
+                    except Exception:
+                        pass
+                st["pixel_coords"] = pixel_coords
+                st["geo_poly"] = geo_poly
+                st["score"] = score
+                st["area_m2"] = area_m2
+                self._json_response({
+                    "polygon": pixel_coords,
+                    "score": round(score, 3),
+                    "area_m2": round(area_m2, 1),
+                    "pos": st["pos"],
+                    "neg": st["neg"],
+                })
+            except Exception as e:
+                print(f"[SAM] segment error: {e}")
+                self._json_response({"error": str(e)}, 500)
+
+        elif path == "/api/sam_accept":
+            st = ReviewHandler._sam_state
+            if st["geo_poly"] is None:
+                self._json_response({"error": "no SAM polygon"}, 400)
+                return
+            new_id = self.store.accept_sam_polygon(st["tile_key"], st["geo_poly"])
+            st.update(tile_key=None, pos=[], neg=[],
+                      pixel_coords=None, geo_poly=None, score=None, area_m2=None)
+            self._json_response({"ok": True, "pred_id": new_id})
+
+        elif path == "/api/sam_undo":
+            ok = self.store.undo_last_sam_polygon()
+            self._json_response({"ok": ok})
+
+        elif path == "/api/sam_clear":
+            ReviewHandler._sam_state.update(
+                tile_key=None, pos=[], neg=[],
+                pixel_coords=None, geo_poly=None, score=None, area_m2=None)
+            self._json_response({"ok": True})
+
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
 
-def _find_predictions(grid_id: str, base_dir: Path) -> Path | None:
-    """Search for predictions GPKG in local results/ then D drive."""
-    candidates = [
-        base_dir / "results" / grid_id / "predictions_metric.gpkg",
-        Path("/mnt/d/ZAsolar/results") / grid_id / "predictions_metric.gpkg",
-    ]
+def _find_predictions(grid_id: str, base_dir: Path, region: str | None = None) -> Path | None:
+    """Search for predictions GPKG.  When region=jhb, prioritize results_joburg/."""
+    if region == "jhb":
+        candidates = [
+            base_dir / "results_joburg" / grid_id / "predictions_metric.gpkg",
+            Path("/mnt/d/ZAsolar/results_joburg") / grid_id / "predictions_metric.gpkg",
+            base_dir / "results" / grid_id / "predictions_metric.gpkg",
+            Path("/mnt/d/ZAsolar/results") / grid_id / "predictions_metric.gpkg",
+        ]
+    else:
+        candidates = [
+            base_dir / "results" / grid_id / "predictions_metric.gpkg",
+            base_dir / "results_joburg" / grid_id / "predictions_metric.gpkg",
+            Path("/mnt/d/ZAsolar/results") / grid_id / "predictions_metric.gpkg",
+            Path("/mnt/d/ZAsolar/results_joburg") / grid_id / "predictions_metric.gpkg",
+        ]
     for p in candidates:
         if p.exists():
             return p
@@ -1264,42 +1766,64 @@ def main():
                        help="Auto-batch: load all grids with ≤N predictions (from D drive results)")
     parser.add_argument("--predictions", type=Path, default=None,
                        help="Path to predictions GPKG (single-grid mode only)")
+    parser.add_argument("--region", default=None,
+                       help="Region hint for grid spec lookup (e.g. 'jhb' for Johannesburg)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args()
+
+    # Auto-detect region from prediction paths
+    region = normalize_region(args.region)
 
     base_dir = Path(__file__).resolve().parent.parent.parent
 
     # Resolve grid list
     if args.max_preds is not None:
-        # Auto-batch: scan D drive results using ogrinfo for fast row count
+        # Auto-batch: scan results roots using ogrinfo for fast row count
         import subprocess
-        d_results = Path("/mnt/d/ZAsolar/results")
         grid_ids = []
-        for d in sorted(d_results.iterdir()):
-            if not d.is_dir() or not d.name.startswith("G"):
+        if region == "jhb":
+            results_roots = [Path("/mnt/d/ZAsolar/results_joburg"), base_dir / "results_joburg"]
+        elif region == "ct":
+            results_roots = [Path("/mnt/d/ZAsolar/results"), base_dir / "results"]
+        else:
+            results_roots = [
+                Path("/mnt/d/ZAsolar/results"),
+                base_dir / "results",
+                Path("/mnt/d/ZAsolar/results_joburg"),
+                base_dir / "results_joburg",
+            ]
+
+        seen = set()
+        for results_root in results_roots:
+            if not results_root.exists():
                 continue
-            pred_file = d / "predictions_metric.gpkg"
-            if not pred_file.exists():
-                continue
-            try:
-                out = subprocess.check_output(
-                    ["ogrinfo", "-so", "-al", str(pred_file)],
-                    text=True, stderr=subprocess.DEVNULL, timeout=5,
-                )
-                for line in out.splitlines():
-                    if line.strip().startswith("Feature Count:"):
-                        count = int(line.split(":")[1].strip())
-                        if count <= args.max_preds:
-                            grid_ids.append(d.name)
-                        break
-            except Exception:
-                # Fallback: read with geopandas
-                gdf = gpd.read_file(str(pred_file))
-                if len(gdf) <= args.max_preds:
-                    grid_ids.append(d.name)
+            for d in sorted(results_root.iterdir()):
+                if not d.is_dir() or not d.name.startswith("G") or d.name in seen:
+                    continue
+                pred_file = d / "predictions_metric.gpkg"
+                if not pred_file.exists():
+                    continue
+                try:
+                    out = subprocess.check_output(
+                        ["ogrinfo", "-so", "-al", str(pred_file)],
+                        text=True, stderr=subprocess.DEVNULL, timeout=5,
+                    )
+                    for line in out.splitlines():
+                        if line.strip().startswith("Feature Count:"):
+                            count = int(line.split(":")[1].strip())
+                            if count <= args.max_preds:
+                                grid_ids.append(d.name)
+                                seen.add(d.name)
+                            break
+                except Exception:
+                    # Fallback: read with geopandas
+                    gdf = gpd.read_file(str(pred_file))
+                    if len(gdf) <= args.max_preds:
+                        grid_ids.append(d.name)
+                        seen.add(d.name)
         if not grid_ids:
-            print(f"[ERROR] No grids found with ≤{args.max_preds} predictions on D drive")
+            print(f"[ERROR] No grids found with ≤{args.max_preds} predictions in results roots")
             sys.exit(1)
         print(f"[AUTO-BATCH] Found {len(grid_ids)} grids with ≤{args.max_preds} predictions")
     elif args.grid_id:
@@ -1314,11 +1838,15 @@ def main():
         if args.predictions and len(grid_ids) == 1:
             pred_path = args.predictions
         else:
-            pred_path = _find_predictions(gid, base_dir)
+            pred_path = _find_predictions(gid, base_dir, region=region)
         if pred_path is None:
             print(f"[WARN] Predictions not found for {gid}, skipping")
             continue
-        tiles_dir = TILES_ROOT / gid
+        grid_region = region
+        if grid_region is None and "results_joburg" in str(pred_path):
+            grid_region = "jhb"
+            print(f"[INFO] Auto-detected region=jhb for {gid} from prediction path")
+        tiles_dir = resolve_tiles_dir(gid, region=grid_region)
         if not tiles_dir.exists():
             print(f"[WARN] Tiles not found for {gid}: {tiles_dir}, skipping")
             continue
@@ -1326,19 +1854,32 @@ def main():
         all_pred_paths.append(pred_path)
         all_tiles_dirs.append(tiles_dir)
 
+    effective_region = region
+    if effective_region is None and all_pred_paths:
+        has_jhb = any("results_joburg" in str(path) for path in all_pred_paths)
+        has_ct = any("results_joburg" not in str(path) for path in all_pred_paths)
+        if has_jhb and not has_ct:
+            effective_region = "jhb"
+        elif has_ct and not has_jhb:
+            effective_region = "ct"
     if not all_grid_ids:
         print("[ERROR] No valid grids found")
         sys.exit(1)
 
+    if effective_region:
+        print(f"[INIT] Region: {effective_region}")
     print(f"[INIT] Grids: {', '.join(all_grid_ids)} ({len(all_grid_ids)} total)")
     for gid, pp in zip(all_grid_ids, all_pred_paths):
         print(f"  {gid}: {pp}")
 
-    store = DetectionReviewStore(all_grid_ids, all_pred_paths, all_tiles_dirs)
+    store = DetectionReviewStore(all_grid_ids, all_pred_paths, all_tiles_dirs, region=effective_region)
     tile_list = store.get_tile_list()
     print(f"[INIT] {len(tile_list)} tiles with predictions")
 
     ReviewHandler.store = store
+
+    # Lazy-load SAM in background (non-blocking; first /api/sam_click will wait if needed)
+    _sam_ensure_loaded()
 
     server = ThreadingHTTPServer((args.host, args.port), ReviewHandler)
     url = f"http://{args.host}:{args.port}"
