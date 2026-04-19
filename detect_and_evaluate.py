@@ -89,6 +89,8 @@ DEFAULT_METRIC_CRS   = "EPSG:32734"
 METRIC_CRS           = DEFAULT_METRIC_CRS
 EXPORT_CRS           = INPUT_CRS     # 导出回 QGIS 时统一使用 4326
 GRID_REGION          = None
+IMAGERY_LAYER_ID     = None
+MODEL_RUN_ID         = None
 
 # 输出文件路径
 PREDICTIONS_PATH         = OUTPUT_DIR / "predictions.geojson"
@@ -104,10 +106,14 @@ SCRIPT_SHA256            = hashlib.sha256(Path(__file__).read_bytes()).hexdigest
 
 def set_grid_context(grid_id: str = DEFAULT_GRID_ID,
                      output_subdir: str | None = None,
-                     region: str | None = None) -> None:
+                     region: str | None = None,
+                     imagery_layer: str | None = None,
+                     model_run: str | None = None) -> None:
     """更新当前运行使用的 grid 路径上下文。"""
     global GRID_ID
     global GRID_REGION
+    global IMAGERY_LAYER_ID
+    global MODEL_RUN_ID
     global TILES_DIR
     global GT_GPKG
     global GT_GEOJSON
@@ -130,7 +136,15 @@ def set_grid_context(grid_id: str = DEFAULT_GRID_ID,
     global AREA_ERROR_METRICS_PATH
 
     GRID_REGION = normalize_region(region)
-    paths = get_grid_paths(grid_id, output_subdir=output_subdir, region=GRID_REGION)
+    IMAGERY_LAYER_ID = imagery_layer
+    MODEL_RUN_ID = model_run
+    paths = get_grid_paths(
+        grid_id,
+        output_subdir=output_subdir,
+        region=GRID_REGION,
+        imagery_layer=imagery_layer,
+        model_run=model_run,
+    )
     GRID_ID = paths.grid_id
     TILES_DIR = paths.tiles_dir
     GT_GPKG = paths.gt_gpkg
@@ -242,6 +256,9 @@ def build_detection_config(
     """构建检测阶段配置快照，用于结果复用校验。"""
     return {
         "grid_id": GRID_ID,
+        "region": GRID_REGION,
+        "imagery_layer_id": IMAGERY_LAYER_ID,
+        "model_run_id": MODEL_RUN_ID,
         "tiles_dir": Path(TILES_DIR).resolve(),
         "output_dir": Path(output_dir or OUTPUT_DIR).resolve(),
         "script_sha256": SCRIPT_SHA256,
@@ -1715,6 +1732,18 @@ def parse_args():
         help="区域提示，例如 jhb。用于选择正确的 grid/tile/results 上下文",
     )
     parser.add_argument(
+        "--imagery-layer",
+        default=None,
+        help="影像层 ID (例如 aerial_2023 / geid_2024_02 / aerial_2025)。"
+             "未指定时走 regions.yaml 的 default_imagery_layer。",
+    )
+    parser.add_argument(
+        "--model-run",
+        default=None,
+        help="模型 run ID (例如 v4_aerial_2023)。指定时结果写入 "
+             "results/<region>/<run_id>/<grid>/，便于按模型/影像区分。",
+    )
+    parser.add_argument(
         "--output-subdir",
         default=None,
         help="结果输出到 results/<grid>/<subdir>/",
@@ -1795,6 +1824,8 @@ def parse_args():
 def main(force: bool = False,
          grid_id: str = DEFAULT_GRID_ID,
          region: str | None = None,
+         imagery_layer: str | None = None,
+         model_run: str | None = None,
          output_subdir: str | None = None,
          chip_size: int | None = None,
          overlap: float | None = None,
@@ -1822,6 +1853,8 @@ def main(force: bool = False,
         normalize_grid_id(grid_id),
         output_subdir=output_subdir,
         region=region,
+        imagery_layer=imagery_layer,
+        model_run=model_run,
     )
 
     print("╔════════════════════════════════════════════════════════╗")
@@ -1957,6 +1990,8 @@ if __name__ == "__main__":
             force=args.force,
             grid_id=args.grid_id,
             region=args.region,
+            imagery_layer=args.imagery_layer,
+            model_run=args.model_run,
             output_subdir=args.output_subdir,
             chip_size=args.chip_size,
             overlap=args.overlap,

@@ -140,8 +140,6 @@ def _resolve_gt_gpkg(grid_id: str, *, region: str | None = None) -> Path:
 def _preferred_tiles_root(region: str | None) -> Path:
     region = normalize_region(region)
     env_root = os.environ.get("SOLAR_TILES_ROOT")
-
-    # Try registry
     rkey = _region_key(region)
     if rkey:
         try:
@@ -150,81 +148,88 @@ def _preferred_tiles_root(region: str | None) -> Path:
                 return registry_path
         except KeyError:
             pass
-
-    if region == "jhb":
-        if env_root:
-            env_path = Path(env_root)
-            name = env_path.name.lower()
-            if "joburg" in name or "jhb" in name:
-                return env_path
-        # Fallback: project-relative tiles_joburg
-        jhb_tiles = BASE_DIR / "tiles_joburg"
-        if jhb_tiles.exists():
-            return jhb_tiles
-        # Last resort: /mnt/d fallback
-        d_jhb = Path("/mnt/d/ZAsolar/tiles_joburg")
-        if d_jhb.exists():
-            return d_jhb
-        return jhb_tiles
     return Path(env_root) if env_root else TILES_ROOT
 
 
-def get_results_root(region: str | None = None) -> Path:
+def get_results_root(
+    region: str | None = None,
+    *,
+    model_run: str | None = None,
+) -> Path:
+    """Return the results root for (region, model_run).
+
+    When ``model_run`` is given, routes to the registered results_path for
+    that run. Otherwise returns the region's legacy results_root.
+    """
     region = normalize_region(region)
     rkey = _region_key(region)
+
+    if model_run is not None and rkey is not None:
+        try:
+            return region_registry.get_model_run_path(rkey, model_run)
+        except KeyError:
+            pass
+
     if rkey:
         try:
             return region_registry.get_results_path(rkey)
         except KeyError:
             pass
-    if region == "jhb":
-        return BASE_DIR / "results_joburg"
     return RESULTS_ROOT
 
 
-def resolve_tiles_dir(grid_id: str, *, region: str | None = None) -> Path:
+def resolve_tiles_dir(
+    grid_id: str,
+    *,
+    region: str | None = None,
+    imagery_layer: str | None = None,
+) -> Path:
+    """Return the source tile Path for (grid_id, region, imagery_layer).
+
+    Behavior by layer file_layout:
+      - ``chunked``: returns directory `<layer>/<grid_id>/` (caller globs chips)
+      - ``mosaic``:  returns the single file `<layer>/{grid_id}_mosaic.tif`
+
+    Resolution order for ``imagery_layer``:
+      1. Explicit ``imagery_layer=`` argument.
+      2. Region's default_imagery_layer.
+      3. First registered layer whose coverage_grids contains the grid.
+
+    ``SOLAR_TILES_ROOT`` env var overrides **only** when the resulting
+    ``<env>/<grid_id>/`` directory actually exists (for RunPod /dev/shm).
+    """
     grid_id = normalize_grid_id(grid_id)
     region = normalize_region(region)
+    rkey = _region_key(region)
 
-    candidates: list[Path] = []
+    # RunPod /dev/shm fast path: only if the legacy layout exists there.
     env_root = os.environ.get("SOLAR_TILES_ROOT")
     if env_root:
-        candidates.append(Path(env_root))
+        env_path = Path(env_root)
+        candidate = env_path / grid_id
+        if candidate.exists():
+            return candidate
+        mosaic_candidate = env_path / f"{grid_id}_mosaic.tif"
+        if mosaic_candidate.exists():
+            return mosaic_candidate
 
-    # Add registry-based path
-    rkey = _region_key(region)
     if rkey is None:
         rkey = region_registry.lookup_region(grid_id)
-    if rkey:
+
+    if rkey is not None:
         try:
-            candidates.append(region_registry.get_tiles_path(rkey))
+            layer_id = imagery_layer or region_registry.resolve_imagery_layer_for_grid(
+                grid_id, rkey
+            )
+            layer = region_registry.get_imagery_layer(rkey, layer_id)
+            layer_path = region_registry.get_imagery_layer_path(rkey, layer_id)
+            if layer.file_layout == "mosaic":
+                return layer_path / f"{grid_id}_mosaic.tif"
+            return layer_path / grid_id
         except KeyError:
             pass
 
-    # Legacy fallbacks
-    if region == "jhb":
-        candidates.extend([
-            BASE_DIR / "tiles_joburg",
-            Path("/mnt/d/ZAsolar/tiles_joburg"),
-            TILES_ROOT,
-            Path("/mnt/d/ZAsolar/tiles"),
-        ])
-    else:
-        candidates.extend([
-            TILES_ROOT,
-            Path("/mnt/d/ZAsolar/tiles"),
-        ])
-
-    seen: set[Path] = set()
-    for root in candidates:
-        root = Path(root)
-        if root in seen:
-            continue
-        seen.add(root)
-        tile_dir = root / grid_id
-        if tile_dir.exists():
-            return tile_dir
-
+    # Fallback: legacy behavior (may return non-existent path; caller errors)
     return _preferred_tiles_root(region) / grid_id
 
 
@@ -233,15 +238,17 @@ def get_grid_paths(
     output_subdir: str | None = None,
     *,
     region: str | None = None,
+    imagery_layer: str | None = None,
+    model_run: str | None = None,
 ) -> GridPaths:
     grid_id = normalize_grid_id(grid_id)
     region = normalize_region(region)
-    output_dir = get_results_root(region) / grid_id
+    output_dir = get_results_root(region, model_run=model_run) / grid_id
     if output_subdir:
         output_dir = output_dir / output_subdir
     return GridPaths(
         grid_id=grid_id,
-        tiles_dir=resolve_tiles_dir(grid_id, region=region),
+        tiles_dir=resolve_tiles_dir(grid_id, region=region, imagery_layer=imagery_layer),
         output_dir=output_dir,
         gt_gpkg=_resolve_gt_gpkg(grid_id, region=region),
         gt_geojson=ANNOTATIONS_DIR / f"{grid_id.lower()}.geojson",
