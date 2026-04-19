@@ -10,7 +10,11 @@ param(
 )
 
 $WM_SETTEXT = 0x000C
+$WM_CHAR = 0x0102
+$WM_CLEAR = 0x0303
+$EM_SETSEL = 0x00B1
 $BM_CLICK = 0x00F5
+$UDM_SETPOS32 = 0x0471
 $SW_RESTORE = 9
 $MOUSEEVENTF_LEFTDOWN = 0x0002
 $MOUSEEVENTF_LEFTUP = 0x0004
@@ -214,6 +218,7 @@ function Resolve-GeidControlMap {
 
     $edits = $Controls | Where-Object { $_.Class -eq "TEdit" }
     $buttons = $Controls | Where-Object { $_.Class -eq "TButton" }
+    $upDowns = $Controls | Where-Object { $_.Class -eq "TUpDown" } | Sort-Object Left
 
     $taskName = $edits | Where-Object { $_.Top -ge 50 -and $_.Top -le 100 } | Select-Object -First 1
     $dateEdit = $edits | Where-Object { $_.Top -ge 120 -and $_.Top -le 170 } | Select-Object -First 1
@@ -229,6 +234,9 @@ function Resolve-GeidControlMap {
     if ($zoomEdits.Count -ne 2) {
         throw "Expected 2 zoom edits, got $($zoomEdits.Count)"
     }
+    if ($upDowns.Count -lt 2) {
+        throw "Expected at least 2 TUpDown spin controls, got $($upDowns.Count)"
+    }
     if ($coordEdits.Count -ne 4) {
         throw "Expected 4 coordinate edits, got $($coordEdits.Count)"
     }
@@ -241,6 +249,8 @@ function Resolve-GeidControlMap {
         Date = $dateEdit
         ZoomFrom = $zoomEdits[0]
         ZoomTo = $zoomEdits[1]
+        ZoomFromUpDown = $upDowns[0]
+        ZoomToUpDown = $upDowns[1]
         LeftLongitude = $coordEdits[0]
         RightLongitude = $coordEdits[1]
         TopLatitude = $coordEdits[2]
@@ -255,27 +265,29 @@ function Set-EditText {
         [IntPtr]$Handle,
         [string]$Value
     )
-    [void][GeidWin32]::SendMessage($Handle, $WM_SETTEXT, [IntPtr]::Zero, $Value)
-    Start-Sleep -Milliseconds 120
-    if ((Get-WindowText $Handle) -eq $Value) {
-        return
+    # GEID 6.48 (Delphi VCL) ignores WM_SETTEXT but accepts WM_CHAR.
+    # WM_GETTEXT also returns stale cached data on these TEdit controls,
+    # so do NOT verify via Get-WindowText after this call — just trust the writes.
+    [void][GeidWin32]::SendMessage($Handle, $EM_SETSEL, [IntPtr]0, [IntPtr]-1)
+    Start-Sleep -Milliseconds 30
+    [void][GeidWin32]::SendMessage($Handle, $WM_CLEAR, [IntPtr]::Zero, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 30
+    foreach ($c in $Value.ToCharArray()) {
+        $code = [int][char]$c
+        [void][GeidWin32]::SendMessage($Handle, $WM_CHAR, [IntPtr]$code, [IntPtr]0)
     }
+    Start-Sleep -Milliseconds 50
+}
 
-    $rect = Get-RectObject $Handle
-    $x = [int]($rect.Left + [Math]::Floor($rect.Width / 2))
-    $y = [int]($rect.Top + [Math]::Floor($rect.Height / 2))
-    [void][GeidWin32]::SetCursorPos($x, $y)
-    Start-Sleep -Milliseconds 120
-    [GeidWin32]::mouse_event($MOUSEEVENTF_LEFTDOWN, 0, 0, 0, [UIntPtr]::Zero)
-    [GeidWin32]::mouse_event($MOUSEEVENTF_LEFTUP, 0, 0, 0, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 120
-
-    Set-Clipboard -Value $Value
-    $shell = New-Object -ComObject WScript.Shell
-    $shell.SendKeys('^a')
-    Start-Sleep -Milliseconds 80
-    $shell.SendKeys('^v')
-    Start-Sleep -Milliseconds 180
+function Set-UpDownPos {
+    param(
+        [IntPtr]$Handle,
+        [int]$Value
+    )
+    # TUpDown spin controls own the bound TEdit's value — writing to the edit
+    # directly gets clobbered. Use UDM_SETPOS32 to set the spin position.
+    [void][GeidWin32]::SendMessage($Handle, $UDM_SETPOS32, [IntPtr]0, [IntPtr]$Value)
+    Start-Sleep -Milliseconds 50
 }
 
 function Click-Button {
@@ -395,21 +407,19 @@ foreach ($task in $tasks) {
     if ($map.Date -and -not [string]::IsNullOrWhiteSpace($task.date)) {
         Set-EditText -Handle $map.Date.Handle -Value $task.date
     }
-    Set-EditText -Handle $map.ZoomFrom.Handle -Value ([string]$task.zoom_from)
-    Set-EditText -Handle $map.ZoomTo.Handle -Value ([string]$task.zoom_to)
+    Set-UpDownPos -Handle $map.ZoomFromUpDown.Handle -Value ([int]$task.zoom_from)
+    Set-UpDownPos -Handle $map.ZoomToUpDown.Handle -Value ([int]$task.zoom_to)
     Set-EditText -Handle $map.LeftLongitude.Handle -Value ([string]$task.left_longitude)
     Set-EditText -Handle $map.RightLongitude.Handle -Value ([string]$task.right_longitude)
     Set-EditText -Handle $map.TopLatitude.Handle -Value ([string]$task.top_latitude)
     Set-EditText -Handle $map.BottomLatitude.Handle -Value ([string]$task.bottom_latitude)
     Set-EditText -Handle $map.SaveTo.Handle -Value $task.save_to
 
-    Write-Host ("  task_name={0}" -f (Get-WindowText $map.TaskName.Handle))
-    Write-Host ("  save_to={0}" -f (Get-WindowText $map.SaveTo.Handle))
+    Write-Host ("  task_name={0}" -f $task.task_name)
+    Write-Host ("  save_to={0}" -f $task.save_to)
     Write-Host ("  bounds=({0}, {1}, {2}, {3})" -f
-        (Get-WindowText $map.LeftLongitude.Handle),
-        (Get-WindowText $map.RightLongitude.Handle),
-        (Get-WindowText $map.TopLatitude.Handle),
-        (Get-WindowText $map.BottomLatitude.Handle))
+        $task.left_longitude, $task.right_longitude, $task.top_latitude, $task.bottom_latitude)
+    Write-Host "  (Get-WindowText is unreliable on Delphi TEdit — verify in GEID GUI)" -ForegroundColor DarkYellow
 
     if (-not [string]::IsNullOrWhiteSpace($task.map_type)) {
         Write-Warning "map_type selection is not yet automated; keep GEID combo on '$($task.map_type)' manually."
