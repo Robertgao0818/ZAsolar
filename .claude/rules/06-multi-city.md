@@ -3,16 +3,35 @@
 ## Never hardcode city-specific paths
 
 Do not hardcode `/mnt/d/ZAsolar/tiles_joburg`, `results_joburg/`, or any
-city-specific directory path in new or modified code. Always use
-`core/grid_utils.py` functions:
+city-specific directory path in new or modified code. Post-2026-04-19 the
+canonical layout is `tiles/<region>/<imagery_layer>/` and
+`results/<region>/<model_run>/`. Always use `core/grid_utils.py` +
+`core/region_registry.py`:
 
-- `resolve_tiles_dir(grid_id, region=)` — tile directory
-- `get_results_root(region=)` — results root
-- `get_grid_paths(grid_id, region=)` — full path set
-- `_resolve_gt_gpkg(grid_id, region=)` — GT annotation file
+- `resolve_tiles_dir(grid_id, region=, imagery_layer=)` — tile dir or mosaic file
+- `get_results_root(region=, model_run=)` — results root for a specific run
+- `get_grid_paths(grid_id, region=, imagery_layer=, model_run=)` — full path set
+- `region_registry.get_imagery_layer_path(region, layer_id)` — raw layer dir
+- `region_registry.get_model_run_path(region, run_id)` — raw run dir
 
-Existing hardcoded paths in legacy scripts are known tech debt. Do not
-introduce new ones.
+Legacy symlinks (`tiles_joburg`, `results_joburg`, `tiles/joburg_geid`) are
+retained for ~2 weeks post-2026-04-19, then deleted. Do not reference them
+in new code.
+
+## Grid IDs can overlap between regions — NEVER pick region by grid ID
+
+CT and JHB task grids **both** contain IDs like `G1189`, `G1190`, `G1293`,
+`G1513`, `G1570`, `G1630`. These cover **different physical areas** in each
+region, not the same area.
+
+Rules:
+- Any API that resolves a path from `grid_id` MUST take a `region` argument.
+- `core.region_registry.lookup_region(grid_id)` returns one match arbitrarily
+  and is DEPRECATED for multi-region contexts. Use `lookup_regions(grid_id)`
+  (plural) if you need all hits.
+- Classification scripts (e.g., migrating results by grid ID) must read
+  `config.json.tiles_dir` or `config.json.model_path` — never pattern-match
+  on grid ID ranges.
 
 ## Region must flow from config, not pattern matching
 
@@ -20,10 +39,31 @@ Do not infer region from grid ID naming patterns (e.g., "starts with JHB =
 Johannesburg"). Region should be:
 1. Explicitly passed via `--region` CLI arg, or
 2. Looked up from `configs/datasets/regions.yaml` via
-   `core.region_registry.lookup_region(grid_id)`
+   `core.region_registry.lookup_regions(grid_id)` (returns list; callers
+   must disambiguate).
 
 The `normalize_region()` function in `grid_utils` handles aliases
 (jhb/joburg/johannesburg → jhb, ct/cape_town/capetown → ct).
+
+## Imagery layers and model runs are authoritative
+
+Each region in `regions.yaml` declares:
+- `imagery_layers:` — physical tile sources (aerial_2023 / geid_2024_02 /
+  aerial_2025 / ...). Each layer has `source`, `vintage`, `file_layout`
+  (`chunked` or `mosaic`), `crs`, and `coverage_grids`.
+- `model_runs:` — each inference batch has `model_version`, `imagery_layer`,
+  `results_path`, `inference_date`, `grid_count`.
+
+When running inference via `detect_and_evaluate.py`, prefer explicit
+`--imagery-layer` and `--model-run` to get the right source tiles and the
+right output directory. `config.json` in results must contain
+`imagery_layer_id` and `model_run_id` to let downstream tools trace
+provenance.
+
+`chunked` vs `mosaic` layouts differ: chunked is a directory of
+`{grid}_{col}_{row}_geo.tif` chunks; mosaic is a single `{grid}_mosaic.tif`.
+Consumers must branch on `file_layout` (from the layer's `MANIFEST.json` or
+`region_registry.get_imagery_layer(...).file_layout`).
 
 ## `regions.yaml` is the authoritative registry
 
@@ -32,6 +72,8 @@ The `normalize_region()` function in `grid_utils` handles aliases
 - CRS per region
 - Annotation source paths
 - Region-specific infrastructure paths (tiles, results, task grid)
+- **imagery_layers per region** (physical tile sources with vintage/format)
+- **model_runs per region** (inference batches with model + layer + results_path)
 
 When adding a new city, the FIRST step is adding it to `regions.yaml`.
 Code must read from this file via `core/region_registry.py`, not duplicate

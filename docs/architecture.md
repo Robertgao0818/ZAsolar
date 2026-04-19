@@ -8,26 +8,56 @@
 data/
   task_grid.gpkg              — Grid 编号集合
   annotations/                — 标注数据（详见 annotations/README.md）
-    G1238_detailed.gpkg       — SAM2.1 精细切割 (248 polygons, layer SAM_Residential_merged)
-    solarpanel_g0001_g1190.gpkg — Google Earth 标注（已校准, G1189=58, G1190=76, 其余少量）
-    cleaned/                  — 清洗后 SAM2 标注 ({GridID}_SAM2_{YYMMDD}.gpkg)，export 主数据源
-    ANNOTATION_SPEC.md        — V1.3 标注规范（GT 仍为 installation footprint，流水线输出为 reviewed predictions）
+    Capetown/                 — Cape Town 标注（{GridID}_SAM2_{YYMMDD}.gpkg），COCO export 主数据源
+                                包含 SAM2 cleaned, 早期 legacy（G1023/G1134 等）, all_annotations_cleaned.gpkg
+    Joburg/                   — Johannesburg 标注
+                                JHB01-06.gpkg          — Li 手标 6-grid pilot (legacy)
+                                G07xx-G09xx_V4_*.gpkg  — CBD batch1 25 grids (V4 推理 → review → SAM 重切, 2026-04-07)
+    ANNOTATION_SPEC.md        — V1.3 标注规范：GT = installation footprint + Two-Axis Model (A1-A3 × H/R/S/G)
     PROGRESS.md               — 标注进度自动汇总（batch/grid/installation 统计）
     annotation_manifest.csv   — 标注 manifest (quality tier T1/T2, review status)
   coco/                       — COCO 格式训练数据（export_coco_dataset.py 生成）
 tiles/                        — 符号链接或空目录（实际数据禁止放 WSL 项目目录）
                                所有 tiles 存放在 D:\ZAsolar\tiles (WSL: /mnt/d/ZAsolar/tiles)
-                               环境变量: SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles
                                COCO 数据集同理: /mnt/d/ZAsolar/coco_*/
-results/<GridID>/             — 检测结果、评估报告、图表（数据目录，禁止放源码）
+
+# /mnt/d/ZAsolar/tiles/ 目录结构 (post-2026-04-19 重构):
+#   cape_town/
+#     aerial_2025/{MANIFEST.json, G1189/, ...}      — CT 航测 2025 (chunked, 119 grids)
+#   johannesburg/
+#     aerial_2023/{MANIFEST.json, G0772/, ...}      — JHB 航测 2023 (chunked, 100 grids)
+#     aerial_legacy/{MANIFEST.json, JHB01/, ...}    — JHB legacy pilot (chunked, 6 grids)
+#     geid_2024_02/{MANIFEST.json, G0772_mosaic.tif, ...}  — JHB GEID 2024-02 (mosaic, 100 files)
+#   joburg_geid -> johannesburg/geid_2024_02/       — 过渡 symlink (~2 周后删)
+# /mnt/d/ZAsolar/tiles_joburg -> tiles/johannesburg/aerial_2023/  — 过渡 symlink
+# 每层 MANIFEST.json 记录 source/vintage/file_layout/coverage_grids/crs。
+# 解析 tile 路径: core.region_registry.get_imagery_layer_path(region, layer_id)
+
+# WARNING: Grid IDs overlap between regions. G1189/G1190/G1293/G1513/G1570/
+#   G1630 等在 CT 和 JHB 都有真实、独立的地理覆盖。**永远** 用
+#   (region, imagery_layer) 定位,不要靠 grid_id 猜 region。
+
+results/<region>/<model_run>/<GridID>/  — 检测结果按 region × model_run 分组
+                                         每层 RUN_MANIFEST.json 记录 model_version/imagery_layer/inference_date
+# 已注册的 model_runs (configs/datasets/regions.yaml):
+#   cape_town/v3c_targeted_hn_aerial_2025/    — V3-C on CT aerial (45 grids)
+#   cape_town/v3c_geid_experiment/            — 跨区实验 G1189/G1190 (可删)
+#   johannesburg/v3c_geid_2024_02/            — V3-C on JHB GEID (85 grids)
+#   johannesburg/v3c_targeted_hn_aerial_2023/ — V3-C on JHB aerial (100 grids)
+#   johannesburg/v4_aerial_2023/              — V4 on JHB aerial (92 grids, canonical)
+# Legacy results/<GridID>/ (直接挂 CT 根下) 仍为 CT 旧格式结果的后备位置,
+#   待 PR8 清理 (checkpoints_cleaned 24 grids + 无 config 77 grids)。
+# /home/gaosh/projects/ZAsolar/results_joburg -> results/johannesburg/v4_aerial_2023  — 过渡 symlink
   masks/                      — per-tile 检测掩膜
   vectors/                    — per-tile 矢量化结果
+  config.json                 — 包含 region/imagery_layer_id/model_run_id 字段 (post-2026-04-19)
   presence_metrics.csv        — V1.3 installation presence P/R/F1
   footprint_metrics.csv       — V1.3 footprint IoU/Dice 分布
   area_error_metrics.csv      — V1.3 面积误差分桶
 checkpoints/                  — 微调模型权重（数据目录，禁止放源码）
 core/
-  grid_utils.py               — Grid 路径/坐标工具函数（共享模块）
+  grid_utils.py               — Grid 路径/坐标工具函数（共享模块，内部委托 region_registry）
+  region_registry.py           — 加载 regions.yaml 提供 lookup_region/get_region_config 等 API
 scripts/
   analysis/
     param_search.py            — 检测参数网格搜索
@@ -46,7 +76,8 @@ scripts/
     prepare_jhb_grids.py       — JHB grid 准备
 configs/
   datasets/
-    regions.yaml               — 区域/Grid 注册表（基线指标、标注源）
+    regions.yaml               — 权威区域注册表（grids、CRS、paths、grid_id_pattern）
+    training_sets.yaml         — 训练集 recipe provenance（region_scope、holdout、HN 来源）
     imagery_sources.yaml       — 影像源参数（分辨率、CRS、下载脚本）
   benchmarks/
     post_train.yaml            — Benchmark preset (grid suites, verdict 规则)
@@ -69,7 +100,7 @@ docs/
 
 | Script | Description |
 |--------|-------------|
-| `detect_and_evaluate.py` | 主流程：检测→过滤→评估→可视化。支持 `--model-path`、`--evaluation-profile`、`--data-scope` |
+| `detect_and_evaluate.py` | 主流程：检测→过滤→评估→可视化。支持 `--model-path`、`--evaluation-profile`、`--data-scope`、`--imagery-layer`、`--model-run` |
 | `export_coco_dataset.py` | 标注→COCO 数据集导出。支持 `--neg-ratio`（neg:pos 比例）、`--exclude-grids`（benchmark holdout）、`--audit-csv`（热水器过滤）、`--manifest`、`--no-balance` |
 | `scripts/training/export_targeted_hn.py` | Batch 003 审核 FP → targeted HN chips，合并到 base COCO |
 | `scripts/training/export_v4_hn.py` | Batch 004 小目标 FP shortlist → HN chips（分层采样） |
@@ -80,7 +111,9 @@ docs/
 | `scripts/analysis/batch_inference.sh` | 并行批量推理 (canonical 入口，支持任意 grid list + 并行度) |
 | `train.py` | Mask R-CNN 微调训练（两阶段：heads-only → full fine-tune），需要 CUDA GPU |
 | `building_filter.py` | OSM+Microsoft 建筑轮廓 → buildings.gpkg + tile_manifest.csv |
-| `core/grid_utils.py` | Grid 路径/坐标工具函数（共享模块） |
+| `core/grid_utils.py` | Grid 路径/坐标工具函数（共享模块，内部委托 region_registry） |
+| `core/region_registry.py` | 加载 regions.yaml 提供 region/grid 查询 API |
+| `scripts/validate_registry.py` | 注册表交叉验证（manifest ↔ training_sets ↔ model_registry ↔ regions） |
 | `scripts/progress_tracker.py` | ROADMAP.md 自动更新 |
 
 ## CRS 约定

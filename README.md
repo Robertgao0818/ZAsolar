@@ -236,7 +236,7 @@
 - **7,074 个 reviewed polygons**
 - 分布在 **103 个开普敦 grids**
 
-这个数字应理解为“**当前人工审查后的城市级归档规模**”，而不是“模型在完全无人干预状态下的原始全城检测数”。约翰内斯堡 CBD 25 grids 在过去一周新增的 **686 个 reviewer-confirmed predictions**（662 个 correct + 24 个 edit），目前还在 `results_joburg/` 工作区内，**未并入上述 7,074 这个数字**。
+这个数字应理解为“**当前人工审查后的城市级归档规模**”，而不是“模型在完全无人干预状态下的原始全城检测数”。约翰内斯堡 CBD 25 grids 在过去一周新增的 **686 个 reviewer-confirmed predictions**（662 个 correct + 24 个 edit），目前还在 `results/johannesburg/v4_aerial_2023/` 工作区内（post-2026-04-19 目录重构），**未并入上述 7,074 这个数字**。
 
 ### 3.4 标注数据汇总
 
