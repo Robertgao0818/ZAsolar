@@ -2,7 +2,7 @@
 """
 GT 加热器污染审计 — 构建审计队列 + 导出 chip。
 
-扫描 data/annotations/cleaned/*_SAM2_*.gpkg，为每个 GT polygon 生成审计记录，
+扫描 data/annotations/Capetown/*_SAM2_*.gpkg，为每个 GT polygon 生成审计记录，
 按几何特征分层，导出 400×400 chip 供人工复核。
 
 兼容两种 schema：
@@ -39,7 +39,7 @@ from shapely.geometry import MultiPolygon
 
 # ── Paths ──────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-CLEANED_DIR = BASE_DIR / "data" / "annotations" / "cleaned"
+CLEANED_DIR = BASE_DIR / "data" / "annotations" / "Capetown"
 
 import os
 TILES_ROOT = Path(os.environ.get("SOLAR_TILES_ROOT", BASE_DIR / "tiles"))
@@ -105,7 +105,7 @@ def assign_risk_tier(area_m2: float, geometry_bucket: str, solidity: float) -> s
 # ── Discover & load ───────────────────────────────────────────────────
 
 def discover_cleaned_sources() -> dict[str, dict]:
-    """Auto-discover *_SAM2_*.gpkg from cleaned/ dir, same logic as export_coco."""
+    """Auto-discover *_SAM2_*.gpkg from Capetown/ dir, same logic as export_coco."""
     sources = {}
     for f in sorted(CLEANED_DIR.glob("*_SAM2_*.gpkg")):
         grid_id = f.name.split("_SAM2_")[0]

@@ -21,7 +21,7 @@ for grid_dir in sorted(Path("results").iterdir()):
 
     grid_id = grid_dir.name
     p = gpd.read_file(str(pred_file))
-    gt_files = list(Path("data/annotations/cleaned").glob(f"{grid_id}*"))
+    gt_files = list(Path("data/annotations/Capetown").glob(f"{grid_id}*"))
     if not gt_files:
         continue
     g = gpd.read_file(str(gt_files[0])).to_crs(p.crs)

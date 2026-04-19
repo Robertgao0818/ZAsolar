@@ -190,12 +190,13 @@ rm -rf ~/.cache/huggingface/hub/models--facebook--sam-vit-large
 审查完成后，将 reviewed GPKG 中 `correct` 的多边形转为标注文件：
 
 ```bash
-# 将 correct 多边形复制到 annotations/cleaned/ 作为 GT
+# 将 correct 多边形复制到 annotations/Capetown/ (Cape Town) 或
+# annotations/Joburg/ (Johannesburg) 作为 GT
 python3 -c "
 import geopandas as gpd
 gdf = gpd.read_file('results/G1686/review/G1686_reviewed.gpkg')
 gt = gdf[gdf['review_status'] == 'correct'].copy()
-gt.to_file('data/annotations/cleaned/G1686_SAM2_260325.gpkg', driver='GPKG')
+gt.to_file('data/annotations/Capetown/G1686_SAM2_260325.gpkg', driver='GPKG')
 print(f'Exported {len(gt)} GT polygons')
 "
 
@@ -224,7 +225,8 @@ bash cloud_setup.sh --resume checkpoints/best_model.pth
 | FN 标记 | `results/<GridID>/review/fn_markers.csv` |
 | 审查后 GPKG | `results/<GridID>/review/<GridID>_reviewed.gpkg` |
 | QGIS 样式 | `results/<GridID>/review/<GridID>_reviewed.qml` |
-| 训练标注 | `data/annotations/cleaned/<GridID>_SAM2_YYMMDD.gpkg` |
+| 训练标注 (Cape Town) | `data/annotations/Capetown/<GridID>_SAM2_YYMMDD.gpkg` |
+| 训练标注 (Johannesburg) | `data/annotations/Joburg/<GridID>_<MODEL>_YYMMDD.gpkg` |
 
 ## 环境变量
 
