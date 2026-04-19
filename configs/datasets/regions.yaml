@@ -7,11 +7,58 @@ regions:
     crs_metric: "EPSG:32734"
     crs_exchange: "EPSG:4326"
     paths:
-      tiles_root: "tiles"
+      # PR3 (2026-04-19): tiles moved to tiles/cape_town/aerial_2025.
+      # tiles_root now points to the region subtree; individual layers live
+      # under imagery_layers[*].path.
+      tiles_root: "/mnt/d/ZAsolar/tiles/cape_town"
       results_root: "results"
       annotations_dir: "data/annotations/Capetown"
       task_grid: "data/task_grid.gpkg"
     grid_id_pattern: "G\\d{4}"
+
+    imagery_layers:
+      aerial_2025:
+        path: "/mnt/d/ZAsolar/tiles/cape_town/aerial_2025"
+        source: "aerial"
+        vintage: "2025"
+        file_layout: "chunked"
+        file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
+        crs: "EPSG:4326"
+        coverage_grids: [
+          G1189, G1190, G1238, G1240, G1241, G1242, G1243, G1244, G1245,
+          G1293, G1294, G1297, G1298, G1299, G1300, G1301, G1347, G1349,
+          G1353, G1354, G1356, G1410, G1411, G1457, G1458, G1464, G1465,
+          G1466, G1467, G1513, G1515, G1516, G1520, G1521, G1522, G1523,
+          G1524, G1569, G1570, G1571, G1572, G1578, G1579, G1580, G1625,
+          G1626, G1627, G1628, G1629, G1630, G1631, G1632, G1633, G1634,
+          G1635, G1682, G1683, G1685, G1686, G1687, G1688, G1689, G1690,
+          G1691, G1692, G1693, G1741, G1742, G1743, G1744, G1746, G1747,
+          G1749, G1750, G1796, G1797, G1798, G1799, G1800, G1801, G1806,
+          G1807, G1855, G1856, G1862, G1863, G1864, G1909, G1910, G1911,
+          G1917, G1918, G1919, G1920, G1921, G1966, G1970, G1971, G1972,
+          G1973, G1974, G1975, G1976, G1977, G1979, G1981, G2025, G2026,
+          G2027, G2028, G2029, G2030, G2031, G2032, G2033, G2034, G2035,
+          G2037, G2038,
+        ]
+    default_imagery_layer: "aerial_2025"
+
+    model_runs:
+      v3c_targeted_hn_aerial_2025:
+        model_version: "exp003_C_targeted_hn"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/v3c_targeted_hn_aerial_2025"
+        inference_date: "2026-03-29"
+        grid_count: 45
+        notes: "V3-C on CT aerial 2025 (incl. 8 grids rescued from results_joburg/ misplacement)"
+      v3c_geid_experiment:
+        model_version: "exp003_C_targeted_hn"
+        imagery_layer: "geid_2024_02"            # cross-region experiment
+        results_path: "results/cape_town/v3c_geid_experiment"
+        inference_date: "2026-04-08"
+        grid_count: 2
+        notes: "G1189/G1190 cross-region experiment — user marked as discardable"
+      # Deferred: checkpoints_cleaned (24 grids) and NaN-config (~77 grids)
+      # remain under legacy results/ for PR8 triage.
 
     grids:
       G1238:
@@ -52,11 +99,96 @@ regions:
     crs_metric: "EPSG:32735"
     crs_exchange: "EPSG:4326"
     paths:
-      tiles_root: "tiles_joburg"
+      # PR3 (2026-04-19): tiles moved to tiles/johannesburg/<layer>/.
+      # Individual layers live under imagery_layers[*].path.
+      tiles_root: "/mnt/d/ZAsolar/tiles/johannesburg"
       results_root: "results_joburg"
       annotations_dir: "data/annotations/Joburg"
       task_grid: "data/jhb_task_grid.gpkg"
     grid_id_pattern: "(JHB\\d{2}|G\\d{4})"
+
+    # WARNING: Grid IDs (G\d{4}) can overlap with cape_town. E.g. G1189, G1190,
+    # G1293, G1513, G1570, G1630 are VALID in both regions but cover different
+    # physical areas. Always resolve via (region, imagery_layer) — never by
+    # grid_id alone.
+    imagery_layers:
+      aerial_2023:
+        path: "/mnt/d/ZAsolar/tiles/johannesburg/aerial_2023"
+        source: "aerial"
+        vintage: "2023"
+        file_layout: "chunked"
+        file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
+        crs: "EPSG:4326"
+        provenance: "JHB aerial re-downloaded 2026-04; prior version was overwritten by GEID in early 2026-04 and recovered"
+        coverage_grids: [
+          G0772, G0773, G0774, G0775, G0776, G0814, G0815, G0816, G0817,
+          G0818, G0853, G0854, G0855, G0856, G0857, G0888, G0889, G0890,
+          G0891, G0892, G0922, G0923, G0924, G0925, G0926, G1110, G1111,
+          G1112, G1113, G1114, G1144, G1145, G1146, G1147, G1148, G1151,
+          G1152, G1153, G1154, G1155, G1179, G1180, G1181, G1182, G1183,
+          G1186, G1187, G1188, G1189, G1190, G1214, G1215, G1216, G1217,
+          G1218, G1221, G1222, G1223, G1224, G1225, G1250, G1251, G1252,
+          G1253, G1254, G1257, G1258, G1259, G1260, G1261, G1293, G1294,
+          G1295, G1296, G1297, G1512, G1513, G1514, G1515, G1516, G1541,
+          G1542, G1543, G1544, G1545, G1570, G1571, G1572, G1573, G1574,
+          G1600, G1601, G1602, G1603, G1604, G1630, G1631, G1632, G1633,
+          G1634,
+        ]
+      geid_2024_02:
+        path: "/mnt/d/ZAsolar/tiles/johannesburg/geid_2024_02"
+        source: "geid"
+        vintage: "2024-02"
+        file_layout: "mosaic"
+        file_pattern: "{grid_id}_mosaic.tif"
+        crs: "EPSG:4326"
+        provenance: "GEID 6.48 RE captures, stitched via scripts/imagery/chip_mosaic.py"
+        coverage_grids: [
+          G0772, G0773, G0774, G0775, G0776, G0814, G0815, G0816, G0817,
+          G0818, G0853, G0854, G0855, G0856, G0857, G0888, G0889, G0890,
+          G0891, G0892, G0922, G0923, G0924, G0925, G0926, G1110, G1111,
+          G1112, G1113, G1114, G1144, G1145, G1146, G1147, G1148, G1151,
+          G1152, G1153, G1154, G1155, G1179, G1180, G1181, G1182, G1183,
+          G1186, G1187, G1188, G1189, G1190, G1214, G1215, G1216, G1217,
+          G1218, G1221, G1222, G1223, G1224, G1225, G1250, G1251, G1252,
+          G1253, G1254, G1257, G1258, G1259, G1260, G1261, G1293, G1294,
+          G1295, G1296, G1297, G1512, G1513, G1514, G1515, G1516, G1541,
+          G1542, G1543, G1544, G1545, G1570, G1571, G1572, G1573, G1574,
+          G1600, G1601, G1602, G1603, G1604, G1630, G1631, G1632, G1633,
+          G1634,
+        ]
+      aerial_legacy:
+        path: "/mnt/d/ZAsolar/tiles/johannesburg/aerial_legacy"
+        source: "aerial"
+        vintage: "unknown_pre_2023"             # PR3: EXIF inspection to fill in
+        file_layout: "chunked"
+        file_pattern: "{grid_id}/*.tif"
+        crs: "EPSG:4326"
+        provenance: "Legacy Li manual GT pilot grids"
+        coverage_grids: [JHB01, JHB02, JHB03, JHB04, JHB05, JHB06]
+    default_imagery_layer: "aerial_2023"
+
+    model_runs:
+      v3c_geid_2024_02:
+        model_version: "exp003_C_targeted_hn"
+        imagery_layer: "geid_2024_02"
+        results_path: "results/johannesburg/v3c_geid_2024_02"
+        inference_date: "2026-04-08"
+        grid_count: 85
+        notes: "V3-C on JHB GEID (25 CBD + 60 periphery)"
+      v3c_targeted_hn_aerial_2023:
+        model_version: "exp003_C_targeted_hn"
+        imagery_layer: "aerial_2023"
+        results_path: "results/johannesburg/v3c_targeted_hn_aerial_2023"
+        inference_date: "2026-04-05"
+        grid_count: 100
+        notes: "V3-C on JHB aerial 2023. Discovered post-PR5 in results/joburg/. THIRD distinct JHB run alongside v4_aerial_2023 and v3c_geid_2024_02."
+      v4_aerial_2023:
+        model_version: "exp004_v4_hn"
+        imagery_layer: "aerial_2023"
+        results_path: "results/johannesburg/v4_aerial_2023"
+        inference_date: "2026-04-05"
+        grid_count: 92
+        notes: "V4 on JHB aerial 2023. Current canonical JHB inference."
 
     grids:
       # Legacy 6-grid pilot (Li manual, transfer test only)
