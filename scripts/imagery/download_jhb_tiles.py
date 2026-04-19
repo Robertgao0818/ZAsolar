@@ -15,12 +15,14 @@ Usage:
   python scripts/imagery/download_jhb_tiles.py --batch batch1 --workers 6
   python scripts/imagery/download_jhb_tiles.py --batch batch1 --dry
 
-  # RunPod 用法 (tiles 落到 /workspace/tiles_joburg/)
-  SOLAR_TILES_ROOT=/workspace/tiles_joburg python scripts/imagery/download_jhb_tiles.py --batch batch1 --workers 6
+  # RunPod 用法 (post-2026-04-19 layout; tiles 落到 johannesburg/aerial_2023/)
+  SOLAR_TILES_ROOT=/workspace/tiles/johannesburg/aerial_2023 python scripts/imagery/download_jhb_tiles.py --batch batch1 --workers 6
 
-注意: Joburg tiles 必须和 Cape Town tiles 分开存放 (GridID 体系不同但编号可能重叠)
-  - Cape Town: SOLAR_TILES_ROOT=/workspace/tiles (默认)
-  - Joburg:    SOLAR_TILES_ROOT=/workspace/tiles_joburg
+注意: Joburg tiles 必须和 Cape Town tiles 分开存放 (GridID 体系不同但编号重叠严重:
+G1189/G1190/G1293/G1513/G1570/G1630 等 ID 在两个 region 都有真实覆盖!)
+  - Cape Town: SOLAR_TILES_ROOT=/workspace/tiles/cape_town/aerial_2025
+  - Joburg:    SOLAR_TILES_ROOT=/workspace/tiles/johannesburg/aerial_2023
+  See core/region_registry.get_imagery_layer_path() for the canonical resolver.
 """
 
 from __future__ import annotations

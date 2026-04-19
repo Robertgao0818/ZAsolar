@@ -60,7 +60,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("input_dir", type=Path, help="Dir containing <GRID>_mosaic.tif files")
     ap.add_argument("--output-root", type=Path, required=True,
-                    help="Output tiles root, e.g. /workspace/tiles_joburg")
+                    help="Output tiles root, e.g. /mnt/d/ZAsolar/tiles/johannesburg/geid_2024_02_chipped "
+                         "(post-2026-04-19 layout; see regions.yaml imagery_layers)")
     ap.add_argument("--grids", nargs="*", help="Optional subset of grid IDs")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()

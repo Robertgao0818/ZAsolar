@@ -42,8 +42,11 @@ sys.path.insert(0, str(BASE_DIR))
 
 from core.grid_utils import get_grid_spec, get_tile_bounds, normalize_grid_id
 
-JHB_RESULTS = BASE_DIR / "results_joburg"
-JHB_TILES = Path("/mnt/d/ZAsolar/tiles_joburg")
+# DEPRECATED (2026-04-19): hardcoded paths retained via symlinks. New code
+# should use core.region_registry.get_model_run_path("johannesburg", "v4_aerial_2023")
+# and get_imagery_layer_path("johannesburg", "aerial_2023").
+JHB_RESULTS = BASE_DIR / "results_joburg"                 # → results/johannesburg/v4_aerial_2023
+JHB_TILES = Path("/mnt/d/ZAsolar/tiles_joburg")           # → tiles/johannesburg/aerial_2023
 METRIC_CRS = "EPSG:32735"  # Joburg UTM
 
 CBD_GRIDS = [

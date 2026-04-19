@@ -40,8 +40,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-TILES_ROOT_CT = Path("/mnt/d/ZAsolar/tiles")
-TILES_ROOT_JHB = Path("/mnt/d/ZAsolar/tiles_joburg")
+# DEPRECATED (2026-04-19): hardcoded paths retained via symlinks for back-compat.
+# New code should call core.region_registry.get_imagery_layer_path(region, layer)
+# and get_model_run_path(region, run_id). Grid IDs overlap between CT/JHB, so
+# never pick a region by grid_id range alone.
+TILES_ROOT_CT = Path("/mnt/d/ZAsolar/tiles")            # symlinks cape_town subtree
+TILES_ROOT_JHB = Path("/mnt/d/ZAsolar/tiles_joburg")    # → tiles/johannesburg/aerial_2023
 RESULTS_ROOTS = [Path("results"), Path("/mnt/d/ZAsolar/results"), Path("results_joburg")]
 SAM_CHECKPOINT = Path("/mnt/c/Users/gaosh/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins/GeoOSAM/sam2/checkpoints/sam2.1_hiera_large.pt")
 SAM_CONFIG = "configs/sam2.1/sam2.1_hiera_l"
