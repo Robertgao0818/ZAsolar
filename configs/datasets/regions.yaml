@@ -174,7 +174,16 @@ regions:
         results_path: "results/johannesburg/v3c_geid_2024_02"
         inference_date: "2026-04-08"
         grid_count: 85
-        notes: "V3-C on JHB GEID (25 CBD + 60 periphery)"
+        deprecated: true
+        notes: |
+          V3-C on JHB GEID (25 CBD + 60 periphery). DEPRECATED 2026-04-21:
+          these predictions were produced against GEID mosaics with broken
+          geotransform (5.29% scale underscale, fixed by re-stitching the
+          mosaics on 2026-04-21; see feedback_geid_mosaic_bounds_bug memory).
+          Pixel-level detection is correct but geo-coords of polygons are
+          off by up to ~30 m. GEID bbox detection task is now owned by the
+          parallel ~/projects/geid_bbox/ project; do not rerun V3-C (mask
+          R-CNN + installation semantics) on GEID.
       v3c_targeted_hn_aerial_2023:
         model_version: "exp003_C_targeted_hn"
         imagery_layer: "aerial_2023"
