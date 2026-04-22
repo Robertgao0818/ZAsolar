@@ -440,6 +440,8 @@ def build_base_coco(params: dict) -> dict:
     category_name = params.get("category_name", "solar_panel")
     neg_ratio = params.get("neg_ratio", 1.0)
     exclude_grids_list = params.get("exclude_grids")
+    include_grids_list = params.get("include_grids")
+    val_grids_list = params.get("val_grids")
     audit_csv_str = params.get("audit_csv")
     exclude_audit_labels = params.get("exclude_audit_labels",
                                       ["heater_or_non_pv", "uncertain"])
@@ -451,6 +453,33 @@ def build_base_coco(params: dict) -> dict:
     grid_annotations, grid_regions = load_annotations(
         regions=regions, exclude_grids=exclude_set,
     )
+
+    if include_grids_list:
+        include_set = set(include_grids_list)
+        kept = [g for g in grid_annotations if g in include_set]
+        dropped = [g for g in grid_annotations if g not in include_set]
+        for g in dropped:
+            del grid_annotations[g]
+        missing = include_set - set(kept)
+        print(f"[INCLUDE] kept {len(kept)} grids, dropped {len(dropped)}; "
+              f"requested-but-missing: {sorted(missing) if missing else 'none'}")
+        if missing:
+            raise ValueError(
+                f"--include-grids requested {len(include_set)} grids but "
+                f"{len(missing)} could not be loaded: {sorted(missing)}. "
+                f"Check regions.yaml registry / annotation files / tile dirs."
+            )
+
+    val_grids_set = set(val_grids_list) if val_grids_list else None
+    if val_grids_set is not None:
+        loaded_set = set(grid_annotations.keys())
+        val_missing = val_grids_set - loaded_set
+        if val_missing:
+            raise ValueError(
+                f"--val-grids references {len(val_missing)} grids not in the "
+                f"loaded/included set: {sorted(val_missing)}. "
+                f"Whole-grid val would silently shrink."
+            )
 
     # ── Manifest-based tier filtering ──────────────────────────────────
     manifest_path = Path(manifest_path_str) if manifest_path_str else None
@@ -536,9 +565,17 @@ def build_base_coco(params: dict) -> dict:
 
         tile_map = {t.stem: t for t in tiles}
         tile_to_annots = assign_annotations_to_tiles(annots, tiles)
-        train_stems, val_stems = split_tiles(
-            tile_to_annots, val_fraction=val_fraction, seed=seed
-        )
+        if val_grids_set is not None:
+            # Whole-grid val split: this grid is entirely train OR entirely val
+            all_stems = list(tile_to_annots.keys())
+            if grid_id in val_grids_set:
+                train_stems, val_stems = [], all_stems
+            else:
+                train_stems, val_stems = all_stems, []
+        else:
+            train_stems, val_stems = split_tiles(
+                tile_to_annots, val_fraction=val_fraction, seed=seed
+            )
 
         # Verify no overlap
         overlap_check = set(train_stems) & set(val_stems)
@@ -561,6 +598,7 @@ def build_base_coco(params: dict) -> dict:
         }
 
     # ── Scan chips (metadata only, no disk writes) ──────────────────
+    split_counts: dict[str, int] = {}
     for split_name, stem_attr in [("train", "train_stems"), ("val", "val_stems")]:
         all_images = []
         all_annots = []
@@ -611,6 +649,9 @@ def build_base_coco(params: dict) -> dict:
             print(f"[BALANCE] {split_name}: {len(all_images)} chips after balancing "
                   f"({n_pos2} positive, {n_neg2} negative, ratio={neg_ratio})")
 
+        split_counts[f"{split_name}_images"] = len(all_images)
+        split_counts[f"{split_name}_annotations"] = len(all_annots)
+
         # Write only selected chips to disk
         print(f"[WRITE] {split_name}: writing {len(all_images)} chips to disk...")
         write_selected_chips(all_images, output_dir, chip_size)
@@ -649,6 +690,10 @@ def build_base_coco(params: dict) -> dict:
         "grid_data": grid_data,
         "grid_regions": grid_regions,
         "regions": regions,
+        "train_images": split_counts.get("train_images", 0),
+        "val_images": split_counts.get("val_images", 0),
+        "train_annotations": split_counts.get("train_annotations", 0),
+        "val_annotations": split_counts.get("val_annotations", 0),
     }
 
 
@@ -692,6 +737,17 @@ def main():
         help="Grid IDs to exclude from export (e.g. benchmark holdout grids)",
     )
     parser.add_argument(
+        "--include-grids", nargs="+", default=None,
+        help="If set, only these grids are exported (intersected with registry); "
+             "applied AFTER --exclude-grids.",
+    )
+    parser.add_argument(
+        "--val-grids", nargs="+", default=None,
+        help="Grid IDs that go ENTIRELY to val split (whole-grid val). "
+             "When set, --val-fraction is ignored: included grids not in this "
+             "list go entirely to train.",
+    )
+    parser.add_argument(
         "--audit-csv", type=str, default=None,
         help="Path to GT heater audit CSV (from build_gt_heater_audit.py). "
              "Annotations matching --exclude-audit-labels are removed from training export.",
@@ -721,6 +777,8 @@ def main():
         "category_name": args.category_name,
         "neg_ratio": args.neg_ratio,
         "exclude_grids": args.exclude_grids,
+        "include_grids": args.include_grids,
+        "val_grids": args.val_grids,
         "audit_csv": args.audit_csv,
         "exclude_audit_labels": args.exclude_audit_labels,
     })
