@@ -12,8 +12,9 @@ tiles_satellite_2025/
 *.gpkg
 *.geojson
 
-# BUT keep cleaned annotations and reviewed results
-!data/annotations/cleaned/*.gpkg
+# BUT keep curated annotations (split by region) and reviewed results
+!data/annotations/Capetown/*.gpkg
+!data/annotations/Joburg/*.gpkg
 !results/*/review/*_reviewed.gpkg
 
 # 检测结果（可重新生成）

@@ -189,6 +189,13 @@ regions:
         inference_date: "2026-04-05"
         grid_count: 92
         notes: "V4 on JHB aerial 2023. Current canonical JHB inference."
+      v4_2_jhb_ft_aerial_2023:
+        model_version: "exp006_v4_2_jhb_ft"
+        imagery_layer: "aerial_2023"
+        results_path: "results/johannesburg/v4_2_jhb_ft_aerial_2023"
+        inference_date: "2026-04-21"
+        grid_count: 10
+        notes: "V4.2 post-finetune inference on val 10 grids (5 CBD + 5 Sandton). Best val AP50=0.8371."
 
     grids:
       # Legacy 6-grid pilot (Li manual, transfer test only)
@@ -224,6 +231,32 @@ regions:
       G0924: { annotation_source: "data/annotations/Joburg/G0924_V4_260407.gpkg", annotation_count: 49, notes: "CBD batch1 V4-reviewed" }
       G0925: { annotation_source: "data/annotations/Joburg/G0925_V4_260407.gpkg", annotation_count: 28, notes: "CBD batch1 V4-reviewed" }
       G0926: { annotation_source: "data/annotations/Joburg/G0926_V4_260407.gpkg", annotation_count: 8, notes: "CBD batch1 V4-reviewed" }
+      # Sandton batch2 (V4 inference + review + SAM 重切, 2026-04-21, aerial_2023)
+      G1110: { annotation_source: "data/annotations/Joburg/G1110_V4_260421.gpkg", annotation_count: 39, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1111: { annotation_source: "data/annotations/Joburg/G1111_V4_260421.gpkg", annotation_count: 127, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1112: { annotation_source: "data/annotations/Joburg/G1112_V4_260421.gpkg", annotation_count: 239, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1113: { annotation_source: "data/annotations/Joburg/G1113_V4_260421.gpkg", annotation_count: 202, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1114: { annotation_source: "data/annotations/Joburg/G1114_V4_260421.gpkg", annotation_count: 130, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1144: { annotation_source: "data/annotations/Joburg/G1144_V4_260421.gpkg", annotation_count: 123, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1145: { annotation_source: "data/annotations/Joburg/G1145_V4_260421.gpkg", annotation_count: 139, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1146: { annotation_source: "data/annotations/Joburg/G1146_V4_260421.gpkg", annotation_count: 166, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1147: { annotation_source: "data/annotations/Joburg/G1147_V4_260421.gpkg", annotation_count: 80, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1148: { annotation_source: "data/annotations/Joburg/G1148_V4_260421.gpkg", annotation_count: 77, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1179: { annotation_source: "data/annotations/Joburg/G1179_V4_260421.gpkg", annotation_count: 124, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1180: { annotation_source: "data/annotations/Joburg/G1180_V4_260421.gpkg", annotation_count: 92, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1181: { annotation_source: "data/annotations/Joburg/G1181_V4_260421.gpkg", annotation_count: 170, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1182: { annotation_source: "data/annotations/Joburg/G1182_V4_260421.gpkg", annotation_count: 135, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1183: { annotation_source: "data/annotations/Joburg/G1183_V4_260421.gpkg", annotation_count: 41, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1214: { annotation_source: "data/annotations/Joburg/G1214_V4_260421.gpkg", annotation_count: 74, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1215: { annotation_source: "data/annotations/Joburg/G1215_V4_260421.gpkg", annotation_count: 105, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1216: { annotation_source: "data/annotations/Joburg/G1216_V4_260421.gpkg", annotation_count: 163, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1217: { annotation_source: "data/annotations/Joburg/G1217_V4_260421.gpkg", annotation_count: 112, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1218: { annotation_source: "data/annotations/Joburg/G1218_V4_260421.gpkg", annotation_count: 139, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1250: { annotation_source: "data/annotations/Joburg/G1250_V4_260421.gpkg", annotation_count: 50, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1251: { annotation_source: "data/annotations/Joburg/G1251_V4_260421.gpkg", annotation_count: 199, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1252: { annotation_source: "data/annotations/Joburg/G1252_V4_260421.gpkg", annotation_count: 171, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1253: { annotation_source: "data/annotations/Joburg/G1253_V4_260421.gpkg", annotation_count: 256, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
+      G1254: { annotation_source: "data/annotations/Joburg/G1254_V4_260421.gpkg", annotation_count: 176, notes: "Sandton batch2 V4-reviewed (aerial_2023)" }
     baseline_metrics:
       legacy_macro_recall: 0.281  # 6-grid pilot baseline
       cbd_batch1_v4:               # 25-grid CBD review (2026-04-07)
@@ -233,3 +266,14 @@ regions:
         n_predictions: 1003
         n_correct: 662
         n_sam_recut: 146
+      sandton_batch2_v4:           # 25-grid Sandton review (2026-04-21), V4 on aerial_2023
+        precision: 0.810
+        recall: 0.664
+        f1: 0.730
+        n_predictions: 2826
+        n_correct: 2186
+        n_edit: 93
+        n_delete: 535
+        n_unreviewed: 12
+        n_sam_recut: 1152
+        notes: "Recall bottleneck: 1152 FN with no proposal (post-conf floor 0.66); see results/analysis/v4_joburg_conf_sweep/sweep.csv"

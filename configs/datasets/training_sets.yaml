@@ -68,3 +68,40 @@ training_sets:
     hn_policy: "batch 003 (ID 900000+) + batch 004 (ID 950000+)"
     output_dir: "/mnt/d/ZAsolar/coco_v4_1_hn"
     notes: "15.7% targeted HN ratio; produced V4.1-HN checkpoint"
+
+  v4_2_jhb_ft:
+    id: "v4_2_jhb_ft"
+    description: "V4.2 — JHB-leaning fine-tune; 50 JHB + 25 CT panel-stratified anchor"
+    region_scope: [cape_town, johannesburg]
+    source_family: [reviewed_prediction, sam_refined_review, human_manual_sam_assisted]
+    annotation_source_policy: >
+      JHB CBD batch1 (25 grids, 2026-04-07, aerial_2023) +
+      JHB Sandton batch2 (25 grids, 2026-04-21, aerial_2023) +
+      CT v4_base subsample (25 grids, panel-count stratified, 3 strata, seed=42).
+      Grid-ID collisions G0854/G0855 resolved to JHB (CT versions excluded
+      from CT subsample pool).
+    tier_policy: >
+      All tiers (T1+T2). No manifest-based filtering — all annotations for
+      the selected grids are included. JHB sources are R/S (T2 by default
+      per ANNOTATION_SPEC); CT v4_base subsample is H (human_manual_sam_assisted,
+      T2 by default until explicit A1 review).
+    audit_policy: null
+    easy_negative_ratio: 0.15
+    hn_policy: null    # baseline before HN; HN deferred to v4_3 after seeing v4_2 FPs
+    output_dir: "/mnt/d/ZAsolar/coco_v4_2_jhb_ft"
+    init_weights: "checkpoints/exp004_v4_hn/best_model.pth"
+    val_strategy: >
+      Whole-grid val (no tile leakage): 5 CBD + 5 Sandton stratified by
+      polygon count (seed=42, +1 for sandton). 65 grids in train (25 CT
+      + 20 CBD + 20 Sandton), 10 grids in val.
+    builder_script: "scripts/training/build_v4_2_jhb_ft.py"
+    notes: >
+      Recall-focused JHB-specialized fine-tune. Both CBD and Sandton GT
+      polygons aligned to aerial_2023 pixels (verified via per-grid
+      config.json). No vintage confound. CT 25 grids serve as anchor to
+      prevent catastrophic forgetting on Cape Town. Pre-training V4
+      baseline on 50 JHB grids: P=0.745 R=0.713 F1=0.728 (CBD P=0.684/R=0.825,
+      Sandton P=0.810/R=0.664). Sandton recall bottleneck is proposal
+      shortage (1152 FN with no proposal at any conf), not threshold filter.
+      Targets: maintain CT F1 ≥ 0.80, grow JHB Sandton recall ≥ 0.80
+      at iso-precision. Output checkpoint: exp006_v4_2_jhb_ft.
