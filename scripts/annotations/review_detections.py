@@ -1766,6 +1766,8 @@ def main():
                        help="Auto-batch: load all grids with ≤N predictions (from D drive results)")
     parser.add_argument("--predictions", type=Path, default=None,
                        help="Path to predictions GPKG (single-grid mode only)")
+    parser.add_argument("--predictions-dir", type=Path, default=None,
+                       help="Directory with <grid>/predictions_metric.gpkg (multi-grid override)")
     parser.add_argument("--region", default=None,
                        help="Region hint for grid spec lookup (e.g. 'jhb' for Johannesburg)")
     parser.add_argument("--host", default="127.0.0.1")
@@ -1835,7 +1837,12 @@ def main():
     # Resolve predictions and tiles for each grid
     all_grid_ids, all_pred_paths, all_tiles_dirs = [], [], []
     for gid in grid_ids:
-        if args.predictions and len(grid_ids) == 1:
+        if args.predictions_dir is not None:
+            pred_path = args.predictions_dir / gid / "predictions_metric.gpkg"
+            if not pred_path.exists():
+                print(f"[WARN] Not found under --predictions-dir: {pred_path}")
+                pred_path = None
+        elif args.predictions and len(grid_ids) == 1:
             pred_path = args.predictions
         else:
             pred_path = _find_predictions(gid, base_dir, region=region)
