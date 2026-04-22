@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-04-17: feat: add multi-city pipeline foundation
-- 2026-04-12: Cross-review harness multi-city refactor + pipeline redesign data layer (region_registry, annotation_loader, training_sets)
-- 2026-04-08: Fix GEID mosaic georeferencing (equirectangular, not bbox)
-- 2026-04-08: Joburg GEID pipeline: stitch + chip mosaics for cloud inference
-- 2026-04-08: Remove geid_reverse_engineering/ — moved to standalone sibling folder
-- 2026-04-08: Add geid_reverse_engineering/: headless GEID 6.48 client + protocol writeup
-- 2026-04-08: Update README with Joburg cross-city pilot, training-data deficit, and GT heater audit findings
-- 2026-04-08: Refactor GEID exporter to support arbitrary grid IDs
+- 2026-04-22: docs(progress): sync logs 2026-04-01 → 2026-04-21 + V1.2 pipeline plans
+- 2026-04-22: chore(workload): simplify to polygon-count-only (no buffer-merge)
+- 2026-04-22: feat(sync): Dropbox/Collab sync hooks + progress-log auto-sync
+- 2026-04-22: data(review): update 21 CT reviewed gpkgs + add --predictions-dir override
+- 2026-04-22: deprecate(geid): mark v3c_geid_2024_02 model_run as broken (bounds bug)
+- 2026-04-22: feat(analysis): V4 JHB conf sweep + V4 vs V4.2 val-10 apples-to-apples
+- 2026-04-22: feat(training): v4_2_jhb_ft COCO build pipeline (whole-grid val split)
+- 2026-04-22: data(annotations): add JHB CBD batch 1 (25 grids) and CT legacy GPKG
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
