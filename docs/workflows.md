@@ -109,7 +109,7 @@ BENCHMARK_PARALLEL=6 python3 scripts/analysis/run_benchmark.py --models v3c v4_1
 ```
 
 - **配置**: `configs/benchmarks/post_train.yaml` (preset) + `configs/model_registry.yaml` (模型注册表)
-- **Suites**: `cape_town_t1_smoke` (smoke)、`cape_town_independent_26` (primary, 排名用)、`cape_town_batch003_diagnostic` (diagnostic)、`jhb_transfer_6` (secondary)
+- **Suites**: `cape_town_t1_smoke` (smoke)、`cape_town_independent_26` (primary, 排名用)、`cape_town_batch003_diagnostic` (diagnostic)、`jhb_transfer_6` (secondary, legacy pilot)、`jhb_cbd_reviewed_25` (secondary, Joburg 快速迁移验证)
 - **并行**: 环境变量 `BENCHMARK_PARALLEL` 控制推理并行度（默认 6，RTX 5090 最优）
 - **输出**: `results/benchmark/<run_id>/` — `summary.json`、`summary.md`、`by_suite.csv`、`by_grid.csv`
 - **Per-grid 产物**: `results/<GridID>/benchmark_<run_id>_<tag>/`

@@ -38,5 +38,145 @@
     "timestamp": "2026-04-05T10:28:40Z",
     "source": "commit:95807650",
     "summary": "Daily log 2026-04-05: V4/V4.1 training, benchmark, pipeline improvements"
+  },
+  {
+    "timestamp": "2026-04-05T11:43:17Z",
+    "source": "commit:665185d7",
+    "summary": "GT heater audit pipeline, PV classifier scaffold, daily log update"
+  },
+  {
+    "timestamp": "2026-04-08T02:11:29Z",
+    "source": "commit:d64f87a7",
+    "summary": "Add GEID workflow scripts (Codex) for Google Earth tile downloads"
+  },
+  {
+    "timestamp": "2026-04-08T02:13:22Z",
+    "source": "commit:10b86f0d",
+    "summary": "Refactor GEID exporter to support arbitrary grid IDs"
+  },
+  {
+    "timestamp": "2026-04-08T04:02:22Z",
+    "source": "commit:7a2194a5",
+    "summary": "Update README with Joburg cross-city pilot, training-data deficit, and GT heater audit findings"
+  },
+  {
+    "timestamp": "2026-04-08T09:20:49Z",
+    "source": "commit:3ecc435b",
+    "summary": "Add geid_reverse_engineering/: headless GEID 6.48 client + protocol writeup"
+  },
+  {
+    "timestamp": "2026-04-08T09:54:03Z",
+    "source": "commit:8a8d8ca7",
+    "summary": "Remove geid_reverse_engineering/ — moved to standalone sibling folder"
+  },
+  {
+    "timestamp": "2026-04-08T10:43:52Z",
+    "source": "commit:2a898bb9",
+    "summary": "Joburg GEID pipeline: stitch + chip mosaics for cloud inference"
+  },
+  {
+    "timestamp": "2026-04-08T21:18:30Z",
+    "source": "commit:9598b182",
+    "summary": "Fix GEID mosaic georeferencing (equirectangular, not bbox)"
+  },
+  {
+    "timestamp": "2026-04-12T10:00:00Z",
+    "source": "session",
+    "summary": "Cross-review harness multi-city refactor + pipeline redesign data layer (region_registry, annotation_loader, training_sets)"
+  },
+  {
+    "timestamp": "2026-04-17T11:31:02Z",
+    "source": "commit:4123308d",
+    "summary": "feat: add multi-city pipeline foundation"
+  },
+  {
+    "timestamp": "2026-04-17T11:32:48Z",
+    "source": "commit:aabf6215",
+    "summary": "docs: sync agent workflows and project guidance"
+  },
+  {
+    "timestamp": "2026-04-17T11:38:44Z",
+    "source": "commit:b11db971",
+    "summary": "docs: sync annotation spec and manifest"
+  },
+  {
+    "timestamp": "2026-04-19T08:39:32Z",
+    "source": "commit:9b8ac9e4",
+    "summary": "docs(plans): add tiles/results restructure plan + inventory snapshot"
+  },
+  {
+    "timestamp": "2026-04-19T08:39:50Z",
+    "source": "commit:0e3a29b3",
+    "summary": "feat(registry): imagery_layers + model_runs registry schema"
+  },
+  {
+    "timestamp": "2026-04-19T08:40:06Z",
+    "source": "commit:18a10cbd",
+    "summary": "feat(detect): --imagery-layer / --model-run CLI + grid_utils integration"
+  },
+  {
+    "timestamp": "2026-04-19T08:40:19Z",
+    "source": "commit:7a78a377",
+    "summary": "feat(migration): PR5 results tree migration script"
+  },
+  {
+    "timestamp": "2026-04-19T08:40:33Z",
+    "source": "commit:4c936e4a",
+    "summary": "refactor: deprecate hardcoded city paths in imagery/annotation scripts"
+  },
+  {
+    "timestamp": "2026-04-19T08:40:49Z",
+    "source": "commit:6aea593a",
+    "summary": "docs: sync architecture.md and multi-city rule for new tiles/results layout"
+  },
+  {
+    "timestamp": "2026-04-19T11:30:27Z",
+    "source": "commit:b2a93acf",
+    "summary": "fix(geid-windows): use WM_CHAR + UDM_SETPOS32 for Delphi VCL controls"
+  },
+  {
+    "timestamp": "2026-04-19T11:31:11Z",
+    "source": "commit:5a704d40",
+    "summary": "chore(annotations): rename GT discovery path cleaned/ → Capetown/"
+  },
+  {
+    "timestamp": "2026-04-22T07:30:41Z",
+    "source": "commit:9ae14abc",
+    "summary": "feat(annotations): add JHB Sandton batch 2 (25 grids, aerial_2023)"
+  },
+  {
+    "timestamp": "2026-04-22T07:31:01Z",
+    "source": "commit:877ac526",
+    "summary": "data(annotations): add JHB CBD batch 1 (25 grids) and CT legacy GPKG"
+  },
+  {
+    "timestamp": "2026-04-22T07:31:21Z",
+    "source": "commit:eb35016a",
+    "summary": "feat(training): v4_2_jhb_ft COCO build pipeline (whole-grid val split)"
+  },
+  {
+    "timestamp": "2026-04-22T07:31:37Z",
+    "source": "commit:ddefa9c4",
+    "summary": "feat(analysis): V4 JHB conf sweep + V4 vs V4.2 val-10 apples-to-apples"
+  },
+  {
+    "timestamp": "2026-04-22T07:32:04Z",
+    "source": "commit:da90e336",
+    "summary": "deprecate(geid): mark v3c_geid_2024_02 model_run as broken (bounds bug)"
+  },
+  {
+    "timestamp": "2026-04-22T07:32:30Z",
+    "source": "commit:1dce358f",
+    "summary": "data(review): update 21 CT reviewed gpkgs + add --predictions-dir override"
+  },
+  {
+    "timestamp": "2026-04-22T07:32:46Z",
+    "source": "commit:776f3ed0",
+    "summary": "feat(sync): Dropbox/Collab sync hooks + progress-log auto-sync"
+  },
+  {
+    "timestamp": "2026-04-22T07:32:55Z",
+    "source": "commit:744c0e07",
+    "summary": "chore(workload): simplify to polygon-count-only (no buffer-merge)"
   }
 ]
