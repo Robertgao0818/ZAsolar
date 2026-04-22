@@ -47,6 +47,15 @@
             "command": "bash -c 'echo \"$TOOL_INPUT\" | grep -qE \"data/annotations/|results_joburg/.*reviewed\\.gpkg|results/[^/]+/review/.*reviewed\\.gpkg\" && /home/gaosh/projects/ZAsolar/scripts/sync_annotations_to_dropbox.sh >/dev/null 2>&1 & disown; exit 0'"
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'echo \"$TOOL_INPUT\" | grep -qE \"docs/progress_log/\" && /home/gaosh/projects/ZAsolar/scripts/sync_progress_log_to_dropbox.sh >/dev/null 2>&1 & disown; exit 0'"
+          }
+        ]
       }
     ]
   }
