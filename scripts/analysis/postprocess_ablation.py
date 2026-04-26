@@ -89,7 +89,7 @@ INPUT_CRS = "EPSG:4326"
 
 def find_results_base(grid_id: str) -> Path | None:
     """Find the results directory for a grid."""
-    for base in [Path("results"), Path("/mnt/d/ZAsolar/results")]:
+    for base in [Path("results"), Path("/home/gaosh/zasolar_data/results")]:
         p = base / grid_id
         if p.exists():
             return p
@@ -108,7 +108,7 @@ def find_tile_file(grid_dir: Path, mask_path: Path) -> Path | None:
     """Find the corresponding tile TIF for a mask file."""
     # mask name: GridID_col_row_geo_mask.tif -> tile: GridID_col_row_geo.tif
     tile_name = mask_path.stem.replace("_mask", "") + ".tif"
-    tiles_root = Path("/mnt/d/ZAsolar/tiles")
+    tiles_root = Path("/home/gaosh/zasolar_data/tiles")
     grid_id = grid_dir.name
     tile_path = tiles_root / grid_id / tile_name
     if tile_path.exists():

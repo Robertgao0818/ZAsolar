@@ -8,7 +8,7 @@ When annotating new grids for training data expansion.
 
 ## Prerequisites
 
-- Tiles downloaded to `/mnt/d/ZAsolar/tiles/<GridID>/`
+- Tiles downloaded to `/home/gaosh/zasolar_data/tiles/<GridID>/`
 - Best model at `checkpoints/best_model.pth`
 - Environment: `source scripts/activate_env.sh`
 - Full workflow doc: `docs/semi_auto_annotation_workflow.md`
@@ -18,7 +18,7 @@ When annotating new grids for training data expansion.
 ### 1. Run detection (no GT needed)
 
 ```bash
-SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python detect_and_evaluate.py \
+SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles python detect_and_evaluate.py \
   --grid-id <GRID_ID> --model-path checkpoints/best_model.pth --force
 ```
 
@@ -27,7 +27,7 @@ Output: `results/<GRID_ID>/predictions_metric.gpkg`
 ### 2. Launch review GUI
 
 ```bash
-SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python scripts/annotations/review_detections.py \
+SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles python scripts/annotations/review_detections.py \
   --grid-id <GRID_ID>
 ```
 
@@ -59,7 +59,7 @@ Render verification crops:
 
 Or reload GUI with reviewed GPKG:
 ```bash
-SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python scripts/annotations/review_detections.py \
+SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles python scripts/annotations/review_detections.py \
   --grid-id <GRID_ID> \
   --predictions results/<GRID_ID>/review/<GRID_ID>_reviewed.gpkg
 ```
@@ -87,7 +87,7 @@ python export_coco_dataset.py --output-dir data/coco
 For multiple grids, run detection in a loop:
 ```bash
 for gid in G1682 G1683 G1685 G1686; do
-  SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python detect_and_evaluate.py \
+  SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles python detect_and_evaluate.py \
     --grid-id $gid --model-path checkpoints/best_model.pth --force
 done
 ```

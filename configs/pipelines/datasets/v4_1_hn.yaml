@@ -88,5 +88,5 @@ hard_negatives:
     max_ratio: 0.04
 
 output:
-  root: ${SOLAR_ARTIFACT_ROOT:-/mnt/d/ZAsolar}
+  root: ${SOLAR_ARTIFACT_ROOT:-/home/gaosh/zasolar_data}
   name_template: "coco_{name}_{date}"

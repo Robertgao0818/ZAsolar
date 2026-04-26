@@ -1,5 +1,7 @@
 # Architecture — Cape Town Solar Panel Detection
 
+> **V1.4 (2026-04-22)**: Success metric reframes from per-polygon F1 to aggregate installation inventory at grid level, suited for economic analysis. Sub-repo `geid_bbox` pivots from GEID free detection to location-conditioned install-date back-dating. Validation framework: four channels (stratified precision, exhaustive recall, plausibility, opportunistic external) with task grid as primary aggregation unit. See [`validation_strategy.md`](validation_strategy.md) for the full spec.
+>
 > **V1.3 (2026-04-03)**: Task definition updated from installation-level footprint segmentation to reviewed prediction footprint segmentation. `installation` evaluation profile name preserved; GT annotations still follow installation-level rules. Some sections below may reference historical V1.2 conventions.
 
 ## Directory Structure
@@ -17,19 +19,20 @@ data/
     PROGRESS.md               — 标注进度自动汇总（batch/grid/installation 统计）
     annotation_manifest.csv   — 标注 manifest (quality tier T1/T2, review status)
   coco/                       — COCO 格式训练数据（export_coco_dataset.py 生成）
-tiles/                        — 符号链接或空目录（实际数据禁止放 WSL 项目目录）
-                               所有 tiles 存放在 D:\ZAsolar\tiles (WSL: /mnt/d/ZAsolar/tiles)
-                               COCO 数据集同理: /mnt/d/ZAsolar/coco_*/
+tiles/                        — 项目目录占位符（实际数据禁止放 WSL 项目目录）
+                               post-2026-04-26: 数据迁移到 ~/zasolar_data/ (WSL ext4, 替代 /mnt/d/ZAsolar/)
+                               env: SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles
+                                    SOLAR_ARTIFACT_ROOT=/home/gaosh/zasolar_data
+                               COCO 数据集: ~/zasolar_data/coco/coco_v4_*/
 
-# /mnt/d/ZAsolar/tiles/ 目录结构 (post-2026-04-19 重构):
+# ~/zasolar_data/tiles/ 目录结构 (post-2026-04-19 重构, 2026-04-26 搬到 WSL):
 #   cape_town/
-#     aerial_2025/{MANIFEST.json, G1189/, ...}      — CT 航测 2025 (chunked, 119 grids)
+#     aerial_2025/{MANIFEST.json, G1189/, ...}      — CT 航测 2025 (chunked, 120 grids incl. G1895)
 #   johannesburg/
 #     aerial_2023/{MANIFEST.json, G0772/, ...}      — JHB 航测 2023 (chunked, 100 grids)
-#     aerial_legacy/{MANIFEST.json, JHB01/, ...}    — JHB legacy pilot (chunked, 6 grids)
 #     geid_2024_02/{MANIFEST.json, G0772_mosaic.tif, ...}  — JHB GEID 2024-02 (mosaic, 100 files)
-#   joburg_geid -> johannesburg/geid_2024_02/       — 过渡 symlink (~2 周后删)
-# /mnt/d/ZAsolar/tiles_joburg -> tiles/johannesburg/aerial_2023/  — 过渡 symlink
+# /mnt/d/ZAsolar/tiles/johannesburg/aerial_legacy/  — JHB legacy pilot 6 grids (留在 NTFS, 仅 JHB01-06 用)
+# /mnt/d/ZAsolar/annotations_inbox/                 — QGIS handoff 区, 留在 NTFS 供 Windows 工具直访
 # 每层 MANIFEST.json 记录 source/vintage/file_layout/coverage_grids/crs。
 # 解析 tile 路径: core.region_registry.get_imagery_layer_path(region, layer_id)
 
@@ -47,7 +50,7 @@ results/<region>/<model_run>/<GridID>/  — 检测结果按 region × model_run 
 #   johannesburg/v4_aerial_2023/              — V4 on JHB aerial (92 grids, canonical)
 # Legacy results/<GridID>/ (直接挂 CT 根下) 仍为 CT 旧格式结果的后备位置,
 #   待 PR8 清理 (checkpoints_cleaned 24 grids + 无 config 77 grids)。
-# /home/gaosh/projects/ZAsolar/results_joburg -> results/johannesburg/v4_aerial_2023  — 过渡 symlink
+# results_joburg/ 过渡 symlink 已于 2026-04-26 删除; 部分 analysis 脚本仍引用，待逐一更新
   masks/                      — per-tile 检测掩膜
   vectors/                    — per-tile 矢量化结果
   config.json                 — 包含 region/imagery_layer_id/model_run_id 字段 (post-2026-04-19)

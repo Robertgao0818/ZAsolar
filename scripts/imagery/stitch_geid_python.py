@@ -132,7 +132,7 @@ def stitch_grid(grid_dir: Path, output: Path, force: bool) -> bool:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("root", type=Path, help="GEID-python root, e.g. /mnt/d/ZAsolar/geid_raw/joburg_geid_python")
+    ap.add_argument("root", type=Path, help="GEID-python root, e.g. /home/gaosh/zasolar_data/geid_raw/joburg_geid_python")
     ap.add_argument("--output-dir", type=Path, required=True, help="Output dir for <GRID>_mosaic.tif")
     ap.add_argument("--grids", nargs="*", help="Optional subset of grid IDs")
     ap.add_argument("--force", action="store_true")

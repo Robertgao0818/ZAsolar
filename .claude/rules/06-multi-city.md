@@ -2,11 +2,14 @@
 
 ## Never hardcode city-specific paths
 
-Do not hardcode `/mnt/d/ZAsolar/tiles_joburg`, `results_joburg/`, or any
-city-specific directory path in new or modified code. Post-2026-04-19 the
-canonical layout is `tiles/<region>/<imagery_layer>/` and
-`results/<region>/<model_run>/`. Always use `core/grid_utils.py` +
-`core/region_registry.py`:
+Do not hardcode region-specific directory paths in new or modified code.
+The canonical layout (post-2026-04-19 restructure, post-2026-04-26
+migration to WSL ext4) is:
+
+- Tiles: `~/zasolar_data/tiles/<region>/<imagery_layer>/`
+- Results: `results/<region>/<model_run>/`
+
+Always use `core/grid_utils.py` + `core/region_registry.py`:
 
 - `resolve_tiles_dir(grid_id, region=, imagery_layer=)` — tile dir or mosaic file
 - `get_results_root(region=, model_run=)` — results root for a specific run
@@ -14,9 +17,8 @@ canonical layout is `tiles/<region>/<imagery_layer>/` and
 - `region_registry.get_imagery_layer_path(region, layer_id)` — raw layer dir
 - `region_registry.get_model_run_path(region, run_id)` — raw run dir
 
-Legacy symlinks (`tiles_joburg`, `results_joburg`, `tiles/joburg_geid`) are
-retained for ~2 weeks post-2026-04-19, then deleted. Do not reference them
-in new code.
+Legacy transitional symlinks (`tiles_joburg`, `results_joburg`,
+`tiles/joburg_geid`) were deleted on 2026-04-26. Do not re-introduce them.
 
 ## Grid IDs can overlap between regions — NEVER pick region by grid ID
 

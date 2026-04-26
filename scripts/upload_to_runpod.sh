@@ -25,7 +25,8 @@ ENDPOINT="${RUNPOD_S3_ENDPOINT:-https://s3api-eu-ro-1.runpod.io}"
 REGION="eu-ro-1"
 BUCKET="${RUNPOD_S3_BUCKET:-s3://k5r31jwc9k}"
 AWS="$HOME/.local/bin/aws"
-UPLOAD_DIR="/mnt/d/ZAsolar/upload_tmp"
+UPLOAD_DIR="${UPLOAD_DIR:-$HOME/zasolar_data/_upload_tmp}"
+mkdir -p "$UPLOAD_DIR"
 
 upload_parts() {
     local prefix="$1"    # e.g. "coco_part_" or "tiles_part_"

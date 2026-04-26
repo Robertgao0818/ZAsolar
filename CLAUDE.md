@@ -4,10 +4,13 @@ South Africa rooftop solar installation detection & evaluation pipeline. Uses ge
 
 **Task definition (V1.3)**: reviewed prediction footprint segmentation — model predictions reviewed and accepted by human annotators, exported as polygons. Ground-truth annotations follow installation-level rules (see `data/annotations/ANNOTATION_SPEC.md`), but the pipeline output is reviewed predictions, not installation-merged footprints.
 
+**V1.4 pivot (2026-04-22)**: the project's success metric reframes from per-polygon F1 to an **aggregate-inventory-at-grid-level** goal suited for economic analysis. Per-polygon F1 becomes diagnostic. Validation moves to a four-channel framework (stratified precision, exhaustive recall, plausibility, opportunistic external) with the task grid as the primary aggregation unit. Sub-repo `geid_bbox` pivots from GEID free detection to location-conditioned temporal back-dating (given a main-repo seed, estimate install date from GEID history). Full spec in [`docs/validation_strategy.md`](docs/validation_strategy.md).
+
 ## Key References
 
 - Architecture and directory layout: [`docs/architecture.md`](docs/architecture.md)
 - Workflows (inference, fine-tuning, analysis): [`docs/workflows.md`](docs/workflows.md)
+- Validation strategy (V1.4 four-channel framework): [`docs/validation_strategy.md`](docs/validation_strategy.md)
 - Repository rules (Git, directory governance): [`docs/governance/repo-rules.md`](docs/governance/repo-rules.md)
 - Annotation specification (Two-Axis Model): [`data/annotations/ANNOTATION_SPEC.md`](data/annotations/ANNOTATION_SPEC.md)
 - Region registry (authoritative): [`configs/datasets/regions.yaml`](configs/datasets/regions.yaml)
@@ -27,10 +30,14 @@ South Africa rooftop solar installation detection & evaluation pipeline. Uses ge
 - Virtualenv: `./.venv` (create via `./scripts/bootstrap_env.sh`)
 - CUDA GPU required for detection and training; `./scripts/check_env.sh` verifies availability
 - Training dependencies: `torch`, `torchvision`, `opencv-python-headless`, `huggingface_hub`, `pycocotools`
-- **Large data on D drive** (not in WSL project dir):
-  - Tiles: `/mnt/d/ZAsolar/tiles/` (env: `SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles`)
-  - COCO datasets: `/mnt/d/ZAsolar/coco_*/`
-  - Project `tiles/` directory should NOT contain actual tile data
+- **Large data in `~/zasolar_data/`** (WSL ext4, post-2026-04-26 migration from `/mnt/d/ZAsolar/`):
+  - Tiles: `~/zasolar_data/tiles/<region>/<imagery_layer>/` (env: `SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles`)
+  - COCO datasets: `~/zasolar_data/coco/coco_v4_*/`
+  - Models / SAM weights: `~/zasolar_data/models/`
+  - GEID raw mosaics: `~/zasolar_data/geid_raw/`
+  - Inference results: `~/zasolar_data/results/`
+  - Annotations inbox (QGIS handoff, NTFS-side): `/mnt/d/ZAsolar/annotations_inbox/`
+  - Project `tiles/` and `results/` directories should NOT contain actual data — symlinks/migrations only
 
 ## Quick Commands
 

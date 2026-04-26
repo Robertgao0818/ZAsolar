@@ -10,7 +10,7 @@ When syncing data to RunPod for cloud training, or after generating new COCO dat
 
 - AWS CLI installed at `$HOME/.local/bin/aws`
 - RunPod Network Volume with S3 API enabled
-- Split files prepared in `/mnt/d/ZAsolar/upload_tmp/`
+- Split files prepared in `~/zasolar_data/_upload_tmp/`
 
 ## Steps
 
@@ -21,20 +21,20 @@ Large data must be split into ≤4GB parts because RunPod S3 has pipe/multipart 
 ```bash
 # COCO dataset (~28GB → 7 parts)
 tar -cf - -C /home/gaosh/projects/ZAsolar data/coco/ | \
-  split -b 4G - /mnt/d/ZAsolar/upload_tmp/coco_part_
+  split -b 4G - ~/zasolar_data/_upload_tmp/coco_part_
 
 # Tiles (~23GB → 6 parts)
 tar -cf - -C /home/gaosh/projects/ZAsolar tiles/ | \
-  split -b 4G - /mnt/d/ZAsolar/upload_tmp/tiles_part_
+  split -b 4G - ~/zasolar_data/_upload_tmp/tiles_part_
 ```
 
 For small files (code, checkpoints), tar and upload directly:
 ```bash
-tar -cf /mnt/d/ZAsolar/upload_tmp/zasolar_code.tar \
+tar -cf ~/zasolar_data/_upload_tmp/zasolar_code.tar \
   train.py export_coco_dataset.py detect_and_evaluate.py \
   core/ scripts/ configs/ data/annotations/ requirements*.txt CLAUDE.md
 
-tar -cf /mnt/d/ZAsolar/upload_tmp/zasolar_checkpoints.tar \
+tar -cf ~/zasolar_data/_upload_tmp/zasolar_checkpoints.tar \
   checkpoints/best_model.pth
 ```
 
@@ -72,7 +72,7 @@ For quick syncs after code changes:
 # Load credentials from .env (never hardcode)
 source .env
 
-$HOME/.local/bin/aws s3 cp /mnt/d/ZAsolar/upload_tmp/zasolar_code.tar \
+$HOME/.local/bin/aws s3 cp ~/zasolar_data/_upload_tmp/zasolar_code.tar \
   s3://k5r31jwc9k/zasolar_code.tar \
   --region eu-ro-1 --endpoint-url https://s3api-eu-ro-1.runpod.io
 ```
@@ -86,7 +86,7 @@ scp -P <PORT> -i ~/.ssh/id_ed25519 <file> root@<IP>:/workspace/
 
 - Never pipe `tar | aws s3 cp -` for files >4GB — RunPod S3 multipart fails on pipe streams
 - Always split to real files first, then upload each file individually
-- Split files go to D drive (`/mnt/d/ZAsolar/upload_tmp/`) to avoid filling C drive
+- Split files go to `~/zasolar_data/_upload_tmp/` (WSL ext4); legacy `/mnt/d/ZAsolar/upload_tmp/` removed 2026-04-26
 - S3 credentials are in `scripts/upload_to_runpod.sh`
 - RunPod S3 endpoint: `https://s3api-eu-ro-1.runpod.io`, bucket: `k5r31jwc9k`
 

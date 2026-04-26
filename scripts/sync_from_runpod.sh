@@ -34,8 +34,8 @@ SSH_OPTS="-p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=accept-new"
 
 REMOTE_WORKSPACE="/workspace/ZAsolar"
 REMOTE_TILES="/workspace/tiles"
-LOCAL_RESULTS="/mnt/d/ZAsolar/results"
-LOCAL_TILES="/mnt/d/ZAsolar/tiles"
+LOCAL_RESULTS="/home/gaosh/zasolar_data/results"
+LOCAL_TILES="/home/gaosh/zasolar_data/tiles"
 
 MODE="${1:?Usage: $0 <results|tiles|all> [grid_list_file]}"
 GRID_LIST_FILE="${2:-}"

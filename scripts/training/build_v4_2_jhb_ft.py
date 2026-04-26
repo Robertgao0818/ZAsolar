@@ -93,7 +93,7 @@ def stratified_sample(counts: dict[str, int], n: int, seed: int) -> list[str]:
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--output-dir", default="/mnt/d/ZAsolar/coco_v4_2_jhb_ft")
+    ap.add_argument("--output-dir", default="/home/gaosh/zasolar_data/coco/coco_v4_2_jhb_ft")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--ct-subsample-n", type=int, default=25)
     ap.add_argument("--val-cbd-n", type=int, default=5)

@@ -22,7 +22,7 @@ from rasterio.windows import from_bounds
 from shapely.geometry import box
 
 PROJECT = Path(__file__).resolve().parents[2]
-TILE_ROOT = Path("/mnt/d/ZAsolar/tiles/johannesburg/aerial_2023")
+TILE_ROOT = Path("/home/gaosh/zasolar_data/tiles/johannesburg/aerial_2023")
 NOHINT_DIR = PROJECT / "results/analysis/v4_2_conf015_sandton_no_hint"
 OUT_HTML = PROJECT / "results/analysis/v4_2_conf015_sandton_no_hint_preview.html"
 THUMB_CRS = "EPSG:4326"

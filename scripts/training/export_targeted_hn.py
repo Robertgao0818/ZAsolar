@@ -11,8 +11,8 @@ variant with targeted hard negatives.
 
 Usage:
     python scripts/training/export_targeted_hn.py \
-        --base-coco /mnt/d/ZAsolar/coco_v3_no_hn \
-        --output-dir /mnt/d/ZAsolar/coco_v3_targeted_hn \
+        --base-coco /home/gaosh/zasolar_data/coco/coco_v3_no_hn \
+        --output-dir /home/gaosh/zasolar_data/coco/coco_v3_targeted_hn \
         --grids G1682 G1683 G1685 ...
 """
 
@@ -340,11 +340,11 @@ def main():
         description="Export targeted hard-negative chips from reviewed FP predictions"
     )
     parser.add_argument(
-        "--base-coco", type=Path, default=Path("/mnt/d/ZAsolar/coco_v3_no_hn"),
+        "--base-coco", type=Path, default=Path("/home/gaosh/zasolar_data/coco/coco_v3_no_hn"),
         help="Base COCO dataset (no hard negatives) to merge into",
     )
     parser.add_argument(
-        "--output-dir", type=Path, default=Path("/mnt/d/ZAsolar/coco_v3_targeted_hn"),
+        "--output-dir", type=Path, default=Path("/home/gaosh/zasolar_data/coco/coco_v3_targeted_hn"),
         help="Output directory for merged dataset",
     )
     parser.add_argument("--chip-size", type=int, default=400)

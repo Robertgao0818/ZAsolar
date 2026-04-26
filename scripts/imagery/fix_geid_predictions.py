@@ -95,7 +95,7 @@ def fix_one(grid_id: str, manifest_path: Path, results_dir: Path) -> bool:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--manifest-root", type=Path,
-                    default=Path("/mnt/d/ZAsolar/geid_raw/joburg_geid_python"))
+                    default=Path("/home/gaosh/zasolar_data/geid_raw/joburg_geid_python"))
     ap.add_argument("--results-root", type=Path, default=Path("results"))
     ap.add_argument("--grids", nargs="*")
     args = ap.parse_args()

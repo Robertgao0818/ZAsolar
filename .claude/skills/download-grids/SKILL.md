@@ -10,7 +10,7 @@ When expanding coverage to new geographic areas — preview grids, select ones w
 
 - Environment: `source scripts/activate_env.sh`
 - OSM building data cached in `cache/osm_buildings_centroids.gpkg`
-- Tiles output to D drive: `SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles`
+- Tiles output to WSL ext4: `SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles` (post-2026-04-26 migration from /mnt/d/ZAsolar)
 
 ## Steps
 
@@ -66,17 +66,17 @@ python scripts/imagery/filter_grids_osm.py --buffer-rings 2
 
 ```bash
 # Dry run first
-SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python scripts/imagery/download_reviewed_grids.py \
+SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles python scripts/imagery/download_reviewed_grids.py \
   --batch-dir results/grid_previews/batch_<NNN> --dry
 
 # Actual download (full, no OSM mask)
-SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python scripts/imagery/download_reviewed_grids.py \
+SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles python scripts/imagery/download_reviewed_grids.py \
   --batch-dir results/grid_previews/batch_<NNN> --workers 4
 ```
 
 ## Constraints
 
-- Always set `SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles` — C drive space is limited
+- Always set `SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles` — keeps tiles on WSL ext4 for fast IO
 - Default is full download (all tiles). Only add `--use-tile-mask` in dense urban areas where OSM data is reliable
 - OSM tile mask causes issues in suburban areas (incomplete building data → missed tiles, boundary cuts)
 - Grid preview GUI uses port 8765 (detection review uses 8766)

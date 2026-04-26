@@ -1742,16 +1742,16 @@ def _find_predictions(grid_id: str, base_dir: Path, region: str | None = None) -
     if region == "jhb":
         candidates = [
             base_dir / "results_joburg" / grid_id / "predictions_metric.gpkg",
-            Path("/mnt/d/ZAsolar/results_joburg") / grid_id / "predictions_metric.gpkg",
+            Path("/home/gaosh/zasolar_data/results/johannesburg/v4_aerial_2023") / grid_id / "predictions_metric.gpkg",
             base_dir / "results" / grid_id / "predictions_metric.gpkg",
-            Path("/mnt/d/ZAsolar/results") / grid_id / "predictions_metric.gpkg",
+            Path("/home/gaosh/zasolar_data/results") / grid_id / "predictions_metric.gpkg",
         ]
     else:
         candidates = [
             base_dir / "results" / grid_id / "predictions_metric.gpkg",
             base_dir / "results_joburg" / grid_id / "predictions_metric.gpkg",
-            Path("/mnt/d/ZAsolar/results") / grid_id / "predictions_metric.gpkg",
-            Path("/mnt/d/ZAsolar/results_joburg") / grid_id / "predictions_metric.gpkg",
+            Path("/home/gaosh/zasolar_data/results") / grid_id / "predictions_metric.gpkg",
+            Path("/home/gaosh/zasolar_data/results/johannesburg/v4_aerial_2023") / grid_id / "predictions_metric.gpkg",
         ]
     for p in candidates:
         if p.exists():
@@ -1785,14 +1785,14 @@ def main():
         import subprocess
         grid_ids = []
         if region == "jhb":
-            results_roots = [Path("/mnt/d/ZAsolar/results_joburg"), base_dir / "results_joburg"]
+            results_roots = [Path("/home/gaosh/zasolar_data/results/johannesburg/v4_aerial_2023"), base_dir / "results_joburg"]
         elif region == "ct":
-            results_roots = [Path("/mnt/d/ZAsolar/results"), base_dir / "results"]
+            results_roots = [Path("/home/gaosh/zasolar_data/results"), base_dir / "results"]
         else:
             results_roots = [
-                Path("/mnt/d/ZAsolar/results"),
+                Path("/home/gaosh/zasolar_data/results"),
                 base_dir / "results",
-                Path("/mnt/d/ZAsolar/results_joburg"),
+                Path("/home/gaosh/zasolar_data/results/johannesburg/v4_aerial_2023"),
                 base_dir / "results_joburg",
             ]
 

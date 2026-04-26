@@ -34,12 +34,12 @@ import pandas as pd
 from shapely.geometry import shape
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-TILES_ROOT = Path("/mnt/d/ZAsolar/tiles")
+TILES_ROOT = Path("/home/gaosh/zasolar_data/tiles")
 
 # Results root per batch
 RESULTS_ROOTS = {
     "batch003": BASE_DIR / "results",
-    "batch004": Path("/mnt/d/ZAsolar/results"),
+    "batch004": Path("/home/gaosh/zasolar_data/results"),
 }
 
 BATCH_GRIDS = {
@@ -73,7 +73,7 @@ def _get_results_root(grid_id: str) -> Path:
     local = BASE_DIR / "results" / grid_id
     if local.exists():
         return BASE_DIR / "results"
-    return Path("/mnt/d/ZAsolar/results")
+    return Path("/home/gaosh/zasolar_data/results")
 
 
 def _load_fn_markers(grid_id: str, results_root: Path) -> list[dict]:

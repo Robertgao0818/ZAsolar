@@ -22,7 +22,7 @@ import pandas as pd
 from PIL import Image
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-TILES_ROOT = Path("/mnt/d/ZAsolar/tiles")
+TILES_ROOT = Path("/home/gaosh/zasolar_data/tiles")
 RESULTS_DIR = BASE_DIR / "results"
 CLEANED_DIR = BASE_DIR / "data" / "annotations" / "Capetown"
 THUMBNAILS_ROOT = Path("/mnt/d/ZAsolar/review_thumbnails")

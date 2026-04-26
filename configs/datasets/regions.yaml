@@ -10,15 +10,35 @@ regions:
       # PR3 (2026-04-19): tiles moved to tiles/cape_town/aerial_2025.
       # tiles_root now points to the region subtree; individual layers live
       # under imagery_layers[*].path.
-      tiles_root: "/mnt/d/ZAsolar/tiles/cape_town"
+      tiles_root: "/home/gaosh/zasolar_data/tiles/cape_town"
       results_root: "results"
       annotations_dir: "data/annotations/Capetown"
       task_grid: "data/task_grid.gpkg"
     grid_id_pattern: "G\\d{4}"
 
+    # CT annotation tasks are split along a north-south axis between two RAs,
+    # with two separate KML grid schemes. Same grid ID (e.g. G1842) refers to
+    # DIFFERENT physical cells in each scheme. Task_grid above is the Gao scheme.
+    annotation_schemes:
+      gao:
+        task_grid: "data/task_grid.gpkg"
+        task_kml: "Dropbox/RA_Solar/grid_data/cape_town_grid_Gao.kml"
+        grid_count: 2214
+        grid_id_range: "G0001..G4401"
+        annotations_dir: "data/annotations/Capetown"
+        notes: "Primary scheme — source of all aerial_2025 imagery and training data"
+      li:
+        task_kml: "Dropbox/RA_Solar/grid_data/cape_town_grid_Li.kml"
+        grid_count: 2215
+        grid_id_range: "G0029..G4429"
+        annotations_dir: "data/annotations/Capetown_Li"
+        notes: "Complementary RA scheme. 17 grids annotated 2026-03..2026-04
+          (1260 polygons). No imagery in aerial_2025 yet — annotations are
+          label-bank only until tiles are sourced for Li-KML cell bounds."
+
     imagery_layers:
       aerial_2025:
-        path: "/mnt/d/ZAsolar/tiles/cape_town/aerial_2025"
+        path: "/home/gaosh/zasolar_data/tiles/cape_town/aerial_2025"
         source: "aerial"
         vintage: "2025"
         file_layout: "chunked"
@@ -101,8 +121,8 @@ regions:
     paths:
       # PR3 (2026-04-19): tiles moved to tiles/johannesburg/<layer>/.
       # Individual layers live under imagery_layers[*].path.
-      tiles_root: "/mnt/d/ZAsolar/tiles/johannesburg"
-      results_root: "results_joburg"
+      tiles_root: "/home/gaosh/zasolar_data/tiles/johannesburg"
+      results_root: "results/johannesburg"
       annotations_dir: "data/annotations/Joburg"
       task_grid: "data/jhb_task_grid.gpkg"
     grid_id_pattern: "(JHB\\d{2}|G\\d{4})"
@@ -113,7 +133,7 @@ regions:
     # grid_id alone.
     imagery_layers:
       aerial_2023:
-        path: "/mnt/d/ZAsolar/tiles/johannesburg/aerial_2023"
+        path: "/home/gaosh/zasolar_data/tiles/johannesburg/aerial_2023"
         source: "aerial"
         vintage: "2023"
         file_layout: "chunked"
@@ -135,7 +155,7 @@ regions:
           G1634,
         ]
       geid_2024_02:
-        path: "/mnt/d/ZAsolar/tiles/johannesburg/geid_2024_02"
+        path: "/home/gaosh/zasolar_data/tiles/johannesburg/geid_2024_02"
         source: "geid"
         vintage: "2024-02"
         file_layout: "mosaic"
@@ -286,3 +306,153 @@ regions:
         n_unreviewed: 12
         n_sam_recut: 1152
         notes: "Recall bottleneck: 1152 FN with no proposal (post-conf floor 0.66); see results/analysis/v4_joburg_conf_sweep/sweep.csv"
+
+  pietermaritzburg:
+    description: "Vexcel urban aerial coverage: Pietermaritzburg"
+    crs_metric: "EPSG:32736"
+    crs_exchange: "EPSG:4326"
+    paths:
+      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/pietermaritzburg"
+      results_root: "results/vexcel/pietermaritzburg"
+      annotations_dir: "data/annotations/Vexcel/pietermaritzburg"
+      task_grid: "data/vexcel_task_grids/pietermaritzburg_task_grid.gpkg"
+    grid_id_pattern: "PMB\\d{4}"
+    imagery_layers:
+      vexcel_ortho_2025_12:
+        path: "/home/gaosh/zasolar_data/tiles/vexcel/pietermaritzburg/ortho"
+        source: "vexcel"
+        vintage: "2025-12-16"
+        file_layout: "chunked"
+        file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
+        crs: "EPSG:4326"
+        collection: "za-kzn-pietermaritzburg-2025"
+        product: "final-ortho"
+        avg_gsd_m: 0.069
+        coverage_grids: []
+    default_imagery_layer: "vexcel_ortho_2025_12"
+    grids: {}
+
+  durban:
+    description: "Vexcel urban aerial coverage: Durban"
+    crs_metric: "EPSG:32736"
+    crs_exchange: "EPSG:4326"
+    paths:
+      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/durban"
+      results_root: "results/vexcel/durban"
+      annotations_dir: "data/annotations/Vexcel/durban"
+      task_grid: "data/vexcel_task_grids/durban_task_grid.gpkg"
+    grid_id_pattern: "DBN\\d{4}"
+    imagery_layers:
+      vexcel_ortho_2025_12_2026_01:
+        path: "/home/gaosh/zasolar_data/tiles/vexcel/durban/ortho"
+        source: "vexcel"
+        vintage: "2025-12-17..2026-01-06"
+        file_layout: "chunked"
+        file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
+        crs: "EPSG:4326"
+        collection: "za-kzn-durban-2026"
+        product: "quick-ortho"
+        avg_gsd_m: 0.069
+        coverage_grids: []
+    default_imagery_layer: "vexcel_ortho_2025_12_2026_01"
+    grids: {}
+
+  east_london:
+    description: "Vexcel urban aerial coverage: East London"
+    crs_metric: "EPSG:32735"
+    crs_exchange: "EPSG:4326"
+    paths:
+      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/east_london"
+      results_root: "results/vexcel/east_london"
+      annotations_dir: "data/annotations/Vexcel/east_london"
+      task_grid: "data/vexcel_task_grids/east_london_task_grid.gpkg"
+    grid_id_pattern: "ELS\\d{4}"
+    imagery_layers:
+      vexcel_ortho_2026_01:
+        path: "/home/gaosh/zasolar_data/tiles/vexcel/east_london/ortho"
+        source: "vexcel"
+        vintage: "2026-01-07..2026-01-08"
+        file_layout: "chunked"
+        file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
+        crs: "EPSG:4326"
+        collection: "za-ec-eastlondon-2026"
+        product: "final-ortho"
+        avg_gsd_m: 0.071
+        coverage_grids: []
+    default_imagery_layer: "vexcel_ortho_2026_01"
+    grids: {}
+
+  gqeberha:
+    description: "Vexcel urban aerial coverage: Port Elizabeth / Gqeberha"
+    crs_metric: "EPSG:32735"
+    crs_exchange: "EPSG:4326"
+    paths:
+      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/gqeberha"
+      results_root: "results/vexcel/gqeberha"
+      annotations_dir: "data/annotations/Vexcel/gqeberha"
+      task_grid: "data/vexcel_task_grids/gqeberha_task_grid.gpkg"
+    grid_id_pattern: "GQB\\d{4}"
+    imagery_layers:
+      vexcel_ortho_2026_01:
+        path: "/home/gaosh/zasolar_data/tiles/vexcel/gqeberha/ortho"
+        source: "vexcel"
+        vintage: "2026-01-11..2026-01-21"
+        file_layout: "chunked"
+        file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
+        crs: "EPSG:4326"
+        collection: "za-ec-portelizabeth-2026"
+        product: "final-ortho"
+        avg_gsd_m: 0.072
+        coverage_grids: []
+    default_imagery_layer: "vexcel_ortho_2026_01"
+    grids: {}
+
+  bloemfontein:
+    description: "Vexcel urban aerial coverage: Bloemfontein"
+    crs_metric: "EPSG:32735"
+    crs_exchange: "EPSG:4326"
+    paths:
+      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/bloemfontein"
+      results_root: "results/vexcel/bloemfontein"
+      annotations_dir: "data/annotations/Vexcel/bloemfontein"
+      task_grid: "data/vexcel_task_grids/bloemfontein_task_grid.gpkg"
+    grid_id_pattern: "BFN\\d{4}"
+    imagery_layers:
+      vexcel_ortho_2026_01:
+        path: "/home/gaosh/zasolar_data/tiles/vexcel/bloemfontein/ortho"
+        source: "vexcel"
+        vintage: "2026-01-18"
+        file_layout: "chunked"
+        file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
+        crs: "EPSG:4326"
+        collection: "za-fs-bloemfontein-2026"
+        product: "final-ortho"
+        avg_gsd_m: 0.074
+        coverage_grids: []
+    default_imagery_layer: "vexcel_ortho_2026_01"
+    grids: {}
+
+  pretoria:
+    description: "Vexcel urban aerial coverage: Pretoria"
+    crs_metric: "EPSG:32735"
+    crs_exchange: "EPSG:4326"
+    paths:
+      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/pretoria"
+      results_root: "results/vexcel/pretoria"
+      annotations_dir: "data/annotations/Vexcel/pretoria"
+      task_grid: "data/vexcel_task_grids/pretoria_task_grid.gpkg"
+    grid_id_pattern: "PTA\\d{4}"
+    imagery_layers:
+      vexcel_ortho_2026_02:
+        path: "/home/gaosh/zasolar_data/tiles/vexcel/pretoria/ortho"
+        source: "vexcel"
+        vintage: "2026-02-05..2026-02-08"
+        file_layout: "chunked"
+        file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
+        crs: "EPSG:4326"
+        collection: "za-gp-pretoria-2026"
+        product: "quick-ortho"
+        avg_gsd_m: 0.072
+        coverage_grids: []
+    default_imagery_layer: "vexcel_ortho_2026_02"
+    grids: {}

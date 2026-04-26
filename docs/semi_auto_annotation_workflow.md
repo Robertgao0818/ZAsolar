@@ -4,8 +4,8 @@
 
 ## Prerequisites
 
-- Tiles 存储在 `D:\ZAsolar\tiles\` (WSL: `/mnt/d/ZAsolar/tiles/`)
-- 环境变量: `SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles`
+- Tiles 存储在 `~/zasolar_data/tiles/` (WSL: `/home/gaosh/zasolar_data/tiles/`)
+- 环境变量: `SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles`
 - Best model: `checkpoints/best_model.pth`
 - Python 环境: `source scripts/activate_env.sh`
 
@@ -23,7 +23,7 @@ python scripts/imagery/filter_grids_osm.py --buffer-rings 2
 python scripts/imagery/review_grid_previews.py --batch-dir results/grid_previews/batch_004
 
 # 下载选中的 grid（输出到 D 盘，OSM 掩膜过滤）
-SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python scripts/imagery/download_reviewed_grids.py \
+SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles python scripts/imagery/download_reviewed_grids.py \
   --batch-dir results/grid_previews/batch_004 --use-tile-mask --workers 4
 ```
 
@@ -48,14 +48,14 @@ with open(decisions_path, "w", newline="") as f:
 
 ```bash
 # 单 grid 推理
-SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python detect_and_evaluate.py \
+SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles python detect_and_evaluate.py \
   --grid-id G1686 --model-path checkpoints/best_model.pth --force
 
 # 批量推理（所有新下载的 grid）
 for gid in G1682 G1683 G1685 G1686 G1687 G1688 G1689 G1690 G1691 G1692 G1693 \
            G1743 G1744 G1747 G1749 G1750 G1798 G1800 G1801 G1806 G1807; do
   echo "=== $gid ==="
-  SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python detect_and_evaluate.py \
+  SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles python detect_and_evaluate.py \
     --grid-id $gid --model-path checkpoints/best_model.pth --force
 done
 ```
@@ -65,7 +65,7 @@ done
 ## Step 3: Review GUI 审查
 
 ```bash
-SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles python scripts/annotations/review_detections.py \
+SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles python scripts/annotations/review_detections.py \
   --grid-id G1686
 ```
 
@@ -117,7 +117,7 @@ from rasterio.features import shapes as rio_shapes
 from pathlib import Path
 
 GRID_ID = "G1686"  # ← 改成你的 grid
-TILES_DIR = Path(f"/mnt/d/ZAsolar/tiles/{GRID_ID}")
+TILES_DIR = Path(f"/home/gaosh/zasolar_data/tiles/{GRID_ID}")
 REVIEW_DIR = Path(f"results/{GRID_ID}/review")
 REVIEWED_PATH = REVIEW_DIR / f"{GRID_ID}_reviewed.gpkg"
 
@@ -219,7 +219,7 @@ bash cloud_setup.sh --resume checkpoints/best_model.pth
 
 | 文件 | 路径 |
 |------|------|
-| Tiles (D盘) | `/mnt/d/ZAsolar/tiles/<GridID>/` |
+| Tiles (D盘) | `/home/gaosh/zasolar_data/tiles/<GridID>/` |
 | 预测结果 | `results/<GridID>/predictions_metric.gpkg` |
 | 审查决策 | `results/<GridID>/review/detection_review_decisions.csv` |
 | FN 标记 | `results/<GridID>/review/fn_markers.csv` |
@@ -231,7 +231,7 @@ bash cloud_setup.sh --resume checkpoints/best_model.pth
 ## 环境变量
 
 ```bash
-export SOLAR_TILES_ROOT=/mnt/d/ZAsolar/tiles
+export SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles
 ```
 
 可加入 `scripts/activate_env.sh` 或 `.bashrc` 中。

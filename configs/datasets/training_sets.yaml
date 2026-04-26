@@ -25,7 +25,7 @@ training_sets:
     audit_policy: null
     easy_negative_ratio: 0.15
     hn_policy: null
-    output_dir: "/mnt/d/ZAsolar/coco_v3_no_hn"
+    output_dir: "/home/gaosh/zasolar_data/coco/coco_v3_no_hn"
     notes: >
       Base dataset for V3-C training; no hard negatives.
       Historical benchmark used cape_town_independent_26 (26 grids) as holdout.
@@ -40,7 +40,7 @@ training_sets:
     audit_policy: null
     easy_negative_ratio: 0.15
     hn_policy: "batch 003 reviewed FPs (export_targeted_hn.py)"
-    output_dir: "/mnt/d/ZAsolar/coco_v3_targeted_hn"
+    output_dir: "/home/gaosh/zasolar_data/coco/coco_v3_targeted_hn"
     notes: "5623 images total; produced V3-C-HN checkpoint"
 
   v4_base:
@@ -53,7 +53,7 @@ training_sets:
     audit_policy: null
     easy_negative_ratio: 0.15
     hn_policy: null
-    output_dir: "/mnt/d/ZAsolar/coco_v4_base"
+    output_dir: "/home/gaosh/zasolar_data/coco/coco_v4_base"
     notes: "Expanded with batch 004 (25 additional grids)"
 
   v4_1_hn:
@@ -66,7 +66,7 @@ training_sets:
     audit_policy: null
     easy_negative_ratio: 0.15
     hn_policy: "batch 003 (ID 900000+) + batch 004 (ID 950000+)"
-    output_dir: "/mnt/d/ZAsolar/coco_v4_1_hn"
+    output_dir: "/home/gaosh/zasolar_data/coco/coco_v4_1_hn"
     notes: "15.7% targeted HN ratio; produced V4.1-HN checkpoint"
 
   v4_2_jhb_ft:
@@ -88,7 +88,7 @@ training_sets:
     audit_policy: null
     easy_negative_ratio: 0.15
     hn_policy: null    # baseline before HN; HN deferred to v4_3 after seeing v4_2 FPs
-    output_dir: "/mnt/d/ZAsolar/coco_v4_2_jhb_ft"
+    output_dir: "/home/gaosh/zasolar_data/coco/coco_v4_2_jhb_ft"
     init_weights: "checkpoints/exp004_v4_hn/best_model.pth"
     val_strategy: >
       Whole-grid val (no tile leakage): 5 CBD + 5 Sandton stratified by
@@ -105,3 +105,74 @@ training_sets:
       shortage (1152 FN with no proposal at any conf), not threshold filter.
       Targets: maintain CT F1 ≥ 0.80, grow JHB Sandton recall ≥ 0.80
       at iso-precision. Output checkpoint: exp006_v4_2_jhb_ft.
+
+  v4_3_hn:
+    id: "v4_3_hn"
+    description: "V4.3 — V4.2 + hard negatives to repair CBD precision collapse"
+    region_scope: [cape_town, johannesburg]
+    source_family: [reviewed_prediction, sam_refined_review, human_manual_sam_assisted]
+    annotation_source_policy: >
+      Positive pool identical to v4_2_jhb_ft (25 CT panel-stratified +
+      20 CBD + 20 Sandton train grids; val 5 CBD + 5 Sandton held out).
+      HN pool: V4.2 FPs from val-10 inference + small-FP taxonomy on
+      V4.2 train-grid predictions, with the assumption that the parallel
+      post-proc PV / non-PV binary classifier gates thermal-looking FPs
+      downstream — so HN no longer earmarks water heaters specifically.
+    tier_policy: >
+      Positives: same as v4_2_jhb_ft (all tiers, T1+T2).
+      HN: unlabeled FP chips from V4.2 inference, no tier (negative class).
+    audit_policy: >
+      Exclude any HN chip that overlaps (IoU > 0.1) a reviewed-TP polygon
+      in the source grid (prevents teaching model to suppress real PV).
+    easy_negative_ratio: 0.15
+    hn_policy: >
+      Use FULL available supply of V4 FPs on train grids (val-10 grids
+      excluded to prevent leakage). Derived pool:
+        - JHB CBD train-20: 244 FPs (V4 preds w/ <0.1 overlap to reviewed TP)
+        - JHB Sandton train-20: 444 FPs (same criterion)
+        - CT residual: 455 chips from V4.1 HN shortlist (all size 5-20m²,
+          includes thermal — post-proc PV/non-PV classifier will handle
+          deployment-time filter; keeping CT thermal HN preserves CT
+          precision training signal)
+      Expected total HN ≈ 1143 chips, yielding ~13.6% HN ratio against
+      7293 positives. Below the originally aspired 20%, but supply-limited;
+      synthetic chip inflation rejected to keep HN signal authentic.
+    hn_ratio_target: 0.14    # aspirational, constrained by FP supply
+    hn_ratio_actual: 0.106   # after TP-overlap audit: 866 chips / 8159 total
+    hn_actual_composition:
+      cbd: 185          # from 244 FPs, 76% yield
+      sandton: 229      # from 444 FPs, 52% yield (dense PV → many audit drops)
+      ct_residual: 452  # from 455 shortlist, 99% yield
+    output_dir: "/home/gaosh/zasolar_data/coco/coco_v4_3_hn"
+    init_weights: "checkpoints/exp006_v4_2_jhb_ft/best_model.pth"
+    val_strategy: >
+      Same 10 val grids as v4_2_jhb_ft (5 CBD + 5 Sandton). Train-time
+      monitoring MUST include inference-time F1 callback on val-10 at
+      IoU≥0.5 + post_conf=0.85 (every 5 epochs); best_model selected by
+      this F1, NOT by COCO AP50 (AP50 misled V4.2 — AP50=0.8371 but
+      deployment F1=0.587).
+    builder_script: "scripts/training/build_v4_3_hn.py"  # TODO
+    notes: >
+      V4.3 addresses V4.2's CBD precision collapse (0.562 → 0.284, -28pp)
+      and Sandton precision regression (0.778 → 0.579, -20pp) while
+      preserving V4.2's Sandton recall gain (+7pp).
+
+      Original 20% aspiration reduced to 14% (supply-limited): JHB
+      train-40 produced 688 V4 FPs + 455 CT residual = 1143 max HN
+      chips, giving 13.6% ratio against 7293 positives. Cannot reach
+      20% without synthetic chip inflation (duplicated crops of same FP)
+      which we reject — risks overfitting to FP pixel patterns instead
+      of teaching context-level rejection.
+
+      Rationale for this ratio vs V4.1's 15.7%:
+        - 13.6% ≈ V4.1 (within noise) but HN now JHB-heavy (60% vs 0%),
+          which is where the precision deficit lives
+        - V4.2 demonstrated HN=0% → FP explosion (+2.3×); any non-zero
+          HN with JHB representation should help
+        - Post-proc PV/non-PV classifier absorbs thermal-FP risk, so
+          we don't need to allocate HN budget specifically to thermal
+          suppression — current composition is fine
+
+      Guardrail variant: 10% HN (subsample to ~810 chips) to sanity-check
+      that 13.6% isn't oversaturating. Train both variants serially;
+      ~6 GPU-hours overhead. Select by val-10 F1.

@@ -97,7 +97,7 @@ class HardNegativeEntry:
 
 @dataclass
 class OutputSpec:
-    root: str = "${SOLAR_ARTIFACT_ROOT:-/mnt/d/ZAsolar}"
+    root: str = "${SOLAR_ARTIFACT_ROOT:-/home/gaosh/zasolar_data}"
     name_template: str = "coco_{name}_{date}"
 
 
@@ -386,7 +386,7 @@ def _parse_raw(raw: dict[str, Any]) -> DatasetSpec:
         ),
         hard_negatives=hn_entries,
         output=OutputSpec(
-            root=str(out_raw.get("root", "${SOLAR_ARTIFACT_ROOT:-/mnt/d/ZAsolar}")),
+            root=str(out_raw.get("root", "${SOLAR_ARTIFACT_ROOT:-/home/gaosh/zasolar_data}")),
             name_template=str(out_raw.get("name_template", "coco_{name}_{date}")),
         ),
     )

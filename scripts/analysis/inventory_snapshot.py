@@ -47,7 +47,7 @@ def resolve_region_with_fallback(grid_id: str, tiles_dir: str | None) -> str:
 RESULT_TREES = [
     REPO / "results",
     REPO / "results_joburg",
-    Path("/mnt/d/ZAsolar/results"),
+    Path("/home/gaosh/zasolar_data/results"),
 ]
 OUTPUT_CSV = REPO / "docs" / "plans" / "joburg_pre_migration_snapshot.csv"
 

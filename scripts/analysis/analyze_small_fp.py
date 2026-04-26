@@ -34,11 +34,11 @@ from scipy.spatial import cKDTree
 from shapely.geometry import Point
 
 BASE_DIR = Path(__file__).resolve().parents[2]
-TILES_ROOT = Path("/mnt/d/ZAsolar/tiles")
+TILES_ROOT = Path("/home/gaosh/zasolar_data/tiles")
 
 RESULTS_ROOTS = {
     "batch003": BASE_DIR / "results",
-    "batch004": Path("/mnt/d/ZAsolar/results"),
+    "batch004": Path("/home/gaosh/zasolar_data/results"),
 }
 
 BATCH_GRIDS = {
