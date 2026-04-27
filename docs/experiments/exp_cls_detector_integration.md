@@ -214,3 +214,100 @@ a natural labeled pool for the binary PV vs non-PV classifier:
 This dataset is built and consumed via the protocol in
 `exp_cls_dataset_protocol.md`; see also `exp_cls_backbone_ablation.md` for
 the backbone evaluation that will be run on it.
+
+## Li GT audit (2026-04-27): the matrix above is biased
+
+The 9-cell matrix above was computed against the unaltered Li GT
+(`/mnt/d/ZAsolar/annotations_inbox/Joburg_CBD_Li/`, 2147 polygons across
+25 grids). When auditing the **V3-C ∩ V4.2 shared FP core** (462 polygons
+with `source_detector=both, label=nonpv` from the cascade pool builder)
+to seed the binary classifier subtype taxonomy, we found that
+**119 / 462 (25.8%) were not non-PV at all — they were real PV
+installations missing from Li GT** (V3-C and V4.2 both predicted them at
+≥0.98 confidence; nearest Li GT polygon often >30 m away).
+
+Two follow-on findings from the same audit:
+- JHB CBD non-PV profile differs from CT: skylight 21.4% +
+  corrugated_metal_roof 14.9% + road_marking 10.4% = 47% of the FP
+  core, vs the CT-batch003 finding of 77% solar thermal water heaters.
+  The CT taxonomy does not transfer wholesale.
+- GEID mosaics for adjacent CBD grids overlap by ~35-70 m, so the same
+  physical object is detected and labeled twice across grids
+  (`scripts/classifier/dedup_cls_pool.py` quantifies the redundancy:
+  462 raw → 430 unique objects in the audited core, 3913 → 3728 in the
+  full cascade pool).
+
+### Re-evaluated 9-cell matrix (Li GT + 119 supplement)
+
+GT supplement built by `scripts/classifier/build_li_supplement_gt.py`:
+the 119 audit-confirmed PVs are added to their source grid's GT; a
+boundary PV ends up in both grids' GT (mirroring the per-grid prediction
+setup). All 9 reruns saved under
+`results/analysis/<run>_vs_li_supp_20260427_supp/`.
+
+| Detector / SAM mode | matched | FP | FN | cluster R | cluster F1 | **area F1** | **balanced** |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| V3-C / no SAM            | 1057 |  491 |  365 | 0.743 | 0.712 | 0.840 | 0.705 |
+| **V3-C / box-only**      | 1025 |  507 |  499 | 0.673 | 0.671 | **0.920** ⭐ | **0.811** ⭐ |
+| V3-C / mask+box          | 1062 |  490 |  389 | 0.732 | 0.707 | 0.906 | 0.766 |
+| V4.1 / no SAM            |  921 |  432 |  344 | 0.728 | 0.704 | 0.797 | 0.639 |
+| V4.1 / box-only          |  899 |  445 |  481 | 0.651 | 0.660 | 0.894 | 0.764 |
+| V4.1 / mask+box          |  928 |  429 |  350 | 0.726 | 0.704 | 0.863 | 0.697 |
+| V4.2 / no SAM            |  899 | 1131 |  163 | **0.847** | 0.582 | 0.736 | 0.577 |
+| V4.2 / box-only          |  894 | 1132 |  251 | 0.781 | 0.564 | 0.865 | 0.716 |
+| V4.2 / mask+box          |  915 | 1117 |  158 | **0.853** | 0.589 | 0.803 | 0.636 |
+
+Direction of every shift vs the original Li-only matrix:
+- matched ↑ in every cell (the 119 supp PVs joined as TPs).
+- FP ↓ in every cell (those 119 left the FP bucket).
+- balanced and area F1 generally up; the largest gains land on V3-C
+  variants because the supplement set is dominated by polygons V3-C
+  predicted at high confidence.
+- FN does not shift much because the supplement was *added to TPs*,
+  not removed from FNs.
+
+### Net effect on conclusions
+
+- **V3-C + SAM box-only stays the area-F1 / balanced leader** (0.920 /
+  0.811, both nudged upward) — the cascade-input recommendation is
+  unchanged.
+- **V3-C + SAM mask+box stays the recall-friendly cascade input**
+  (cluster R 0.732, area F1 0.906, FP only 490) — also unchanged.
+- **V4.2 stays out of the cascade-input role** — even with supplement,
+  cluster F1 is ≤0.59 and balanced ≤0.72; FP count (1117-1132) is still
+  ~2.3× V3-C's. The high recall (0.85) doesn't compensate.
+- **V4.1 stays dominated** by V3-C at every SAM mode.
+
+### Audit-derived FP subtype distribution (V3-C, n=462 raw / 430 dedup)
+
+Subtype labels for the 462-row V3-C ∩ V4.2 nonpv core, audited in
+`data/cls_pv_nonpv_v3c_v42_cascade/labeler/v3c__both/nonpv_subtype_labeled.csv`
+(de-duplicated to 430 canonical rows by
+`scripts/classifier/dedup_cls_pool.py`):
+
+| subtype | raw n | dedup n | dedup % |
+|---|---:|---:|---:|
+| actually_pv_mislabeled (→ supplement Li GT) | 119 | 106 | 24.7% |
+| skylight_roof_window | 99 | 95 | 22.1% |
+| corrugated_metal_roof | 69 | 63 | 14.7% |
+| ground_road_marking | 48 | 47 | 10.9% |
+| solar_thermal_water_heater | 32 | 31 | 7.2% |
+| pergola_carport_shadow | 30 | 27 | 6.3% |
+| roof_shadow_dark_fixture | 25 | 24 | 5.6% |
+| other_unknown | 19 | 19 | 4.4% |
+| hvac_rooftop_equipment | 21 | 18 | 4.2% |
+| **total** | **462** | **430** | |
+
+V4.2-side subtype labels were propagated automatically via per-grid
+`source_detector=both` pairing
+(`scripts/classifier/propagate_subtype_to_v42.py`); 441/441 V4.2
+polygons received a propagated subtype, distribution is within ±5%
+of V3-C-side (sanity confirms the cross-detector pair is the same
+physical object).
+
+Combined V3-C + V4.2 subtype-labeled set: **903 rows** in
+`labeler/v3c__both/nonpv_subtype_labeled_union.csv`. After moving
+`actually_pv_mislabeled` (225 rows) from the non-PV pool into the PV
+pool, the cleaned non-PV training set retains **678 rows** across 9
+subtypes — this is the raw input to the binary classifier ablation
+(`exp_cls_backbone_ablation.md`).
