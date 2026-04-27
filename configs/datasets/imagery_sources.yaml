@@ -23,3 +23,10 @@ sources:
     crs: "EPSG:4326"
     download_script: "scripts/imagery/grid_preview_batch.py"
     notes: "Used for rapid visual screening of new grid candidates"
+
+  vexcel_ortho:
+    description: "Vexcel South Africa urban aerial orthos"
+    resolution_m: "0.069-0.074"
+    crs: "EPSG:4326"
+    download_script: null
+    notes: "API credentials are loaded from .env; coverage metadata lives in configs/datasets/vexcel_urban_coverage.yaml"

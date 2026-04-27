@@ -1,0 +1,90 @@
+# Vexcel South Africa urban aerial coverage discovered from the API.
+#
+# Bboxes are lon_min,lat_min,lon_max,lat_max in EPSG:4326.
+# Task grids are generated as clipped 1 km metric cells by
+# scripts/validation/build_vexcel_task_grids.py.
+
+coverage_version: "2026-04-26"
+grid_size_m: 1000
+crs_exchange: "EPSG:4326"
+imagery_source: "vexcel"
+product_family: "ortho"
+
+regions:
+  pietermaritzburg:
+    city: "Pietermaritzburg"
+    province: "KwaZulu-Natal"
+    grid_prefix: "PMB"
+    collection: "za-kzn-pietermaritzburg-2025"
+    capture_start: "2025-12-16"
+    capture_end: "2025-12-16"
+    avg_gsd_m: 0.069
+    coverage_area_km2: 266.3
+    product: "final-ortho"
+    bbox: [30.2893, -29.7104, 30.4532, -29.5190]
+    coverage_path: "data/vexcel_coverage/pietermaritzburg_coverage.geojson"
+
+  durban:
+    city: "Durban"
+    province: "KwaZulu-Natal"
+    grid_prefix: "DBN"
+    collection: "za-kzn-durban-2026"
+    capture_start: "2025-12-17"
+    capture_end: "2026-01-06"
+    avg_gsd_m: 0.069
+    coverage_area_km2: 862.4
+    product: "quick-ortho"
+    bbox: [30.7874, -30.1014, 31.1210, -29.6762]
+    coverage_path: "data/vexcel_coverage/durban_coverage.geojson"
+
+  east_london:
+    city: "East London"
+    province: "Eastern Cape"
+    grid_prefix: "ELS"
+    collection: "za-ec-eastlondon-2026"
+    capture_start: "2026-01-07"
+    capture_end: "2026-01-08"
+    avg_gsd_m: 0.071
+    coverage_area_km2: 260.7
+    product: "final-ortho"
+    bbox: [27.7545, -33.0914, 27.9855, -32.9239]
+    coverage_path: "data/vexcel_coverage/east_london_coverage.geojson"
+
+  gqeberha:
+    city: "Port Elizabeth / Gqeberha"
+    province: "Eastern Cape"
+    grid_prefix: "GQB"
+    collection: "za-ec-portelizabeth-2026"
+    capture_start: "2026-01-11"
+    capture_end: "2026-01-21"
+    avg_gsd_m: 0.072
+    coverage_area_km2: 796.7
+    product: "final-ortho"
+    bbox: [25.3213, -34.0273, 25.7039, -33.7064]
+    coverage_path: "data/vexcel_coverage/gqeberha_coverage.geojson"
+
+  bloemfontein:
+    city: "Bloemfontein"
+    province: "Free State"
+    grid_prefix: "BFN"
+    collection: "za-fs-bloemfontein-2026"
+    capture_start: "2026-01-18"
+    capture_end: "2026-01-18"
+    avg_gsd_m: 0.074
+    coverage_area_km2: 360.0
+    product: "final-ortho"
+    bbox: [26.1184, -29.2509, 26.3320, -29.0534]
+    coverage_path: "data/vexcel_coverage/bloemfontein_coverage.geojson"
+
+  pretoria:
+    city: "Pretoria"
+    province: "Gauteng"
+    grid_prefix: "PTA"
+    collection: "za-gp-pretoria-2026"
+    capture_start: "2026-02-05"
+    capture_end: "2026-02-08"
+    avg_gsd_m: 0.072
+    coverage_area_km2: 754.7
+    product: "quick-ortho"
+    bbox: [28.0819, -25.8830, 28.4539, -25.6216]
+    coverage_path: "data/vexcel_coverage/pretoria_coverage.geojson"

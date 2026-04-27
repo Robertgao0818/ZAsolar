@@ -181,7 +181,7 @@ def lookup_regions(grid_id: str) -> list[str]:
         covered = any(
             grid_id in layer.coverage_grids for layer in config.imagery_layers.values()
         )
-        if covered or grid_id in config.grids:
+        if covered or grid_id in config.grids or grid_id in _task_grid_ids(key):
             hits.append(key)
     return hits
 
@@ -233,6 +233,32 @@ def get_task_grid_path(region_key: str) -> Path:
     """Return the task grid GPKG path for a region."""
     config = get_region_config(region_key)
     return BASE_DIR / config.paths.task_grid
+
+
+@lru_cache(maxsize=None)
+def _task_grid_ids(region_key: str) -> frozenset[str]:
+    """Return grid IDs from a region task_grid, if the file exists.
+
+    New Vexcel regions can have thousands of task cells, so their imagery layer
+    coverage is represented by the task grid itself instead of a long YAML list.
+    """
+    try:
+        path = get_task_grid_path(region_key)
+    except KeyError:
+        return frozenset()
+    if not path.exists():
+        return frozenset()
+
+    try:
+        import geopandas as gpd
+
+        gdf = gpd.read_file(path, columns=["gridcell_id"])
+    except Exception:
+        return frozenset()
+
+    if "gridcell_id" not in gdf.columns:
+        return frozenset()
+    return frozenset(str(item).strip().upper() for item in gdf["gridcell_id"].dropna())
 
 
 def get_all_grid_id_patterns() -> list[str]:
@@ -334,11 +360,17 @@ def resolve_imagery_layer_for_grid(
 
     default_id = config.default_imagery_layer
     if default_id is not None and default_id in config.imagery_layers:
-        if grid_id in config.imagery_layers[default_id].coverage_grids:
+        default_layer = config.imagery_layers[default_id]
+        if (
+            grid_id in default_layer.coverage_grids
+            or (not default_layer.coverage_grids and grid_id in _task_grid_ids(region_key))
+        ):
             return default_id
 
     for layer_id, layer in config.imagery_layers.items():
-        if grid_id in layer.coverage_grids:
+        if grid_id in layer.coverage_grids or (
+            not layer.coverage_grids and grid_id in _task_grid_ids(region_key)
+        ):
             return layer_id
 
     raise KeyError(
