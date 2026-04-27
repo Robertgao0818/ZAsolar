@@ -1,0 +1,184 @@
+{
+  "labeled_csv": "data/cls_pv_nonpv_v3c_v42_cascade/labeler/v3c__both/nonpv_subtype_labeled.csv",
+  "li_gt_dir": "/mnt/d/ZAsolar/annotations_inbox/Joburg_CBD_Li",
+  "v3c_results": "results/johannesburg/v3c_sam_mask_geid_2024_02",
+  "mislabel_tag": "actually_pv_mislabeled",
+  "n_supplement_polygons": 119,
+  "grids": [
+    {
+      "grid_id": "G0772",
+      "li_n": 28,
+      "supp_n": 7,
+      "merged_n": 35,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0772.gpkg"
+    },
+    {
+      "grid_id": "G0773",
+      "li_n": 7,
+      "supp_n": 4,
+      "merged_n": 11,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0773.gpkg"
+    },
+    {
+      "grid_id": "G0774",
+      "li_n": 115,
+      "supp_n": 24,
+      "merged_n": 139,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0774.gpkg"
+    },
+    {
+      "grid_id": "G0775",
+      "li_n": 64,
+      "supp_n": 7,
+      "merged_n": 71,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0775.gpkg"
+    },
+    {
+      "grid_id": "G0814",
+      "li_n": 122,
+      "supp_n": 5,
+      "merged_n": 127,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0814.gpkg"
+    },
+    {
+      "grid_id": "G0815",
+      "li_n": 45,
+      "supp_n": 9,
+      "merged_n": 54,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0815.gpkg"
+    },
+    {
+      "grid_id": "G0816",
+      "li_n": 66,
+      "supp_n": 4,
+      "merged_n": 70,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0816.gpkg"
+    },
+    {
+      "grid_id": "G0817",
+      "li_n": 132,
+      "supp_n": 12,
+      "merged_n": 144,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0817.gpkg"
+    },
+    {
+      "grid_id": "G0818",
+      "li_n": 84,
+      "supp_n": 4,
+      "merged_n": 88,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0818.gpkg"
+    },
+    {
+      "grid_id": "G0853",
+      "li_n": 23,
+      "supp_n": 4,
+      "merged_n": 27,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0853.gpkg"
+    },
+    {
+      "grid_id": "G0854",
+      "li_n": 90,
+      "supp_n": 2,
+      "merged_n": 92,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0854.gpkg"
+    },
+    {
+      "grid_id": "G0855",
+      "li_n": 102,
+      "supp_n": 2,
+      "merged_n": 104,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0855.gpkg"
+    },
+    {
+      "grid_id": "G0856",
+      "li_n": 40,
+      "supp_n": 2,
+      "merged_n": 42,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0856.gpkg"
+    },
+    {
+      "grid_id": "G0857",
+      "li_n": 37,
+      "supp_n": 6,
+      "merged_n": 43,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0857.gpkg"
+    },
+    {
+      "grid_id": "G0888",
+      "li_n": 66,
+      "supp_n": 1,
+      "merged_n": 67,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0888.gpkg"
+    },
+    {
+      "grid_id": "G0889",
+      "li_n": 186,
+      "supp_n": 3,
+      "merged_n": 189,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0889.gpkg"
+    },
+    {
+      "grid_id": "G0892",
+      "li_n": 29,
+      "supp_n": 1,
+      "merged_n": 30,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0892.gpkg"
+    },
+    {
+      "grid_id": "G0922",
+      "li_n": 202,
+      "supp_n": 7,
+      "merged_n": 209,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0922.gpkg"
+    },
+    {
+      "grid_id": "G0923",
+      "li_n": 311,
+      "supp_n": 11,
+      "merged_n": 322,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0923.gpkg"
+    },
+    {
+      "grid_id": "G0924",
+      "li_n": 204,
+      "supp_n": 3,
+      "merged_n": 207,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0924.gpkg"
+    },
+    {
+      "grid_id": "G0926",
+      "li_n": 43,
+      "supp_n": 1,
+      "merged_n": 44,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0926.gpkg"
+    },
+    {
+      "grid_id": "G0776",
+      "li_n": 20,
+      "supp_n": 0,
+      "merged_n": 20,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0776.gpkg"
+    },
+    {
+      "grid_id": "G0890",
+      "li_n": 66,
+      "supp_n": 0,
+      "merged_n": 66,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0890.gpkg"
+    },
+    {
+      "grid_id": "G0891",
+      "li_n": 22,
+      "supp_n": 0,
+      "merged_n": 22,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0891.gpkg"
+    },
+    {
+      "grid_id": "G0925",
+      "li_n": 43,
+      "supp_n": 0,
+      "merged_n": 43,
+      "path": "data/annotations/Joburg_CBD_Li_supp_v1/G0925.gpkg"
+    }
+  ]
+}

@@ -1,0 +1,254 @@
+{
+  "buckets": {
+    "ct_v1": {
+      "source": "/home/gaosh/projects/ZAsolar/data/cls_pv_thermal_v1 (preserved splits)",
+      "train": {
+        "non_pv": 1494,
+        "pv": 4511,
+        "total": 6005
+      },
+      "val": {
+        "non_pv": 423,
+        "pv": 1238,
+        "total": 1661
+      }
+    },
+    "johannesburg:v3c_sam_mask_geid_2024_02": {
+      "class_flip_rule": "human_label == 'actually_pv_mislabeled' \u2192 pv",
+      "source": "/home/gaosh/projects/ZAsolar/data/cls_pv_nonpv_v3c_v42_cascade (audited V3-C + propagated V4.2)",
+      "split_policy": "subtype-stratified, grid-grouped, no leakage, \u22651 chip per subtype with N >= min_subtype_n",
+      "train": {
+        "by_subtype": {
+          "actually_pv_mislabeled": {
+            "by_class": {
+              "pv": 157
+            },
+            "by_detector": {
+              "v3c": 81,
+              "v4_2": 76
+            },
+            "n": 157,
+            "n_grids": 15
+          },
+          "corrugated_metal_roof": {
+            "by_class": {
+              "non_pv": 113
+            },
+            "by_detector": {
+              "v3c": 57,
+              "v4_2": 56
+            },
+            "n": 113,
+            "n_grids": 17
+          },
+          "ground_road_marking": {
+            "by_class": {
+              "non_pv": 81
+            },
+            "by_detector": {
+              "v3c": 41,
+              "v4_2": 40
+            },
+            "n": 81,
+            "n_grids": 13
+          },
+          "hvac_rooftop_equipment": {
+            "by_class": {
+              "non_pv": 30
+            },
+            "by_detector": {
+              "v3c": 15,
+              "v4_2": 15
+            },
+            "n": 30,
+            "n_grids": 9
+          },
+          "other_unknown": {
+            "by_class": {
+              "non_pv": 26
+            },
+            "by_detector": {
+              "v3c": 13,
+              "v4_2": 13
+            },
+            "n": 26,
+            "n_grids": 10
+          },
+          "pergola_carport_shadow": {
+            "by_class": {
+              "non_pv": 30
+            },
+            "by_detector": {
+              "v3c": 15,
+              "v4_2": 15
+            },
+            "n": 30,
+            "n_grids": 7
+          },
+          "roof_shadow_dark_fixture": {
+            "by_class": {
+              "non_pv": 34
+            },
+            "by_detector": {
+              "v3c": 17,
+              "v4_2": 17
+            },
+            "n": 34,
+            "n_grids": 13
+          },
+          "skylight_roof_window": {
+            "by_class": {
+              "non_pv": 133
+            },
+            "by_detector": {
+              "v3c": 69,
+              "v4_2": 64
+            },
+            "n": 133,
+            "n_grids": 14
+          },
+          "solar_thermal_water_heater": {
+            "by_class": {
+              "non_pv": 54
+            },
+            "by_detector": {
+              "v3c": 27,
+              "v4_2": 27
+            },
+            "n": 54,
+            "n_grids": 8
+          }
+        },
+        "n_grids": 18,
+        "non_pv": 501,
+        "pv": 157,
+        "total": 658
+      },
+      "val": {
+        "by_subtype": {
+          "actually_pv_mislabeled": {
+            "by_class": {
+              "pv": 68
+            },
+            "by_detector": {
+              "v3c": 38,
+              "v4_2": 30
+            },
+            "n": 68,
+            "n_grids": 6
+          },
+          "corrugated_metal_roof": {
+            "by_class": {
+              "non_pv": 23
+            },
+            "by_detector": {
+              "v3c": 12,
+              "v4_2": 11
+            },
+            "n": 23,
+            "n_grids": 5
+          },
+          "ground_road_marking": {
+            "by_class": {
+              "non_pv": 14
+            },
+            "by_detector": {
+              "v3c": 7,
+              "v4_2": 7
+            },
+            "n": 14,
+            "n_grids": 4
+          },
+          "hvac_rooftop_equipment": {
+            "by_class": {
+              "non_pv": 12
+            },
+            "by_detector": {
+              "v3c": 6,
+              "v4_2": 6
+            },
+            "n": 12,
+            "n_grids": 6
+          },
+          "other_unknown": {
+            "by_class": {
+              "non_pv": 12
+            },
+            "by_detector": {
+              "v3c": 6,
+              "v4_2": 6
+            },
+            "n": 12,
+            "n_grids": 4
+          },
+          "pergola_carport_shadow": {
+            "by_class": {
+              "non_pv": 30
+            },
+            "by_detector": {
+              "v3c": 15,
+              "v4_2": 15
+            },
+            "n": 30,
+            "n_grids": 4
+          },
+          "roof_shadow_dark_fixture": {
+            "by_class": {
+              "non_pv": 16
+            },
+            "by_detector": {
+              "v3c": 8,
+              "v4_2": 8
+            },
+            "n": 16,
+            "n_grids": 3
+          },
+          "skylight_roof_window": {
+            "by_class": {
+              "non_pv": 60
+            },
+            "by_detector": {
+              "v3c": 30,
+              "v4_2": 30
+            },
+            "n": 60,
+            "n_grids": 7
+          },
+          "solar_thermal_water_heater": {
+            "by_class": {
+              "non_pv": 10
+            },
+            "by_detector": {
+              "v3c": 5,
+              "v4_2": 5
+            },
+            "n": 10,
+            "n_grids": 4
+          }
+        },
+        "n_grids": 7,
+        "non_pv": 177,
+        "pv": 68,
+        "total": 245
+      }
+    }
+  },
+  "built_by": "scripts/classifier/build_cls_dataset_v2.py",
+  "cascade_root": "/home/gaosh/projects/ZAsolar/data/cls_pv_nonpv_v3c_v42_cascade",
+  "chosen_seed_for_jhb_split": 0,
+  "description": "cls_pv_thermal_v2 \u2014 multi-subtype FP suppressor (CT v1 + JHB CBD GEID audit)",
+  "min_subtype_coverage_n": 6,
+  "spec_doc": "docs/experiments/exp_cls_dataset_protocol.md (v2 protocol)",
+  "totals": {
+    "train": {
+      "non_pv": 1995,
+      "pv": 4668
+    },
+    "val": {
+      "non_pv": 600,
+      "pv": 1306
+    }
+  },
+  "v1_root": "/home/gaosh/projects/ZAsolar/data/cls_pv_thermal_v1",
+  "val_fraction_target": 0.27
+}

@@ -1,0 +1,18 @@
+grid_id,annotation_scheme,source_files,raw_rows,labeled_rows,declared_count,partial,output_file,output_layer,crs,label_source,semantic_confidence,quality_tier
+G1842,li_kml,G1842  (31).gpkg::SAM_太阳能_20260327_195511,31,31,31,False,G1842.gpkg,G1842_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1843,li_kml,G1843（21）.gpkg::SAM_太阳能_20260327_205629,21,14,21,True,G1843.gpkg,G1843_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1844,li_kml,G1844 (46).gpkg::SAM_太阳能_20260327_211028,46,43,46,True,G1844.gpkg,G1844_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1846,li_kml,G1846 (5).gpkg::SAM_太阳能_20260327_211755,5,4,5,True,G1846.gpkg,G1846_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1895,li_kml,G1895 (260).gpkg::SAM_太阳能_20260329_125402,260,39,260,True,G1895.gpkg,G1895_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1897,li_kml,G1897（112）.gpkg::SAM_1897_20260329_204040,112,112,112,False,G1897.gpkg,G1897_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1898,li_kml,G1898(26）.gpkg::SAM_1898_20260329_210802,26,26,26,False,G1898.gpkg,G1898_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1899,li_kml,G1899（94）.gpkg::SAM_1899_20260329_221413,94,94,94,False,G1899.gpkg,G1899_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1900,li_kml,G1900(41).gpkg::SAM_1900_20260330_135827,41,41,41,False,G1900.gpkg,G1900_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1901,li_kml,G1901（12）.gpkg::SAM_1901_20260330_141309,12,12,12,False,G1901.gpkg,G1901_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1902,li_kml,G1902(8).gpkg::SAM_1902_20260330_142459,8,8,8,False,G1902.gpkg,G1902_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1950,li_kml,G1950（82）.gpkg::SAM_1903_20260330_145935,82,82,82,False,G1950.gpkg,G1950_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1951,li_kml,G1951（135）.gpkg::SAM_1951_20260330_160543,135,135,135,False,G1951.gpkg,G1951_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1952,li_kml,G1952（210）.gpkg::SAM_1952_20260402_194245,210,210,210,False,G1952.gpkg,G1952_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1953,li_kml,G1953(55).gpkg::SAM_1953_20260402_202404,55,55,55,False,G1953.gpkg,G1953_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1954,li_kml,G1954(153).gpkg::SAM_1954_20260402_210259,153,153,153,False,G1954.gpkg,G1954_li,EPSG:4326,human_manual_sam_assisted,A2,T2
+G1896,li_kml,SAM_1896-2_20260329_192755.gpkg::SAM_1896-2_20260329_192755|SAM_1896-3_20260329_194304.gpkg::SAM_1896-3_20260329_194304|SAM_1896_20260329_141302.gpkg::SAM_1896_20260329_141302,202,201,202,True,G1896.gpkg,G1896_li,EPSG:4326,human_manual_sam_assisted,A2,T2

@@ -1,0 +1,94 @@
+{
+  "build_script": "scripts/classifier/build_cls_dataset_cascade.py",
+  "grids": [
+    "G0772",
+    "G0773",
+    "G0774",
+    "G0775",
+    "G0776",
+    "G0814",
+    "G0815",
+    "G0816",
+    "G0817",
+    "G0818",
+    "G0853",
+    "G0854",
+    "G0855",
+    "G0856",
+    "G0857",
+    "G0888",
+    "G0889",
+    "G0890",
+    "G0891",
+    "G0892",
+    "G0922",
+    "G0923",
+    "G0924",
+    "G0925",
+    "G0926"
+  ],
+  "n_grids": 25,
+  "tp_iou": 0.1,
+  "pair_iou": 0.3,
+  "contain_thresh": 0.5,
+  "chip_size": 224,
+  "pad_ratio": 0.5,
+  "v3c_results": "/home/gaosh/projects/ZAsolar/results/johannesburg/v3c_sam_mask_geid_2024_02",
+  "v42_results": "/home/gaosh/projects/ZAsolar/results/johannesburg/v4_2_sam_mask_geid_2024_02",
+  "gt_dir": "/mnt/d/ZAsolar/annotations_inbox/Joburg_CBD_Li",
+  "imagery_root": "/home/gaosh/zasolar_data/tiles/johannesburg/geid_2024_02",
+  "metric_crs": "EPSG:32735",
+  "n_total": 3913,
+  "n_pv": 2054,
+  "n_nonpv": 1859,
+  "by_detector_label_source": [
+    {
+      "detector": "v3c",
+      "label": "nonpv",
+      "source_detector": "both",
+      "n": 462
+    },
+    {
+      "detector": "v3c",
+      "label": "nonpv",
+      "source_detector": "v3c",
+      "n": 165
+    },
+    {
+      "detector": "v3c",
+      "label": "pv",
+      "source_detector": "both",
+      "n": 1000
+    },
+    {
+      "detector": "v3c",
+      "label": "pv",
+      "source_detector": "v3c",
+      "n": 116
+    },
+    {
+      "detector": "v4_2",
+      "label": "nonpv",
+      "source_detector": "both",
+      "n": 441
+    },
+    {
+      "detector": "v4_2",
+      "label": "nonpv",
+      "source_detector": "v4_2",
+      "n": 791
+    },
+    {
+      "detector": "v4_2",
+      "label": "pv",
+      "source_detector": "both",
+      "n": 831
+    },
+    {
+      "detector": "v4_2",
+      "label": "pv",
+      "source_detector": "v4_2",
+      "n": 107
+    }
+  ]
+}
