@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-04-27: data(metadata): record Li and classifier v2 provenance
+- 2026-04-27: feat(classifier): add v2 dataset and training helpers
+- 2026-04-27: docs(progress): record classifier v2 experiment closure
 - 2026-04-27: chore(gitignore): ignore generated classifier artifacts
 - 2026-04-27: docs(experiments): freeze cls v2 protocol + new promotion rules
 - 2026-04-27: feat(classifier): zero-shot OOD eval on JHB CBD audit set
 - 2026-04-27: feat(classifier): Li GT supplement + V4.2 subtype propagation + matrix rerun
 - 2026-04-27: feat(classifier): cross-grid dedup for cascade pool
-- 2026-04-27: feat(classifier): add corrugated_metal_roof + blue_tarp_or_pool subtypes
-- 2026-04-27: fix(classifier): chip_path alignment + labeler clarity (min-span + polygon outline)
-- 2026-04-27: feat(classifier): add ground_road_marking subtype to nonpv labeler
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.

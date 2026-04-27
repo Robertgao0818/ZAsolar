@@ -293,5 +293,20 @@
     "timestamp": "2026-04-27T11:52:11Z",
     "source": "commit:fcc1737a",
     "summary": "chore(gitignore): ignore generated classifier artifacts"
+  },
+  {
+    "timestamp": "2026-04-27T11:56:48Z",
+    "source": "commit:a825cbe2",
+    "summary": "docs(progress): record classifier v2 experiment closure"
+  },
+  {
+    "timestamp": "2026-04-27T11:57:01Z",
+    "source": "commit:0da7d773",
+    "summary": "feat(classifier): add v2 dataset and training helpers"
+  },
+  {
+    "timestamp": "2026-04-27T11:57:20Z",
+    "source": "commit:93dc7890",
+    "summary": "data(metadata): record Li and classifier v2 provenance"
   }
 ]
