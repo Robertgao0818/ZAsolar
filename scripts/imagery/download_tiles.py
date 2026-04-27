@@ -33,9 +33,67 @@ WMS_URL = "https://cityimg.capetown.gov.za/erdas-iws/ogc/wms/GeoSpatial Datasets
 WMS_LAYER = "Aerial Imagery_Aerial Imagery 2025Jan"
 WMS_FORMAT = "image/jpeg"
 DEFAULT_TIMEOUT = 300
+DEFAULT_TIFF_COMPRESS = "JPEG"
+DEFAULT_JPEG_QUALITY = 95
+DEFAULT_BLOCK_SIZE = 256
 
 
-def download_tile(spec, col, row, out_path: Path, timeout=DEFAULT_TIMEOUT):
+def _build_tiff_profile(
+    *,
+    data,
+    width: int,
+    height: int,
+    bands: int,
+    transform,
+    tiff_compress: str = DEFAULT_TIFF_COMPRESS,
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+    tiled: bool = True,
+    block_size: int = DEFAULT_BLOCK_SIZE,
+) -> dict:
+    profile = {
+        "driver": "GTiff",
+        "dtype": data.dtype,
+        "width": width,
+        "height": height,
+        "count": bands,
+        "crs": "EPSG:4326",
+        "transform": transform,
+    }
+
+    compress = (tiff_compress or "NONE").upper()
+    if compress != "NONE":
+        profile["compress"] = compress
+        if tiled:
+            profile.update(
+                {
+                    "tiled": True,
+                    "blockxsize": block_size,
+                    "blockysize": block_size,
+                }
+            )
+        if compress == "JPEG":
+            profile.update(
+                {
+                    "jpeg_quality": jpeg_quality,
+                    "photometric": "YCBCR" if bands == 3 else "MINISBLACK",
+                    "interleave": "pixel",
+                }
+            )
+
+    return profile
+
+
+def download_tile(
+    spec,
+    col,
+    row,
+    out_path: Path,
+    timeout=DEFAULT_TIMEOUT,
+    *,
+    tiff_compress: str = DEFAULT_TIFF_COMPRESS,
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+    tiled: bool = True,
+):
     """下载单个 WMS 瓦片并保存为带地理参考的 GeoTIFF (EPSG:4326)。"""
     txmin, tymin, txmax, tymax = get_tile_bounds(spec, col, row)
 
@@ -83,21 +141,31 @@ def download_tile(spec, col, row, out_path: Path, timeout=DEFAULT_TIMEOUT):
         bands, h, w = 1, data.shape[0], data.shape[1]
         data = data[np.newaxis, :, :]
 
-    profile = {
-        "driver": "GTiff",
-        "dtype": data.dtype,
-        "width": w,
-        "height": h,
-        "count": bands,
-        "crs": "EPSG:4326",
-        "transform": transform,
-    }
+    profile = _build_tiff_profile(
+        data=data,
+        width=w,
+        height=h,
+        bands=bands,
+        transform=transform,
+        tiff_compress=tiff_compress,
+        jpeg_quality=jpeg_quality,
+        tiled=tiled,
+    )
 
     with rasterio.open(str(out_path), "w", **profile) as dst:
         dst.write(data)
 
 
-def download_grid(grid_id: str, dry_run: bool = False, tile_mask: set | None = None):
+def download_grid(
+    grid_id: str,
+    dry_run: bool = False,
+    tile_mask: set | None = None,
+    *,
+    tiff_compress: str = DEFAULT_TIFF_COMPRESS,
+    jpeg_quality: int = DEFAULT_JPEG_QUALITY,
+    tiled: bool = True,
+    force: bool = False,
+):
     """Download tiles for a grid.
 
     Args:
@@ -105,6 +173,10 @@ def download_grid(grid_id: str, dry_run: bool = False, tile_mask: set | None = N
         dry_run: Only print info, don't download.
         tile_mask: Optional set of (col, row) tuples to download.
                    If None, download all tiles.
+        tiff_compress: GeoTIFF compression. Use "NONE" for uncompressed.
+        jpeg_quality: JPEG quality when tiff_compress="JPEG".
+        tiled: Write tiled GeoTIFF output.
+        force: Re-download and overwrite existing tiles.
     """
     grid_id = normalize_grid_id(grid_id)
     spec = get_grid_spec(grid_id)
@@ -128,6 +200,7 @@ def download_grid(grid_id: str, dry_run: bool = False, tile_mask: set | None = N
     print(f"  Tiles: {spec.n_cols} cols × {spec.n_rows} rows = {total_all}")
     print(f"  Download: {mode}")
     print(f"  WMS Layer: {WMS_LAYER}")
+    print(f"  GeoTIFF: compress={tiff_compress} jpeg_quality={jpeg_quality} tiled={tiled}")
     print(f"  Output: {tiles_dir}")
 
     if dry_run:
@@ -141,12 +214,20 @@ def download_grid(grid_id: str, dry_run: bool = False, tile_mask: set | None = N
         tile_name = f"{grid_id}_{col}_{row}_geo.tif"
         out_path = tiles_dir / tile_name
 
-        if out_path.exists():
+        if out_path.exists() and not force:
             skipped += 1
             continue
 
         try:
-            download_tile(spec, col, row, out_path)
+            download_tile(
+                spec,
+                col,
+                row,
+                out_path,
+                tiff_compress=tiff_compress,
+                jpeg_quality=jpeg_quality,
+                tiled=tiled,
+            )
             downloaded += 1
             print(f"  [{downloaded + skipped}/{total}] {tile_name}")
         except Exception as e:
@@ -154,7 +235,16 @@ def download_grid(grid_id: str, dry_run: bool = False, tile_mask: set | None = N
             print(f"  [ERROR] {tile_name}: {e}")
             time.sleep(3)
             try:
-                download_tile(spec, col, row, out_path, timeout=600)
+                download_tile(
+                    spec,
+                    col,
+                    row,
+                    out_path,
+                    timeout=600,
+                    tiff_compress=tiff_compress,
+                    jpeg_quality=jpeg_quality,
+                    tiled=tiled,
+                )
                 downloaded += 1
                 errors -= 1
                 print(f"  [RETRY OK] {tile_name}")
@@ -168,5 +258,34 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="下载 Cape Town WMS 瓦片")
     parser.add_argument("--grid-id", required=True, help="目标 grid ID (e.g. G1189)")
     parser.add_argument("--dry", action="store_true", help="只打印 tile 信息")
+    parser.add_argument(
+        "--tiff-compress",
+        default=DEFAULT_TIFF_COMPRESS,
+        choices=["JPEG", "DEFLATE", "ZSTD", "LZW", "NONE"],
+        help="GeoTIFF compression for saved tiles (default: JPEG)",
+    )
+    parser.add_argument(
+        "--jpeg-quality",
+        type=int,
+        default=DEFAULT_JPEG_QUALITY,
+        help="JPEG quality when --tiff-compress=JPEG (default: 95)",
+    )
+    parser.add_argument(
+        "--no-tiled",
+        action="store_true",
+        help="Disable tiled GeoTIFF output",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download and overwrite existing tiles",
+    )
     args = parser.parse_args()
-    download_grid(args.grid_id, dry_run=args.dry)
+    download_grid(
+        args.grid_id,
+        dry_run=args.dry,
+        tiff_compress=args.tiff_compress,
+        jpeg_quality=args.jpeg_quality,
+        tiled=not args.no_tiled,
+        force=args.force,
+    )

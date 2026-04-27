@@ -30,7 +30,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 import pandas as pd
 
-from scripts.imagery.download_tiles import download_grid
+from scripts.imagery.download_tiles import (
+    DEFAULT_JPEG_QUALITY,
+    DEFAULT_TIFF_COMPRESS,
+    download_grid,
+)
 
 DEFAULT_DECISIONS = ("keep",)
 DEFAULT_TILE_MASK = Path(__file__).resolve().parent.parent.parent / "cache" / "tile_download_mask.csv"
@@ -111,6 +115,28 @@ def build_parser() -> argparse.ArgumentParser:
         default=4,
         help="Number of grids to download in parallel",
     )
+    parser.add_argument(
+        "--tiff-compress",
+        default=DEFAULT_TIFF_COMPRESS,
+        choices=["JPEG", "DEFLATE", "ZSTD", "LZW", "NONE"],
+        help="GeoTIFF compression for saved tiles (default: JPEG)",
+    )
+    parser.add_argument(
+        "--jpeg-quality",
+        type=int,
+        default=DEFAULT_JPEG_QUALITY,
+        help="JPEG quality when --tiff-compress=JPEG (default: 95)",
+    )
+    parser.add_argument(
+        "--no-tiled",
+        action="store_true",
+        help="Disable tiled GeoTIFF output",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-download and overwrite existing tiles",
+    )
     return parser
 
 
@@ -151,7 +177,15 @@ def main() -> None:
         mask = tile_masks.get(grid_id)
         mask_info = f" (mask: {len(mask)} tiles)" if mask else " (all tiles)"
         print(f"\n=== [{idx}/{len(grid_ids)}] {grid_id}{mask_info} ===", flush=True)
-        download_grid(grid_id, dry_run=False, tile_mask=mask)
+        download_grid(
+            grid_id,
+            dry_run=False,
+            tile_mask=mask,
+            tiff_compress=args.tiff_compress,
+            jpeg_quality=args.jpeg_quality,
+            tiled=not args.no_tiled,
+            force=args.force,
+        )
         return grid_id
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
