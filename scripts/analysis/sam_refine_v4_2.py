@@ -1,0 +1,264 @@
+#!/usr/bin/env python3
+"""SAM2 mask-head replacement PoC for V4.2 detector outputs.
+
+For each V4.2 prediction polygon, run SAM2 with the prediction bbox as box prompt
+on the underlying chunked tile, replace the Mask R-CNN mask with the best SAM2 mask,
+and write a new predictions_metric.gpkg per grid.
+
+Inputs:
+  --src-results-root  : V4.2 results root containing <grid>/predictions_metric.gpkg
+  --tiles-root        : chunked tile root containing <grid>/<grid>_<r>_<c>_geo.tif
+  --output-root       : new results root for SAM-refined predictions
+  --grids             : optional subset
+
+Output layout matches detect_and_evaluate.py so cluster_level_eval can read it.
+
+PoC: take SAM2 best-score mask unconditionally (no acceptance gate), drop predictions
+where SAM2 mask is empty.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import geopandas as gpd
+import numpy as np
+import rasterio
+import torch
+from PIL import Image
+from rasterio.features import shapes as rio_shapes
+from rasterio.windows import Window
+from shapely.geometry import shape
+
+CBD_GRIDS = [
+    "G0772","G0773","G0774","G0775","G0776","G0814","G0815","G0816","G0817","G0818",
+    "G0853","G0854","G0855","G0856","G0857","G0888","G0889","G0890","G0891","G0892",
+    "G0922","G0923","G0924","G0925","G0926",
+]
+
+METRIC_CRS = "EPSG:32735"
+CROP_MARGIN_PX = 64
+MIN_MASK_AREA_PX = 4
+
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--src-results-root", type=Path, required=True)
+    p.add_argument("--tiles-root", type=Path, required=True)
+    p.add_argument("--output-root", type=Path, required=True)
+    p.add_argument("--grids", nargs="*", default=CBD_GRIDS)
+    p.add_argument("--sam-model-id", default="facebook/sam2.1-hiera-large")
+    p.add_argument("--torch-dtype", default="bfloat16", choices=["bfloat16", "float16", "float32"])
+    return p.parse_args()
+
+
+def find_chunk_for_geom(grid_id: str, tiles_root: Path, geom_4326_centroid):
+    """Return path to the chunk that contains the centroid lon/lat."""
+    grid_dir = tiles_root / grid_id
+    if not grid_dir.is_dir():
+        return None
+    cx, cy = geom_4326_centroid.x, geom_4326_centroid.y
+    for tif in grid_dir.glob(f"{grid_id}_*_*_geo.tif"):
+        with rasterio.open(tif) as src:
+            b = src.bounds
+            if b.left <= cx <= b.right and b.bottom <= cy <= b.top:
+                return tif
+    return None
+
+
+def geom_to_pixel_bbox(geom_metric, src):
+    series = gpd.GeoSeries([geom_metric], crs=METRIC_CRS).to_crs(str(src.crs))
+    g = series.iloc[0]
+    minx, miny, maxx, maxy = g.bounds
+    row_min, col_min = src.index(minx, maxy)
+    row_max, col_max = src.index(maxx, miny)
+    return (
+        float(min(col_min, col_max)),
+        float(min(row_min, row_max)),
+        float(max(col_min, col_max)),
+        float(max(row_min, row_max)),
+    ), g
+
+
+def build_window(bbox_px, src_w, src_h):
+    x0, y0, x1, y1 = bbox_px
+    margin = max(CROP_MARGIN_PX, int(max(x1 - x0, y1 - y0) * 0.2))
+    a = max(0, int(x0 - margin))
+    b = max(0, int(y0 - margin))
+    c = min(src_w, int(x1 + margin))
+    d = min(src_h, int(y1 + margin))
+    return Window(a, b, max(1, c - a), max(1, d - b)), (a, b)
+
+
+def polygon_from_mask(mask: np.ndarray, transform):
+    best = None
+    best_area = 0.0
+    for geom, val in rio_shapes(mask.astype(np.uint8), transform=transform):
+        if val != 1:
+            continue
+        poly = shape(geom)
+        if poly.is_valid and not poly.is_empty and poly.area > best_area:
+            best = poly
+            best_area = poly.area
+    return best, best_area
+
+
+def run_one_grid(grid_id, src_root, tiles_root, out_root, processor, model, device, dtype):
+    pred_path = src_root / grid_id / "predictions_metric.gpkg"
+    if not pred_path.exists():
+        print(f"[{grid_id}] SKIP — no predictions_metric.gpkg")
+        return None
+    preds = gpd.read_file(pred_path)
+    if len(preds) == 0:
+        print(f"[{grid_id}] empty preds")
+        return {"grid": grid_id, "n_in": 0, "n_out": 0}
+
+    preds_4326 = preds.to_crs("EPSG:4326")
+    out_records = []
+    n_in = len(preds)
+    n_no_chunk = 0
+    n_empty_mask = 0
+
+    for i, row in preds.iterrows():
+        geom_metric = row.geometry
+        if geom_metric is None or geom_metric.is_empty:
+            continue
+        cent_4326 = preds_4326.iloc[i].geometry.centroid
+        chunk = find_chunk_for_geom(grid_id, tiles_root, cent_4326)
+        if chunk is None:
+            n_no_chunk += 1
+            continue
+        with rasterio.open(chunk) as src:
+            bbox_px, _ = geom_to_pixel_bbox(geom_metric, src)
+            window, (ox, oy) = build_window(bbox_px, src.width, src.height)
+            data = src.read(window=window)
+            window_transform = src.window_transform(window)
+            chunk_crs = str(src.crs)
+        rgb = np.transpose(data[:3], (1, 2, 0)).astype(np.uint8)
+        # bbox in window pixel coords
+        bx0 = bbox_px[0] - ox
+        by0 = bbox_px[1] - oy
+        bx1 = bbox_px[2] - ox
+        by1 = bbox_px[3] - oy
+        bx0 = max(0.0, min(rgb.shape[1] - 1, bx0))
+        by0 = max(0.0, min(rgb.shape[0] - 1, by0))
+        bx1 = max(0.0, min(rgb.shape[1] - 1, bx1))
+        by1 = max(0.0, min(rgb.shape[0] - 1, by1))
+        cx_px = (bx0 + bx1) / 2
+        cy_px = (by0 + by1) / 2
+
+        inputs = processor(
+            images=Image.fromarray(rgb),
+            input_boxes=[[[bx0, by0, bx1, by1]]],
+            return_tensors="pt",
+        )
+        inputs = {k: v.to(device) if hasattr(v, "to") else v for k, v in inputs.items()}
+        with torch.no_grad(), torch.autocast(device_type="cuda" if device == "cuda" else "cpu", dtype=dtype, enabled=device == "cuda"):
+            outputs = model(**inputs, multimask_output=True)
+        masks_list = processor.image_processor.post_process_masks(
+            outputs.pred_masks.detach().to(torch.float32).cpu(),
+            inputs["original_sizes"].detach().cpu(),
+        )
+        scores = outputs.iou_scores.detach().to(torch.float32).cpu().numpy()[0][0]
+        masks_t = masks_list[0][0]  # tensor [num_masks, H, W]
+        masks = [masks_t[k].to(torch.uint8).numpy() for k in range(masks_t.shape[0])]
+        # Pick best by score
+        best_idx = int(np.argmax(scores))
+        mask = masks[best_idx]
+        if mask.sum() < MIN_MASK_AREA_PX:
+            # try second-best
+            order = np.argsort(-scores)
+            chosen = None
+            for idx in order[1:]:
+                if masks[int(idx)].sum() >= MIN_MASK_AREA_PX:
+                    chosen = masks[int(idx)]
+                    break
+            if chosen is None:
+                n_empty_mask += 1
+                continue
+            mask = chosen
+            best_idx = int(order[1])
+
+        poly_chunk_crs, poly_area = polygon_from_mask(mask, window_transform)
+        if poly_chunk_crs is None or poly_chunk_crs.is_empty:
+            n_empty_mask += 1
+            continue
+        # Project polygon back to metric CRS
+        gs = gpd.GeoSeries([poly_chunk_crs], crs=chunk_crs).to_crs(METRIC_CRS)
+        poly_metric = gs.iloc[0]
+        if not poly_metric.is_valid or poly_metric.is_empty:
+            n_empty_mask += 1
+            continue
+        rec = {k: row[k] for k in preds.columns if k != "geometry"}
+        rec["geometry"] = poly_metric
+        rec["sam_score"] = float(scores[best_idx])
+        rec["sam_mask_idx"] = best_idx
+        rec["orig_area_m2"] = float(geom_metric.area)
+        rec["sam_area_m2"] = float(poly_metric.area)
+        out_records.append(rec)
+
+    out_dir = out_root / grid_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "predictions_metric.gpkg"
+    if out_records:
+        gdf = gpd.GeoDataFrame(out_records, crs=METRIC_CRS)
+        gdf.to_file(out_path, driver="GPKG")
+    else:
+        # Write empty gpkg with just geometry column
+        gdf = gpd.GeoDataFrame({"geometry": []}, geometry="geometry", crs=METRIC_CRS)
+        gdf.to_file(out_path, driver="GPKG")
+
+    cfg_out = {
+        "grid_id": grid_id,
+        "source": str(pred_path),
+        "tiles_root": str(tiles_root),
+        "model": "v4_2_sam_refine_PoC",
+        "n_in": n_in,
+        "n_out": len(out_records),
+        "n_no_chunk": n_no_chunk,
+        "n_empty_mask": n_empty_mask,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    (out_dir / "config.json").write_text(json.dumps(cfg_out, indent=2))
+    print(f"[{grid_id}] in={n_in}  refined={len(out_records)}  no_chunk={n_no_chunk}  empty_mask={n_empty_mask}")
+    return cfg_out
+
+
+def main():
+    args = parse_args()
+    args.output_root.mkdir(parents=True, exist_ok=True)
+
+    print(f"Loading SAM2 ({args.sam_model_id})...")
+    from transformers import Sam2Model, Sam2Processor
+    processor = Sam2Processor.from_pretrained(args.sam_model_id)
+    model = Sam2Model.from_pretrained(args.sam_model_id)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    if device == "cuda":
+        model = model.to(device)
+    model.eval()
+    dtype_map = {"bfloat16": torch.bfloat16, "float16": torch.float16, "float32": torch.float32}
+    dtype = dtype_map[args.torch_dtype]
+    print(f"  ready on {device} (dtype={args.torch_dtype})")
+
+    summaries = []
+    for g in args.grids:
+        try:
+            s = run_one_grid(g, args.src_results_root, args.tiles_root, args.output_root,
+                             processor, model, device, dtype)
+            if s:
+                summaries.append(s)
+        except Exception as e:
+            print(f"[{g}] ERROR: {e!r}")
+            import traceback; traceback.print_exc()
+
+    summary_path = args.output_root / "_run_summary.json"
+    summary_path.write_text(json.dumps({"grids": summaries, "timestamp_utc": datetime.now(timezone.utc).isoformat()}, indent=2))
+    print(f"\nDONE — summary: {summary_path}")
+
+
+if __name__ == "__main__":
+    main()
