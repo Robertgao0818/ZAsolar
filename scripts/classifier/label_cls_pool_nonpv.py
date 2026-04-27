@@ -48,11 +48,12 @@ LABELS = [
     ("2", "pergola_carport_shadow", "车棚/遮阳棚"),
     ("3", "skylight_roof_window", "天窗/屋顶窗"),
     ("4", "roof_shadow_dark_fixture", "屋顶阴影/深色物"),
-    ("5", "blue_tarp_roof_cover", "蓝色防水布"),
+    ("5", "blue_tarp_or_pool", "蓝色防水布/泳池"),
     ("6", "hvac_rooftop_equipment", "HVAC/屋顶设备"),
     ("7", "actually_pv_mislabeled", "实为PV(误标)"),
     ("8", "ground_road_marking", "地面标识/路标"),
-    ("9", "other_unknown", "其他/不确定"),
+    ("9", "corrugated_metal_roof", "彩钢/瓦楞屋顶"),
+    ("0", "other_unknown", "其他/不确定"),
 ]
 
 
@@ -241,7 +242,7 @@ body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee;
       <button onclick="skip()">S 跳过 &rarr;</button>
     </div>
     <button class="export-btn" onclick="exportCSV()">导出 CSV</button>
-    <div class="hint">1-9 标注 · S 跳过 · B 回退 · 青色轮廓 = 检测多边形</div>
+    <div class="hint">1-9, 0 标注 · S 跳过 · B 回退 · 青色轮廓 = 检测多边形</div>
   </div>
 </div>
 <script>
@@ -314,6 +315,7 @@ function prev() { if (idx > 0) { idx--; render(); } }
 document.addEventListener("keydown", e => {
   const k = e.key;
   if (k >= "1" && k <= "9") { applyLabel(LABELS[parseInt(k) - 1][1]); }
+  else if (k === "0") { applyLabel(LABELS[9][1]); }
   else if (k.toLowerCase() === "s") { skip(); }
   else if (k.toLowerCase() === "b") { prev(); }
 });
@@ -462,7 +464,7 @@ def main() -> int:
     if wsl_path.startswith("/home/"):
         win_path = "\\\\wsl$\\Ubuntu" + wsl_path.replace("/", "\\")
         print(f"  Windows 路径: {win_path}")
-    print(f"\n  快捷键: 1-9 标注, S 跳过, B 回退")
+    print(f"\n  快捷键: 1-9, 0 标注, S 跳过, B 回退")
     print(f"  标完点「导出 CSV」下载 nonpv_subtype_labeled.csv → 放回 {out_dir}/")
     return 0
 
