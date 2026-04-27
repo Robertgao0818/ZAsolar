@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-04-27: docs(progress): add 2026-04-22/24/26 daily logs + sync entries.json
+- 2026-04-26: chore(infra): migrate large data from /mnt/d/ZAsolar to ~/zasolar_data (WSL ext4)
+- 2026-04-22: docs(roadmap): refresh Recently Completed block
 - 2026-04-22: docs(progress): sync logs 2026-04-01 → 2026-04-21 + V1.2 pipeline plans
 - 2026-04-22: chore(workload): simplify to polygon-count-only (no buffer-merge)
 - 2026-04-22: feat(sync): Dropbox/Collab sync hooks + progress-log auto-sync
 - 2026-04-22: data(review): update 21 CT reviewed gpkgs + add --predictions-dir override
 - 2026-04-22: deprecate(geid): mark v3c_geid_2024_02 model_run as broken (bounds bug)
-- 2026-04-22: feat(analysis): V4 JHB conf sweep + V4 vs V4.2 val-10 apples-to-apples
-- 2026-04-22: feat(training): v4_2_jhb_ft COCO build pipeline (whole-grid val split)
-- 2026-04-22: data(annotations): add JHB CBD batch 1 (25 grids) and CT legacy GPKG
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
@@ -206,6 +206,48 @@ Expanded annotation to 94 grids (batch 001-004), introduced targeted hard negati
 | Model | P | R | F1 | FP | FN |
 |-------|---|---|----|----|-----|
 | V3-C  | 69.6% | 72.2% | **70.9%** | 362 | 319 |
+
+---
+
+## V1.4: Validation Framework Pivot — PLANNED (2026-04-22)
+
+Reframes the project's success metric for **economically usable** inventory use cases. Replaces the implicit "per-polygon F1 on human-annotated holdout" with a four-channel validation framework. Full spec in [`docs/validation_strategy.md`](docs/validation_strategy.md).
+
+### Goal restatement
+- **Main repo**: produce a per-region installation inventory where **aggregate counts per grid are unbiased**. Precision and recall serve the aggregate, not individual polygons.
+- **Sub-repo (geid_bbox)**: pivot from GEID free detection to **location-conditioned temporal back-dating** — given a main-repo high-confidence installation, estimate install date from the GEID historical stack.
+
+### Four-channel validation (primary aggregation unit = task grid)
+1. **Stratified RA precision audit** — sample detected polygons by (region × grid_type), RA adjudicates, report precision ± CI per stratum.
+2. **Exhaustive small-AOI recall** — sample AOIs by (region × grid_type), RA exhaustively annotates, compute recall per stratum. Current annotation workflow does not produce landscape-level recall.
+3. **Plausibility sanity checks** — per-grid density / solarizable-area / mean-polygon-area fall inside known physical bounds.
+4. **Opportunistic external agreement** — where admin/survey exists (CT CBD, JHB survey), join address points to grid and run count regression. Supporting evidence only.
+
+Bonus Channel 5 — **temporal consistency** via sub-repo install-date estimator (monotonic dates + match to Eskom SSEG cumulative).
+
+### Dual-threshold post-processing
+- `configs/postproc/v4_high.json` — seed inventory for sub-repo; calibrated to Channel 1 precision ≥ 0.95 per stratum.
+- `configs/postproc/v4_agg.json` — economic aggregate inventory; calibrated to Channel 3 bounds + Channel 4 slope ≈ 1.
+
+### Planned deliverables
+- [ ] Grid-type strata tagging (CBD / suburban / township / peri_urban / rural) in `configs/datasets/regions.yaml` or `grid_strata.csv`
+- [ ] `scripts/analysis/ra_precision_sample.py` — Channel 1 sampler + queue builder
+- [ ] `scripts/analysis/build_recall_aoi_queue.py` + exhaustive annotation RA tool — Channel 2
+- [ ] `scripts/analysis/grid_plausibility.py` — Channel 3 with outlier flagging
+- [ ] `scripts/analysis/external_agreement_grid.py` — Channel 4 (builds on `area_aggregate_eval.py`)
+- [ ] `configs/postproc/v4_high.json` + `v4_agg.json` + calibration script
+- [ ] `docs/experiments/exp_validation_v1_4.md` — running log of channel results
+
+### Sub-repo pivot (geid_bbox)
+- Existing GEID free-detection work frozen as baseline (`git tag baseline-free-detection`, README deprecation notice)
+- New module `geid_bbox/install_date/`: binary patch classifier (installed / not installed) + first-appearance estimator on GEID temporal stack
+- Input: main-repo `v4_high.json` output `(lat, lon, footprint, grid_id)`
+- Output: `(anchor_id, install_date, confidence)` + `install_date_MAE` vs spot-checked GT
+
+### Decision log
+- Per-polygon F1 remains as **diagnostic** metric (continuity with V1.2/V1.3 reports); no longer the headline.
+- External GT demoted to Channel 4 because SA has no national registry; admin data is urban-biased, sparse, and points-on-households (not on panels).
+- Grid (`G1xxx`) chosen over ward/SAL as primary aggregation unit — zero external dependency, matches existing pipeline semantics.
 
 ---
 
