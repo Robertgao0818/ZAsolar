@@ -6,6 +6,12 @@ VENV_PATH="$PROJECT_ROOT/.venv"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 LOCK_FILE="$PROJECT_ROOT/requirements.lock.txt"
 REQ_FILE="$PROJECT_ROOT/requirements.txt"
+PYTORCH_INDEX_URL="${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu126}"
+PIP_LOCK_ARGS=()
+
+if [[ -n "$PYTORCH_INDEX_URL" ]]; then
+  PIP_LOCK_ARGS+=(--extra-index-url "$PYTORCH_INDEX_URL")
+fi
 
 mkdir -p \
   "$PROJECT_ROOT/.cache" \
@@ -32,7 +38,7 @@ fi
 "$VENV_PATH/bin/python" -m pip install --upgrade pip setuptools wheel
 
 if [[ -f "$LOCK_FILE" ]]; then
-  if ! "$VENV_PATH/bin/pip" install -r "$LOCK_FILE"; then
+  if ! "$VENV_PATH/bin/pip" install "${PIP_LOCK_ARGS[@]}" -r "$LOCK_FILE"; then
     echo
     echo "Lock file install failed; falling back to requirements.txt"
     "$VENV_PATH/bin/pip" install -r "$REQ_FILE"

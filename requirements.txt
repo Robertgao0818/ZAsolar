@@ -13,3 +13,5 @@ torchvision
 huggingface_hub
 opencv-python-headless
 pycocotools
+timm>=0.9
+pytest
