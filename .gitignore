@@ -32,6 +32,8 @@ checkpoints/
 # 训练数据（可重新生成）
 data/coco*/
 data/cls_pv_thermal/
+data/cls_pv_thermal_v*/
+data/cls_pv_nonpv_v*/
 
 # 建筑轮廓数据（可重新生成）
 buildings.gpkg
@@ -58,6 +60,7 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+.venv.bak.*/
 .cache/
 .config/
 .local/
@@ -66,6 +69,7 @@ __pycache__/
 
 # 运行日志
 run_output.txt
+logs/
 
 # OS
 .DS_Store
@@ -74,6 +78,8 @@ Thumbs.db
 # Claude Code config (local-only parts)
 .claude/settings.local.json
 .claude/projects/
+.codex
+.hermes/
 
 # Local cache (OSM buildings, tile masks, etc.)
 cache/
@@ -83,3 +89,6 @@ cache/
 
 # Misc data files
 data/sseg_registration_geo.csv
+
+# Generated visual diagnostics / local imagery comparisons
+mosaics/
