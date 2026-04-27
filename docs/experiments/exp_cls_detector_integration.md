@@ -139,3 +139,78 @@ For any grid with reviewed GT available:
    filtered precision; otherwise the decoupling is leaking state.
 5. `config.json` in the post-filter run must contain the three classifier
    provenance fields.
+
+## Detector × SAM mode benchmark (2026-04-26)
+
+Why this matters for classifier integration: the classifier is the second
+stage of a (detector → SAM mask refine → classifier) cascade. Picking the
+detector + SAM mode that *enters* the classifier determines (a) how many FPs
+the classifier has to kill, (b) the ceiling area F1 the cascade can reach,
+and (c) the recall budget. The 9-cell ablation below was run on the V1.4
+benchmark blueprint (25 JHB CBD grids × Li hand-labeled GT × GEID 2024-02
+chunked imagery, post-proc `configs/postproc/v4_canonical.json`,
+cluster-level eval via `scripts/analysis/cluster_level_eval.py`).
+
+### Full 3 detector × 3 SAM mode matrix
+
+| Detector / SAM mode | matched | FP | FN | cluster R | cluster F1 | **area F1** | **balanced** |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| V3-C / no SAM            |  977 |  578 |  364 | 0.729 | **0.675** | 0.833 | 0.685 |
+| **V3-C / box-only**      |  948 |  591 |  495 | 0.657 | 0.636 | **0.918** ⭐ | **0.798** ⭐ |
+| V3-C / mask+box          |  981 |  578 |  389 | 0.716 | 0.670 | 0.895 | 0.743 |
+| V4.1 / no SAM            |  851 |  508 |  332 | 0.719 | 0.670 | 0.791 | 0.620 |
+| V4.1 / box-only          |  831 |  519 |  467 | 0.640 | 0.628 | 0.891 | 0.750 |
+| V4.1 / mask+box          |  857 |  506 |  339 | 0.717 | 0.670 | 0.855 | 0.676 |
+| V4.2 / no SAM            |  826 | 1211 |  159 | **0.839** | 0.547 | 0.730 | 0.558 |
+| V4.2 / box-only          |  821 | 1211 |  244 | 0.771 | 0.530 | 0.860 | 0.696 |
+| V4.2 / mask+box          |  841 | 1198 | **155** | **0.844** | 0.554 | 0.796 | 0.613 |
+
+Source artifacts: `results/analysis/{v3c_rerun,v4_1,v4_2}_vs_li_20260426/`
+(detector-only) and `results/analysis/{v3c,v4_1,v4_2}_sam_{box,mask}_vs_li_20260426/`
+(+ SAM); raw masks in `results/johannesburg/{v3c,v4_1,v4_2}_sam_{box,mask}_geid_2024_02/`.
+
+### Three findings that shape classifier-stage planning
+
+1. **"SAM is the area F1 ceiling" — falsified.** V4.2+SAM tops at area F1
+   0.860; V3-C+SAM tops at 0.918. **Detector box quality propagates
+   directly into SAM output** — clean boxes let SAM pick the right
+   sub-component. Detector choice is *not* recall-only.
+2. **Box-only FN flip is detector-invariant.** V3-C +131 FN, V4.1 +135 FN,
+   V4.2 +85 FN — every detector loses recall when SAM gets bbox-only
+   prompts. The "SAM `argmax(score)` specificity bias picks
+   sub-components" failure mode is general, not over-segmentation-
+   specific. Classifier integration cannot fix this — it must be solved
+   at the SAM-prompt layer.
+3. **mask+box gives a +6pp area F1 gain across all detectors.**
+   V3-C +6.2 / V4.1 +6.4 / V4.2 +6.6. The role of mask-prompt is
+   sub-component-flip suppression, not over-seg repair.
+
+### Implications for classifier integration
+
+- **Primary cascade input = V3-C + SAM mask+box.** Detector matched=981,
+  FP=578, FN=389, area F1 0.895. Classifier needs to kill ~70% of 578 FPs
+  to push cluster P from 0.629 → ~0.85; estimated three-stage cluster F1
+  ≈ 0.78, area F1 0.895, balanced ≈ 0.80+.
+- **Aggressive variant = V3-C + SAM box-only.** Starts at area F1 0.918 /
+  balanced 0.798 (already best in the no-classifier matrix). Same FP count
+  (591), but recall is capped at 0.657 — choose this only if downstream KPI
+  is weighted toward area precision and recall is allowed to drop.
+- **Control = V4.2 + SAM mask+box.** recall 0.844 ceiling but FP 1198
+  forces classifier recall ≥ 90% to break even on cluster F1; reserved for
+  the case where someone trains a near-perfect water-heater discriminator.
+- **V4.1 is dominated** at every SAM mode by V3-C at the same SAM mode;
+  drop from candidate cascades, keep only as ablation control.
+
+### Classifier dataset implication
+
+The 981 matched + 578 FP from V3-C + SAM mask+box on the 25 CBD grids form
+a natural labeled pool for the binary PV vs non-PV classifier:
+
+- 981 matched (vs Li GT, IoU ≥ 0.1) → positive examples
+- 578 FPs → negative examples (subtype audit feeds
+  `scripts/analysis/cls_nonpv_subtype_audit.py` to ensure water-heater /
+  fixture / shadow / road-marking coverage)
+
+This dataset is built and consumed via the protocol in
+`exp_cls_dataset_protocol.md`; see also `exp_cls_backbone_ablation.md` for
+the backbone evaluation that will be run on it.
