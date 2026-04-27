@@ -465,6 +465,7 @@ def detect_solar_panels(
     output_dir=None,
     save_config=True,
     model_path=None,
+    profile=False,
 ) -> gpd.GeoDataFrame:
     """
     使用 geoai SolarPanelDetector 对每张 GeoTIFF 进行检测。
@@ -563,38 +564,69 @@ def detect_solar_panels(
             except Exception as e:
                 print(f"[WARN] 加载建筑轮廓失败: {e}")
 
+        from core.profiling import StageProfiler
+        prof = StageProfiler(cuda=(device == "cuda")) if profile else None
+
         all_gdfs = []
         for idx, tif_path in enumerate(geo_tifs, 1):
             tile_name = tif_path.stem
             print(f"  [{idx}/{len(geo_tifs)}] 检测中: {tile_name}")
 
             try:
-                prepared_tif_path = prepare_geoai_input_raster(
-                    tif_path, _masks_dir / "_geoai_input_cache"
-                )
+                if prof is not None:
+                    with prof("prep_input"):
+                        prepared_tif_path = prepare_geoai_input_raster(
+                            tif_path, _masks_dir / "_geoai_input_cache"
+                        )
+                else:
+                    prepared_tif_path = prepare_geoai_input_raster(
+                        tif_path, _masks_dir / "_geoai_input_cache"
+                    )
 
-                # 生成掩膜 → 矢量化
+                # 生成掩膜（含 GPU forward + chip I/O + mask 写盘）
                 mask_path = _masks_dir / f"{tile_name}_mask.tif"
-                masks_result = detector.generate_masks(
-                    str(prepared_tif_path),
-                    output_path=str(mask_path),
-                    confidence_threshold=_confidence_threshold,
-                    mask_threshold=_mask_threshold,
-                    min_object_area=_min_object_area,
-                    overlap=_overlap,
-                    chip_size=_chip_size,
-                    batch_size=BATCH_SIZE,
-                    verbose=False,
-                )
+                if prof is not None:
+                    with prof("generate_masks", cuda=(device == "cuda")):
+                        masks_result = detector.generate_masks(
+                            str(prepared_tif_path),
+                            output_path=str(mask_path),
+                            confidence_threshold=_confidence_threshold,
+                            mask_threshold=_mask_threshold,
+                            min_object_area=_min_object_area,
+                            overlap=_overlap,
+                            chip_size=_chip_size,
+                            batch_size=BATCH_SIZE,
+                            verbose=False,
+                        )
+                else:
+                    masks_result = detector.generate_masks(
+                        str(prepared_tif_path),
+                        output_path=str(mask_path),
+                        confidence_threshold=_confidence_threshold,
+                        mask_threshold=_mask_threshold,
+                        min_object_area=_min_object_area,
+                        overlap=_overlap,
+                        chip_size=_chip_size,
+                        batch_size=BATCH_SIZE,
+                        verbose=False,
+                    )
 
                 # 矢量化：正交化多边形
                 vector_path = _vectors_dir / f"{tile_name}_vectors.geojson"
                 try:
-                    gdf_tile = geoai.orthogonalize(
-                        input_path=masks_result,
-                        output_path=str(vector_path),
-                        epsilon=0.2,
-                    )
+                    if prof is not None:
+                        with prof("orthogonalize"):
+                            gdf_tile = geoai.orthogonalize(
+                                input_path=masks_result,
+                                output_path=str(vector_path),
+                                epsilon=0.2,
+                            )
+                    else:
+                        gdf_tile = geoai.orthogonalize(
+                            input_path=masks_result,
+                            output_path=str(vector_path),
+                            epsilon=0.2,
+                        )
                 except Exception as exc:
                     if is_empty_geometry_result_error(exc):
                         print("    -> 未检测到可矢量化多边形")
@@ -605,10 +637,17 @@ def detect_solar_panels(
                     # --- 从 mask band 2 回填 confidence ---
                     try:
                         import rasterstats as _rs
-                        _conf_stats = _rs.zonal_stats(
-                            gdf_tile, str(mask_path), band=2,
-                            stats=["mean"], nodata=0,
-                        )
+                        if prof is not None:
+                            with prof("zonal_conf"):
+                                _conf_stats = _rs.zonal_stats(
+                                    gdf_tile, str(mask_path), band=2,
+                                    stats=["mean"], nodata=0,
+                                )
+                        else:
+                            _conf_stats = _rs.zonal_stats(
+                                gdf_tile, str(mask_path), band=2,
+                                stats=["mean"], nodata=0,
+                            )
                         gdf_tile["confidence"] = [
                             (s["mean"] / 255.0) if s["mean"] is not None else 0.0
                             for s in _conf_stats
@@ -617,14 +656,50 @@ def detect_solar_panels(
                         print(f"    [WARN] confidence 回填失败: {_e}")
 
                     # --- 颜色过滤：去除阴影和反光 ---
+                    # Single rasterio read of bands 1-3, then numpy-level zonal means.
+                    # Replaces 3 separate rasterstats.zonal_stats calls (each was
+                    # reopening the source raster). See profiling 2026-04-23.
                     try:
-                        import rasterstats
-                        stats_r = rasterstats.zonal_stats(gdf_tile, str(tif_path), band=1, stats=['mean'], nodata=0)
-                        stats_g = rasterstats.zonal_stats(gdf_tile, str(tif_path), band=2, stats=['mean'], nodata=0)
-                        stats_b = rasterstats.zonal_stats(gdf_tile, str(tif_path), band=3, stats=['mean'], nodata=0)
-                        gdf_tile["mean_r"] = [s['mean'] if s['mean'] is not None else 0 for s in stats_r]
-                        gdf_tile["mean_g"] = [s['mean'] if s['mean'] is not None else 0 for s in stats_g]
-                        gdf_tile["mean_b"] = [s['mean'] if s['mean'] is not None else 0 for s in stats_b]
+                        def _zonal_rgb_means(gdf, raster_path: str):
+                            """Per-polygon mean of R/G/B in one raster open.
+
+                            Matches rasterstats(..., nodata=0) semantics: pixels
+                            with band value == 0 are excluded from the mean.
+                            """
+                            from rasterio import open as _rio_open
+                            from rasterio.features import geometry_mask
+                            with _rio_open(raster_path) as src:
+                                rgb = src.read([1, 2, 3])  # (3, H, W)
+                                tr = src.transform
+                                h, w = rgb.shape[1], rgb.shape[2]
+                            means = np.zeros((len(gdf), 3), dtype=np.float64)
+                            for j, geom in enumerate(gdf.geometry.values):
+                                if geom is None or geom.is_empty:
+                                    continue
+                                try:
+                                    m = geometry_mask(
+                                        [geom], out_shape=(h, w), transform=tr,
+                                        invert=True, all_touched=False,
+                                    )
+                                except Exception:
+                                    continue
+                                if not m.any():
+                                    continue
+                                for b in range(3):
+                                    vals = rgb[b][m]
+                                    vals = vals[vals != 0]  # nodata=0 parity
+                                    if vals.size:
+                                        means[j, b] = float(vals.mean())
+                            return means[:, 0], means[:, 1], means[:, 2]
+
+                        if prof is not None:
+                            with prof("zonal_rgb"):
+                                mr, mg, mb = _zonal_rgb_means(gdf_tile, str(tif_path))
+                        else:
+                            mr, mg, mb = _zonal_rgb_means(gdf_tile, str(tif_path))
+                        gdf_tile["mean_r"] = mr
+                        gdf_tile["mean_g"] = mg
+                        gdf_tile["mean_b"] = mb
 
                         # 阴影过滤（RGB 三通道均低于阈值）+ 过曝过滤
                         is_shadow = ((gdf_tile["mean_r"] < SHADOW_RGB_THRESH)
@@ -644,7 +719,11 @@ def detect_solar_panels(
 
                     if len(gdf_tile) > 0:
                         # 添加几何属性用于后续过滤
-                        gdf_tile = geoai.add_geometric_properties(gdf_tile)
+                        if prof is not None:
+                            with prof("geom_props"):
+                                gdf_tile = geoai.add_geometric_properties(gdf_tile)
+                        else:
+                            gdf_tile = geoai.add_geometric_properties(gdf_tile)
                         # 添加来源 tile 信息
                         gdf_tile["source_tile"] = tile_name
                         all_gdfs.append(gdf_tile)
@@ -657,6 +736,9 @@ def detect_solar_panels(
             except Exception as e:
                 print(f"    [WARNING] 处理 {tile_name} 时出错: {e}")
                 continue
+
+        if prof is not None:
+            print(prof.summary(header=f"inference path A, {len(geo_tifs)} tiles"))
 
         if not all_gdfs:
             print("[ERROR] 所有 tile 均未检测到太阳能板")
@@ -888,10 +970,20 @@ def load_ground_truth() -> gpd.GeoDataFrame:
     return gt
 
 
-def load_predictions() -> gpd.GeoDataFrame:
-    """加载预测结果，并统一到米制计算 CRS。"""
-    pred_path = None
-    if PREDICTIONS_METRIC_PATH.exists():
+def load_predictions(override_path: Path | None = None) -> gpd.GeoDataFrame:
+    """加载预测结果，并统一到米制计算 CRS。
+
+    `override_path`: 若指定，优先使用该路径 (用于 classifier-filtered GPKG 的
+    eval-only flow)。外部 GPKG 仍按 METRIC_CRS 解释，与 predictions_metric.gpkg
+    一致。
+    """
+    pred_path: Path | None = None
+    if override_path is not None:
+        if not override_path.exists():
+            print(f"[ERROR] --classifier-filtered-gpkg 指定的文件不存在: {override_path}")
+            sys.exit(1)
+        pred_path = override_path
+    elif PREDICTIONS_METRIC_PATH.exists():
         pred_path = PREDICTIONS_METRIC_PATH
     elif PREDICTIONS_PATH.exists():
         pred_path = PREDICTIONS_PATH
@@ -902,7 +994,7 @@ def load_predictions() -> gpd.GeoDataFrame:
     pred = gpd.read_file(str(pred_path))
     print(f"  已加载预测结果: {len(pred)} 个多边形 ({pred_path.name})")
 
-    assumed_crs = METRIC_CRS if pred_path == PREDICTIONS_METRIC_PATH else EXPORT_CRS
+    assumed_crs = METRIC_CRS if pred_path != PREDICTIONS_PATH else EXPORT_CRS
     pred = to_metric_crs(pred, assumed_crs=assumed_crs, label="预测结果")
 
     pred = pred[pred.geometry.notnull() & pred.is_valid].copy()
@@ -1818,6 +1910,30 @@ def parse_args():
         help="后处理参数 JSON 文件路径（由 calibration_sweep 生成），"
              "覆盖 post_conf_threshold / min_object_area / max_elongation",
     )
+    parser.add_argument(
+        "--classifier-filtered-gpkg",
+        default=None,
+        help="外部 classifier 过滤后的 predictions GPKG（metric CRS）。"
+             "指定后跳过检测，直接用该文件做评估。与 --force 互斥语义：此模式"
+             "天然视为 eval-only，cache 不会被复用。"
+             "见 docs/experiments/exp_cls_detector_integration.md",
+    )
+    parser.add_argument(
+        "--classifier-model-path",
+        default=None,
+        help="记录到 config.json 的 classifier checkpoint 路径（provenance）。",
+    )
+    parser.add_argument(
+        "--classifier-threshold",
+        type=float,
+        default=None,
+        help="记录到 config.json 的 classifier PV 阈值（provenance）。",
+    )
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="打印 path A 推理各阶段耗时分解 (prep/generate_masks/orthogonalize/zonal/geom)",
+    )
     return parser.parse_args()
 
 
@@ -1837,7 +1953,11 @@ def main(force: bool = False,
          model_path: str | None = None,
          evaluation_profile: str = "installation",  # V1.3: name preserved for compatibility; evaluates reviewed predictions vs installation-level GT
          data_scope: str = "full_grid",
-         postproc_config: str | None = None):
+         postproc_config: str | None = None,
+         classifier_filtered_gpkg: str | None = None,
+         classifier_model_path: str | None = None,
+         classifier_threshold: float | None = None,
+         profile: bool = False):
     # 后处理配置文件覆盖：文件中的值作为 fallback，CLI 显式参数优先
     if postproc_config is not None:
         pp = load_postproc_config(postproc_config)
@@ -1868,6 +1988,13 @@ def main(force: bool = False,
     print(f"[EVAL] profile={evaluation_profile}, scope={data_scope}")
 
     # ── Step 1: 检测 ──────────────────────────────────────────────────
+    # 如果指定 --classifier-filtered-gpkg，跳过检测，直接用外部 filtered GPKG 做评估。
+    # Classifier filter 是 detect_and_evaluate 之外的解耦步骤 (见 Task 5a
+    # exp_cls_detector_integration.md)；这里只接线 eval 入口。
+    classifier_filter_path = (
+        Path(classifier_filtered_gpkg) if classifier_filtered_gpkg else None
+    )
+
     detect_chip_size = (chip_size, chip_size) if chip_size is not None else None
     detection_config = build_detection_config(
         chip_size=detect_chip_size,
@@ -1880,7 +2007,19 @@ def main(force: bool = False,
         output_dir=OUTPUT_DIR,
         model_path=model_path,
     )
-    if should_reuse_predictions(OUTPUT_DIR, detection_config, force=force):
+    # Record classifier provenance so config.json cache key differs when
+    # classifier filtering is applied (see exp_cls_detector_integration.md).
+    if classifier_filter_path is not None:
+        detection_config["classifier_filtered_gpkg"] = str(classifier_filter_path)
+        if classifier_model_path:
+            detection_config["classifier_model_path"] = classifier_model_path
+        if classifier_threshold is not None:
+            detection_config["classifier_threshold"] = classifier_threshold
+
+    if classifier_filter_path is not None:
+        print(f"[CLS ] Eval-only with classifier-filtered GPKG: {classifier_filter_path}")
+        pred = load_predictions(override_path=classifier_filter_path)
+    elif should_reuse_predictions(OUTPUT_DIR, detection_config, force=force):
         pred = load_predictions()
     else:
         pred = detect_solar_panels(
@@ -1893,6 +2032,7 @@ def main(force: bool = False,
             max_elongation=max_elongation,
             output_dir=str(OUTPUT_DIR),
             model_path=model_path,
+            profile=profile,
         )
         pred = load_predictions()  # 重新加载以确保 CRS 统一
 
@@ -2004,6 +2144,10 @@ if __name__ == "__main__":
             evaluation_profile=args.evaluation_profile,
             data_scope=args.data_scope,
             postproc_config=args.postproc_config,
+            classifier_filtered_gpkg=args.classifier_filtered_gpkg,
+            classifier_model_path=args.classifier_model_path,
+            classifier_threshold=args.classifier_threshold,
+            profile=args.profile,
         )
     except RuntimeError as exc:
         print(f"[ERROR] {exc}")

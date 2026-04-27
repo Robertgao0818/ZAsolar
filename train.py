@@ -22,7 +22,9 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.utils.data
-from torchvision.models.detection import maskrcnn_resnet50_fpn
+
+from core.models import build_solar_maskrcnn
+from core.profiling import StageProfiler
 
 assert torch.cuda.is_available(), (
     "CUDA is required for training. WSL2 does not currently expose CUDA to PyTorch. "
@@ -255,35 +257,11 @@ class ValTransforms:
 # Model
 # ════════════════════════════════════════════════════════════════════════
 def build_model(pretrained_path: str | None = None, num_classes: int = 2):
-    """Build Mask R-CNN ResNet50-FPN, optionally loading geoai pretrained weights."""
-    image_mean = [0.485, 0.456, 0.406]
-    image_std = [0.229, 0.224, 0.225]
-
-    model = maskrcnn_resnet50_fpn(
-        weights=None,
-        progress=False,
+    """Thin wrapper over core.models.build_solar_maskrcnn for backcompat."""
+    return build_solar_maskrcnn(
+        pretrained_path=pretrained_path,
         num_classes=num_classes,
-        weights_backbone=None,
-        image_mean=image_mean,
-        image_std=image_std,
     )
-
-    if pretrained_path is not None:
-        print(f"[MODEL] Loading pretrained weights from {pretrained_path}")
-        state_dict = torch.load(pretrained_path, map_location="cpu", weights_only=False)
-        if isinstance(state_dict, dict):
-            if "model" in state_dict:
-                state_dict = state_dict["model"]
-            elif "state_dict" in state_dict:
-                state_dict = state_dict["state_dict"]
-        # Remove 'module.' prefix if present (DataParallel)
-        state_dict = {
-            k.replace("module.", ""): v for k, v in state_dict.items()
-        }
-        model.load_state_dict(state_dict, strict=False)
-        print("[MODEL] Pretrained weights loaded")
-
-    return model
 
 
 def freeze_backbone(model):
@@ -307,8 +285,68 @@ def unfreeze_all(model):
 # Evaluation (COCO AP)
 # ════════════════════════════════════════════════════════════════════════
 @torch.no_grad()
+def _compute_f1_at_conf(coco_gt_data: dict, coco_results: list,
+                        conf_threshold: float = 0.85,
+                        iou_threshold: float = 0.5) -> dict:
+    """Compute deployment-threshold F1 on chip val set.
+
+    Mirrors inference-time behavior: filter preds by conf, greedy IoU match
+    to GT per image. Catches V4.2-style failure mode where AP50 stays high
+    but deployment-threshold precision collapses.
+    """
+    from pycocotools import mask as mask_util
+
+    gt_by_img: dict[int, list] = {}
+    for ann in coco_gt_data["annotations"]:
+        gt_by_img.setdefault(ann["image_id"], []).append(ann["segmentation"])
+    preds_by_img: dict[int, list] = {}
+    for r in coco_results:
+        if r["score"] < conf_threshold:
+            continue
+        preds_by_img.setdefault(r["image_id"], []).append(r)
+
+    tp = fp = fn = 0
+    all_img_ids = {im["id"] for im in coco_gt_data["images"]}
+    for img_id in all_img_ids:
+        gt_rles = gt_by_img.get(img_id, [])
+        pred_list = sorted(preds_by_img.get(img_id, []),
+                           key=lambda r: -r["score"])
+        if not gt_rles and not pred_list:
+            continue
+        if not pred_list:
+            fn += len(gt_rles)
+            continue
+        if not gt_rles:
+            fp += len(pred_list)
+            continue
+        matched_gt = set()
+        for pr in pred_list:
+            ious = mask_util.iou([pr["segmentation"]], gt_rles,
+                                 [0] * len(gt_rles))[0]
+            best_j, best_iou = -1, iou_threshold
+            for j, iou in enumerate(ious):
+                if j in matched_gt:
+                    continue
+                if iou >= best_iou:
+                    best_iou = iou
+                    best_j = j
+            if best_j >= 0:
+                matched_gt.add(best_j)
+                tp += 1
+            else:
+                fp += 1
+        fn += len(gt_rles) - len(matched_gt)
+
+    p = tp / (tp + fp) if (tp + fp) else 0.0
+    r = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * p * r / (p + r) if (p + r) else 0.0
+    return {"p": p, "r": r, "f1": f1, "tp": tp, "fp": fp, "fn": fn,
+            "conf_threshold": conf_threshold, "iou_threshold": iou_threshold}
+
+
+@torch.no_grad()
 def evaluate_coco(model, data_loader, device):
-    """Compute COCO segm AP50 on the validation set."""
+    """Compute COCO segm AP50 + deployment-conf F1 on the validation set."""
     from pycocotools.coco import COCO
     from pycocotools.cocoeval import COCOeval
     from pycocotools import mask as mask_util
@@ -383,7 +421,7 @@ def evaluate_coco(model, data_loader, device):
 
     if not coco_gt_data["annotations"]:
         print("[EVAL] No GT annotations in val set")
-        return 0.0
+        return {"ap50": 0.0, "f1@85": 0.0, "p@85": 0.0, "r@85": 0.0}
 
     # Run COCO evaluation
     coco_gt = COCO()
@@ -392,17 +430,28 @@ def evaluate_coco(model, data_loader, device):
 
     if not coco_results:
         print("[EVAL] No predictions")
-        return 0.0
+        return {"ap50": 0.0, "f1@85": 0.0, "p@85": 0.0, "r@85": 0.0}
 
     coco_dt = coco_gt.loadRes(coco_results)
     coco_eval = COCOeval(coco_gt, coco_dt, iouType="segm")
     coco_eval.evaluate()
     coco_eval.accumulate()
     coco_eval.summarize()
-
-    # AP50 is index 1 in stats
     ap50 = coco_eval.stats[1]
-    return ap50
+
+    # Deployment-threshold F1 — catches V4.2 failure mode where AP50 is high
+    # but conf-gated precision collapses
+    f1_stats = _compute_f1_at_conf(coco_gt_data, coco_results,
+                                   conf_threshold=0.85, iou_threshold=0.5)
+    return {
+        "ap50": ap50,
+        "f1@85": f1_stats["f1"],
+        "p@85": f1_stats["p"],
+        "r@85": f1_stats["r"],
+        "tp@85": f1_stats["tp"],
+        "fp@85": f1_stats["fp"],
+        "fn@85": f1_stats["fn"],
+    }
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -413,33 +462,82 @@ def collate_fn(batch):
 
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch,
-                    lr_scheduler=None, scaler=None):
-    """Train for one epoch, return average loss. Supports AMP via scaler."""
+                    lr_scheduler=None, scaler=None, profiler=None):
+    """Train for one epoch, return average loss. Supports AMP via scaler.
+
+    If `profiler` is a StageProfiler, per-stage wall/GPU times are accumulated
+    into it (stages: data_wait, to_device, forward, backward, step).
+    """
     model.train()
     total_loss = 0.0
     n_batches = 0
 
-    for images, targets in data_loader:
-        images = [img.to(device) for img in images]
-        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+    prof = profiler  # alias
+    data_iter = iter(data_loader)
+    while True:
+        # ── data_wait: time blocked waiting for next batch ────────────
+        if prof is not None:
+            with prof("data_wait"):
+                try:
+                    images, targets = next(data_iter)
+                except StopIteration:
+                    break
+        else:
+            try:
+                images, targets = next(data_iter)
+            except StopIteration:
+                break
+
+        # ── to_device: H2D transfer ────────────────────────────────────
+        if prof is not None:
+            with prof("to_device"):
+                images = [img.to(device, non_blocking=True) for img in images]
+                targets = [{k: v.to(device, non_blocking=True) for k, v in t.items()}
+                           for t in targets]
+        else:
+            images = [img.to(device) for img in images]
+            targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
         optimizer.zero_grad()
 
         if scaler is not None:
-            with torch.amp.autocast("cuda"):
+            if prof is not None:
+                with prof("forward", cuda=True):
+                    with torch.amp.autocast("cuda"):
+                        loss_dict = model(images, targets)
+                        losses = sum(loss for loss in loss_dict.values())
+                with prof("backward", cuda=True):
+                    scaler.scale(losses).backward()
+                with prof("step"):
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                    scaler.step(optimizer)
+                    scaler.update()
+            else:
+                with torch.amp.autocast("cuda"):
+                    loss_dict = model(images, targets)
+                    losses = sum(loss for loss in loss_dict.values())
+                scaler.scale(losses).backward()
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                scaler.step(optimizer)
+                scaler.update()
+        else:
+            if prof is not None:
+                with prof("forward", cuda=True):
+                    loss_dict = model(images, targets)
+                    losses = sum(loss for loss in loss_dict.values())
+                with prof("backward", cuda=True):
+                    losses.backward()
+                with prof("step"):
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                    optimizer.step()
+            else:
                 loss_dict = model(images, targets)
                 losses = sum(loss for loss in loss_dict.values())
-            scaler.scale(losses).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            loss_dict = model(images, targets)
-            losses = sum(loss for loss in loss_dict.values())
-            losses.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-            optimizer.step()
+                losses.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                optimizer.step()
 
         if lr_scheduler is not None:
             lr_scheduler.step()
@@ -465,11 +563,17 @@ def main():
     parser.add_argument("--lr2", type=float, default=1e-4, help="Stage 2 learning rate")
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--num-workers", type=int, default=8)
+    parser.add_argument("--prefetch-factor", type=int, default=2,
+                        help="Batches each worker prefetches (PyTorch default 2)")
     parser.add_argument("--no-amp", action="store_true", help="Disable mixed precision training")
     parser.add_argument("--chip-size", type=int, default=400)
     parser.add_argument(
         "--resume", default=None,
         help="Path to checkpoint (.pth) to resume training (auto-detects stage)",
+    )
+    parser.add_argument(
+        "--profile", action="store_true",
+        help="Print per-stage wall/GPU timing breakdown after each epoch",
     )
     args = parser.parse_args()
 
@@ -503,23 +607,26 @@ def main():
     )
     print(f"[DATA] Train: {len(train_ds)} images, Val: {len(val_ds)} images")
 
-    train_loader = torch.utils.data.DataLoader(
-        train_ds, batch_size=args.batch_size, shuffle=True,
-        num_workers=args.num_workers, collate_fn=collate_fn, pin_memory=True,
+    loader_kwargs = dict(
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        collate_fn=collate_fn,
+        pin_memory=True,
         persistent_workers=args.num_workers > 0,
     )
-    val_loader = torch.utils.data.DataLoader(
-        val_ds, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.num_workers, collate_fn=collate_fn, pin_memory=True,
-        persistent_workers=args.num_workers > 0,
-    )
+    if args.num_workers > 0:
+        loader_kwargs["prefetch_factor"] = args.prefetch_factor
+    train_loader = torch.utils.data.DataLoader(train_ds, shuffle=True, **loader_kwargs)
+    val_loader = torch.utils.data.DataLoader(val_ds, shuffle=False, **loader_kwargs)
 
     # ── Model ─────────────────────────────────────────────────────────
     model = build_model(pretrained_path, num_classes=2)
     model.to(device)
 
     best_ap50 = 0.0
-    best_path = output_dir / "best_model.pth"
+    best_f1 = 0.0
+    best_path = output_dir / "best_model.pth"           # selected by F1@0.85 (deployment metric)
+    best_ap50_path = output_dir / "best_ap50_model.pth" # secondary, for comparison
     history = []
 
     # ── Resume handling (auto-detect stage) ───────────────────────────
@@ -533,11 +640,13 @@ def main():
         resume_stage = ckpt.get("stage", 2)
         resume_epoch = ckpt["epoch"]
         best_ap50 = ckpt.get("best_ap50", best_ap50)
+        best_f1 = ckpt.get("best_f1", best_f1)
         if "scaler" in ckpt and scaler is not None:
             scaler.load_state_dict(ckpt["scaler"])
-        print(f"[RESUME] Stage {resume_stage}, epoch {resume_epoch}, best_ap50={best_ap50:.4f}")
+        print(f"[RESUME] Stage {resume_stage}, epoch {resume_epoch}, "
+              f"best_ap50={best_ap50:.4f}, best_f1={best_f1:.4f}")
 
-    def save_checkpoint(stage, epoch, model, optimizer, best_ap50, scaler=None):
+    def save_checkpoint(stage, epoch, model, optimizer, best_ap50, best_f1, scaler=None):
         """Save checkpoint with all state needed for resume."""
         ckpt_path = output_dir / f"stage{stage}_epoch{epoch}.pth"
         state = {
@@ -546,6 +655,7 @@ def main():
             "stage": stage,
             "epoch": epoch,
             "best_ap50": best_ap50,
+            "best_f1": best_f1,
         }
         if scaler is not None:
             state["scaler"] = scaler.state_dict()
@@ -576,25 +686,39 @@ def main():
 
         for epoch in range(stage1_start + 1, args.epochs1 + 1):
             t0 = time.time()
+            epoch_prof = StageProfiler(cuda=True) if args.profile else None
             avg_loss = train_one_epoch(
-                model, optimizer1, train_loader, device, epoch, scaler=scaler
+                model, optimizer1, train_loader, device, epoch,
+                scaler=scaler, profiler=epoch_prof,
             )
             dt = time.time() - t0
+            if epoch_prof is not None:
+                print(epoch_prof.summary(header=f"stage1 epoch {epoch}"))
 
-            ap50 = evaluate_coco(model, val_loader, device)
+            metrics = evaluate_coco(model, val_loader, device)
+            ap50 = metrics["ap50"]
+            f1_85 = metrics["f1@85"]
             print(f"  Epoch {epoch}/{args.epochs1}  loss={avg_loss:.4f}  "
-                  f"val_AP50={ap50:.4f}  time={dt:.0f}s")
+                  f"val_AP50={ap50:.4f}  val_F1@85={f1_85:.4f} "
+                  f"(P={metrics['p@85']:.3f} R={metrics['r@85']:.3f} "
+                  f"TP={metrics['tp@85']} FP={metrics['fp@85']} FN={metrics['fn@85']})  "
+                  f"time={dt:.0f}s")
 
             history.append({
-                "stage": 1, "epoch": epoch, "loss": avg_loss, "val_ap50": ap50
+                "stage": 1, "epoch": epoch, "loss": avg_loss,
+                "val_ap50": ap50, "val_f1_85": f1_85,
+                "val_p_85": metrics["p@85"], "val_r_85": metrics["r@85"],
             })
 
+            if f1_85 > best_f1:
+                best_f1 = f1_85
+                torch.save(model.state_dict(), best_path)
+                print(f"  >> New best F1@85={f1_85:.4f}, saved to {best_path}")
             if ap50 > best_ap50:
                 best_ap50 = ap50
-                torch.save(model.state_dict(), best_path)
-                print(f"  >> New best AP50={ap50:.4f}, saved to {best_path}")
+                torch.save(model.state_dict(), best_ap50_path)
 
-            save_checkpoint(1, epoch, model, optimizer1, best_ap50, scaler)
+            save_checkpoint(1, epoch, model, optimizer1, best_ap50, best_f1, scaler)
 
     # ── Stage 2: Full fine-tune ───────────────────────────────────────
     print("\n" + "=" * 60)
@@ -620,28 +744,41 @@ def main():
 
     for epoch in range(stage2_start + 1, args.epochs2 + 1):
         t0 = time.time()
+        epoch_prof = StageProfiler(cuda=True) if args.profile else None
         avg_loss = train_one_epoch(
             model, optimizer2, train_loader, device, epoch,
-            lr_scheduler=scheduler, scaler=scaler,
+            lr_scheduler=scheduler, scaler=scaler, profiler=epoch_prof,
         )
         dt = time.time() - t0
+        if epoch_prof is not None:
+            print(epoch_prof.summary(header=f"stage2 epoch {epoch}"))
 
-        ap50 = evaluate_coco(model, val_loader, device)
+        metrics = evaluate_coco(model, val_loader, device)
+        ap50 = metrics["ap50"]
+        f1_85 = metrics["f1@85"]
         current_lr = optimizer2.param_groups[0]["lr"]
         print(f"  Epoch {epoch}/{args.epochs2}  loss={avg_loss:.4f}  "
-              f"val_AP50={ap50:.4f}  lr={current_lr:.2e}  time={dt:.0f}s")
+              f"val_AP50={ap50:.4f}  val_F1@85={f1_85:.4f} "
+              f"(P={metrics['p@85']:.3f} R={metrics['r@85']:.3f} "
+              f"TP={metrics['tp@85']} FP={metrics['fp@85']} FN={metrics['fn@85']})  "
+              f"lr={current_lr:.2e}  time={dt:.0f}s")
 
         history.append({
-            "stage": 2, "epoch": epoch, "loss": avg_loss, "val_ap50": ap50,
+            "stage": 2, "epoch": epoch, "loss": avg_loss,
+            "val_ap50": ap50, "val_f1_85": f1_85,
+            "val_p_85": metrics["p@85"], "val_r_85": metrics["r@85"],
             "lr": current_lr,
         })
 
+        if f1_85 > best_f1:
+            best_f1 = f1_85
+            torch.save(model.state_dict(), best_path)
+            print(f"  >> New best F1@85={f1_85:.4f}, saved to {best_path}")
         if ap50 > best_ap50:
             best_ap50 = ap50
-            torch.save(model.state_dict(), best_path)
-            print(f"  >> New best AP50={ap50:.4f}, saved to {best_path}")
+            torch.save(model.state_dict(), best_ap50_path)
 
-        save_checkpoint(2, epoch, model, optimizer2, best_ap50, scaler)
+        save_checkpoint(2, epoch, model, optimizer2, best_ap50, best_f1, scaler)
 
     # ── Save final outputs ────────────────────────────────────────────
     final_path = output_dir / "final_model.pth"

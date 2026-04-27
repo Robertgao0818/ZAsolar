@@ -55,3 +55,13 @@ models:
     region_scope: [cape_town]
     evaluation_profile_default: "installation"
     postproc_config: "configs/postproc/v4_canonical.json"
+
+  v4_2:
+    tag: "V4.2-JHB-FT"
+    checkpoint: "checkpoints/exp006_v4_2_jhb_ft/best_model.pth"
+    description: "V4.2 JHB-leaning fine-tune (25 CT anchor + 25 JHB CBD aerial_2023 + 25 JHB Sandton aerial_2023; init from V4)"
+    coco_ap50: 0.8371
+    training_set_id: "v4_2_jhb_ft"
+    region_scope: [cape_town, johannesburg]
+    evaluation_profile_default: "installation"
+    postproc_config: "configs/postproc/v4_canonical.json"
