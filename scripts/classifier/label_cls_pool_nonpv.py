@@ -41,6 +41,7 @@ BBOX_COLOR_RGB = (0, 255, 255)  # cyan
 BBOX_THICKNESS = 3
 CHIP_SIZE_DEFAULT = 224
 PAD_RATIO_DEFAULT = 0.5
+MIN_SPAN_M_DEFAULT = 18.0  # 18 m × 0.13-0.15 m/px ≈ 130 raw px → 224 (~1.7× upsample)
 
 LABELS = [
     ("1", "solar_thermal_water_heater", "太阳能热水器"),
@@ -63,16 +64,22 @@ def encode_chip_png(chip_rgb: np.ndarray) -> str:
     return base64.b64encode(buf.tobytes()).decode("ascii")
 
 
-def extract_chip_with_bbox(
+def extract_chip_with_outline(
     src: rasterio.io.DatasetReader,
     geom_metric,
     metric_crs: str,
     chip_size: int,
     pad_ratio: float,
+    min_span_m: float,
 ) -> np.ndarray | None:
+    """Crop a square chip centered on geom_metric and outline the polygon in cyan.
+
+    Window span = max(polygon_bbox * (1+pad_ratio), min_span_m). The min_span_m
+    floor stops 1-3 m FPs from being upsampled 8x to fill 224x224.
+    """
     minx, miny, maxx, maxy = geom_metric.bounds
     span = max(maxx - minx, maxy - miny) * (1.0 + pad_ratio)
-    span = max(span, 4.0)
+    span = max(span, min_span_m)
     cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
     half = span / 2
 
@@ -104,37 +111,54 @@ def extract_chip_with_bbox(
     if arr.shape[0] == 0 or arr.shape[1] == 0:
         return None
 
+    # The actual window that rasterio gave us may differ from the requested one
+    # by 1 px on either side; recover its true raster-CRS bounds for an accurate
+    # affine.
+    actual_left, actual_top = src.transform * (win.col_off, win.row_off)
+    actual_right, actual_bottom = src.transform * (
+        win.col_off + win.width, win.row_off + win.height
+    )
+
     h_pre, w_pre = arr.shape[:2]
     arr = cv2.resize(arr, (chip_size, chip_size), interpolation=cv2.INTER_AREA)
-
-    # Project polygon bounds onto resized chip pixel space.
-    if raster_crs != metric_crs:
-        from rasterio.warp import transform as warp_pts
-        xs, ys = warp_pts(metric_crs, raster_crs, [minx, maxx], [miny, maxy])
-        bb_left, bb_right = min(xs), max(xs)
-        bb_top, bb_bottom = max(ys), min(ys)
-    else:
-        bb_left, bb_right = minx, maxx
-        bb_top, bb_bottom = maxy, miny
-
     sx = chip_size / w_pre
     sy = chip_size / h_pre
-    px_left = (bb_left - left) / src.transform.a
-    px_right = (bb_right - left) / src.transform.a
-    px_top = (bb_top - top) / src.transform.e
-    px_bottom = (bb_bottom - top) / src.transform.e
 
-    x1 = int(round(min(px_left, px_right) * sx))
-    x2 = int(round(max(px_left, px_right) * sx))
-    y1 = int(round(min(px_top, px_bottom) * sy))
-    y2 = int(round(max(px_top, px_bottom) * sy))
-    x1 = max(0, min(chip_size - 1, x1))
-    x2 = max(0, min(chip_size - 1, x2))
-    y1 = max(0, min(chip_size - 1, y1))
-    y2 = max(0, min(chip_size - 1, y2))
-
-    if x2 > x1 and y2 > y1:
-        cv2.rectangle(arr, (x1, y1), (x2, y2), BBOX_COLOR_RGB, BBOX_THICKNESS)
+    # Project the polygon's exterior ring vertices into raster CRS, then to
+    # resized chip pixel space, and stroke the outline.
+    from shapely.geometry import MultiPolygon, Polygon
+    geoms = (
+        list(geom_metric.geoms)
+        if isinstance(geom_metric, MultiPolygon)
+        else [geom_metric]
+    )
+    pixel_dx = src.transform.a
+    pixel_dy = src.transform.e
+    for poly in geoms:
+        if not isinstance(poly, Polygon):
+            continue
+        rings = [poly.exterior, *poly.interiors]
+        for ring in rings:
+            if ring is None or ring.is_empty:
+                continue
+            xs_metric, ys_metric = zip(*ring.coords)
+            if raster_crs != metric_crs:
+                from rasterio.warp import transform as warp_pts
+                xs_raster, ys_raster = warp_pts(
+                    metric_crs, raster_crs, list(xs_metric), list(ys_metric)
+                )
+            else:
+                xs_raster, ys_raster = list(xs_metric), list(ys_metric)
+            pts = []
+            for xr, yr in zip(xs_raster, ys_raster):
+                px = (xr - actual_left) / pixel_dx
+                py = (yr - actual_top) / pixel_dy
+                pts.append([int(round(px * sx)), int(round(py * sy))])
+            arr_pts = np.array(pts, dtype=np.int32)
+            cv2.polylines(
+                arr, [arr_pts], isClosed=True,
+                color=BBOX_COLOR_RGB, thickness=BBOX_THICKNESS,
+            )
     return arr
 
 
@@ -217,7 +241,7 @@ body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #eee;
       <button onclick="skip()">S 跳过 &rarr;</button>
     </div>
     <button class="export-btn" onclick="exportCSV()">导出 CSV</button>
-    <div class="hint">1-9 标注 · S 跳过 · B 回退 · 青色方框 = 检测范围</div>
+    <div class="hint">1-9 标注 · S 跳过 · B 回退 · 青色轮廓 = 检测多边形</div>
   </div>
 </div>
 <script>
@@ -340,6 +364,11 @@ def main() -> int:
     )
     p.add_argument("--chip-size", type=int, default=CHIP_SIZE_DEFAULT)
     p.add_argument("--pad-ratio", type=float, default=PAD_RATIO_DEFAULT)
+    p.add_argument(
+        "--min-span-m", type=float, default=MIN_SPAN_M_DEFAULT,
+        help="floor on chip window span in metric units; protects small "
+             "polygons from being upsampled to fill the chip",
+    )
     args = p.parse_args()
 
     manifest_csv = args.pool_dir / "manifest.csv"
@@ -387,9 +416,9 @@ def main() -> int:
             key = str(mosaic)
             if key not in src_cache:
                 src_cache[key] = rasterio.open(mosaic)
-            chip = extract_chip_with_bbox(
+            chip = extract_chip_with_outline(
                 src_cache[key], r.geometry, args.metric_crs,
-                args.chip_size, args.pad_ratio,
+                args.chip_size, args.pad_ratio, args.min_span_m,
             )
             if chip is None:
                 skipped += 1

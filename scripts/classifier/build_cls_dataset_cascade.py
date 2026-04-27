@@ -347,37 +347,43 @@ def main() -> None:
 
     manifest_gdf = gpd.GeoDataFrame(rows, geometry="geometry", crs=args.metric_crs)
 
-    # Chip extraction
+    # Chip extraction. Iterate per row, not per grid, so chip_path stays aligned
+    # with manifest_gdf row order. (Previous per-grid loop misaligned the
+    # chip_path column against the detector-then-grid manifest order — files
+    # on disk were correct, but the column pointed elsewhere.)
     if not args.skip_chips:
         print("\nExtracting chips...", flush=True)
-        chip_paths: list[str] = []
+        chip_paths: list[str] = [""] * len(manifest_gdf)
         n_skipped = 0
-        for grid_id in args.grids:
-            mosaic = args.imagery_root / f"{grid_id}_mosaic.tif"
-            if not mosaic.exists():
-                print(f"  [WARN] {mosaic} missing — skipping {grid_id}", flush=True)
-                grid_mask = manifest_gdf["grid_id"] == grid_id
-                for cid in manifest_gdf.loc[grid_mask, "chip_id"]:
-                    chip_paths.append("")
-                continue
-            with rasterio.open(mosaic) as src:
-                grid_rows = manifest_gdf[manifest_gdf["grid_id"] == grid_id]
-                for _, row in grid_rows.iterrows():
-                    arr = crop_chip(
-                        src,
-                        row.geometry,
-                        args.metric_crs,
-                        args.chip_size,
-                        args.pad_ratio,
-                    )
-                    if arr is None:
-                        chip_paths.append("")
-                        n_skipped += 1
-                        continue
-                    rel = Path("chips") / row["label"] / f"{row['chip_id']}.png"
-                    abs_path = out / rel
-                    cv2.imwrite(str(abs_path), cv2.cvtColor(arr, cv2.COLOR_RGB2BGR))
-                    chip_paths.append(str(rel))
+        src_cache: dict[str, rasterio.io.DatasetReader] = {}
+        try:
+            for i, row in manifest_gdf.reset_index(drop=True).iterrows():
+                grid_id = row["grid_id"]
+                mosaic = args.imagery_root / f"{grid_id}_mosaic.tif"
+                if not mosaic.exists():
+                    n_skipped += 1
+                    continue
+                key = str(mosaic)
+                if key not in src_cache:
+                    src_cache[key] = rasterio.open(mosaic)
+                arr = crop_chip(
+                    src_cache[key],
+                    row.geometry,
+                    args.metric_crs,
+                    args.chip_size,
+                    args.pad_ratio,
+                )
+                if arr is None:
+                    n_skipped += 1
+                    continue
+                rel = Path("chips") / row["label"] / f"{row['chip_id']}.png"
+                abs_path = out / rel
+                abs_path.parent.mkdir(parents=True, exist_ok=True)
+                cv2.imwrite(str(abs_path), cv2.cvtColor(arr, cv2.COLOR_RGB2BGR))
+                chip_paths[i] = str(rel)
+        finally:
+            for h in src_cache.values():
+                h.close()
         manifest_gdf["chip_path"] = chip_paths
         if n_skipped:
             print(f"  [WARN] skipped {n_skipped} chips (out-of-bounds / empty)", flush=True)
