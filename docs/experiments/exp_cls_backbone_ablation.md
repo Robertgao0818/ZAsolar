@@ -99,3 +99,88 @@ Decoupled, not fused. Contract specified in `exp_cls_detector_integration.md`:
 - **Class imbalance 2.6:1**: `train_cls.py` already has a balanced sampler; focal loss is a fallback if ViT minority recall underperforms.
 - **Capacity-mode fairness**: Reported metrics will label each backbone's training mode (full_ft / lora / linear_probe) so the comparison is transparent.
 - **Dataset builder legacy bug**: `build_cls_dataset.py` originally scanned only flat `results/G*/review/`, missing CT batch004 and JHB. Fix is registry-driven, not glob-additive.
+
+---
+
+## v2 round (2026-04-27): JHB CBD GEID added, promotion rule rewritten
+
+The v1 ablation never ran in mainline form because the OOD eval on a
+holdout that v1 *did not include* (462 V3-C ∩ V4.2 shared-FP audit
+chips on JHB CBD GEID) showed the v1 protocol cannot be promoted:
+
+| Backbone (v1) | CT val bal_acc | JHB CBD audit bal_acc | non-PV kill @ PV-recall=0.95 |
+|---|---:|---:|---:|
+| efficientnet_b0 | 0.835 | 0.566 | 9.6% |
+| convnext_tiny | 0.869 | 0.653 | 15.5% |
+| dinov2_vits14 | 0.891 | 0.679 | 10.2% |
+
+Cascade integration assumes the classifier kills ~70% of FPs at safe
+PV recall. V1 hits 10-15%. The classifier role therefore changes from
+"water-heater filter" to **multi-subtype FP suppressor**, and the
+promotion rule has to be rewritten around that role.
+
+### v2 candidate set
+
+Same three: `efficientnet_b0` / `convnext_tiny` / `dinov2_vits14`.
+ResNet-18 dropped (it underperformed v1's effb0 in pilot runs and
+adds no signal v2 doesn't already get from effb0). DINOv2 ViT-B/14
+LoRA promoted to a *parallel* track (was conditional in v1) because
+DINOv2 ViT-S/14 is now the v1 OOD champion and scaling the FM is
+the most likely path to closing the cascade gap further.
+
+### v2 dataset
+
+`cls_pv_thermal_v2`. See `exp_cls_dataset_protocol.md` "v2 protocol".
+Key v2 additions vs v1:
+
+- New bucket `johannesburg:v3c_sam_mask_geid_2024_02` — 903 chips
+  (462 V3-C audit + 441 V4.2 propagated; 225 actually_pv class-flipped
+  to pv) drawn from the GEID 2024-02 chunked benchmark.
+- Subtype-stratified holdout (25-30%) on the new GEID bucket; CT v1
+  buckets retain their existing splits.
+- Audit chips that became pv (actually_pv_mislabeled) also feed Li GT
+  supplementation (`Joburg_CBD_Li_supp_v1`) so cluster_eval and
+  classifier training agree on labels.
+
+### v2 promotion rule (replaces v1's)
+
+A backbone is **promotable** for cascade integration if all hold:
+
+1. **Primary**: at PV recall ≥ **0.95** on the JHB CBD GEID holdout,
+   non-PV kill rate ≥ **40%**. (V1 best was 15.5%; the bar makes
+   cascade math work without being unreachable from the audit
+   subtype labels.)
+2. **Secondary guardrail**: cascade-level installation recall on
+   `cape_town_independent_26` drops ≤ **3pp** vs V3-C+SAM mask+box
+   without classifier. Stops the JHB additions from corrupting CT
+   numbers.
+3. **Per-subtype reporting** (not gating, but published): kill rate on
+   each of `corrugated_metal_roof`, `hvac_rooftop_equipment`,
+   `solar_thermal_water_heater`, `skylight_roof_window`,
+   `ground_road_marking`. A backbone with kill rate ≥ 0.5 on
+   water_heater + skylight + road_marking but < 0.3 on
+   corrugated_metal / HVAC remains publishable; flag, don't fail.
+
+### v2 thresholds: per-imagery-source
+
+V1 used a single threshold (default 0.5; cascade-safe 0.85 / 0.95).
+V2 calibrates one threshold per **imagery layer** stored at
+`configs/classifier/thresholds_v2.json`:
+
+- `aerial_2025` (CT) — calibrated on CT v1 val
+- `aerial_2023` (JHB suburbs) — calibrated on JHB v4 holdout
+- `geid_2024_02` (JHB CBD) — calibrated on the new GEID holdout
+
+`classify_predictions.py` selects the threshold from
+`config.json.imagery_layer_id`. The single-threshold path remains as
+fallback for legacy callers.
+
+### v2 deliverables
+
+- `data/cls_pv_thermal_v2/` (gitignored)
+- `checkpoints/cls_pv_thermal_v2_{effb0,convnext_tiny,dinov2_vits14}/`
+- `configs/classifier/thresholds_v2.json`
+- `results/analysis/cls_audit_eval_v2_<run_id>/` — re-run of
+  `eval_on_audit_set.py` with v2 checkpoints; same 462 chips, so the
+  v1 → v2 shift on each backbone is directly readable.
+- This file appended with v2 numbers when training finishes.
