@@ -178,5 +178,20 @@
     "timestamp": "2026-04-22T07:32:55Z",
     "source": "commit:744c0e07",
     "summary": "chore(workload): simplify to polygon-count-only (no buffer-merge)"
+  },
+  {
+    "timestamp": "2026-04-22T07:33:12Z",
+    "source": "commit:134f1241",
+    "summary": "docs(progress): sync logs 2026-04-01 → 2026-04-21 + V1.2 pipeline plans"
+  },
+  {
+    "timestamp": "2026-04-22T07:33:20Z",
+    "source": "commit:6629c2b1",
+    "summary": "docs(roadmap): refresh Recently Completed block"
+  },
+  {
+    "timestamp": "2026-04-26T09:39:11Z",
+    "source": "commit:b6cf77e8",
+    "summary": "chore(infra): migrate large data from /mnt/d/ZAsolar to ~/zasolar_data (WSL ext4)"
   }
 ]
