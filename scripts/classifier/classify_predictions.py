@@ -59,7 +59,11 @@ def load_cls_config(config_path: Path) -> dict:
 
 
 def build_model(arch: str, num_classes: int = 2) -> nn.Module:
-    """Build model architecture (weights loaded separately)."""
+    """Build model architecture (weights loaded separately).
+
+    Mirrors `scripts/classifier/train_cls.py::build_model` — the two must
+    produce state-dict-compatible models for every supported backbone.
+    """
     from torchvision import models
     if arch == "efficientnet_b0":
         model = models.efficientnet_b0(weights=None)
@@ -67,25 +71,46 @@ def build_model(arch: str, num_classes: int = 2) -> nn.Module:
     elif arch == "resnet18":
         model = models.resnet18(weights=None)
         model.fc = nn.Linear(model.fc.in_features, num_classes)
+    elif arch == "convnext_tiny":
+        model = models.convnext_tiny(weights=None)
+        in_features = model.classifier[-1].in_features
+        model.classifier[-1] = nn.Linear(in_features, num_classes)
+    elif arch == "dinov2_vits14":
+        # Delegate to the training-side factory so the state-dict structure
+        # stays identical. `pretrained=False` — weights come from checkpoint.
+        from scripts.classifier.train_cls import DinoV2Classifier, DINOV2_TIMM_NAMES
+        model = DinoV2Classifier(
+            DINOV2_TIMM_NAMES[arch], pretrained=False, num_classes=num_classes,
+        )
     else:
         raise ValueError(f"Unsupported architecture: {arch}")
     return model
 
 
 def load_classifier(model_path: Path, device: torch.device) -> tuple[nn.Module, dict]:
-    """Load trained classifier from checkpoint. Returns (model, config)."""
+    """Load trained classifier from checkpoint. Returns (model, config).
+
+    Checkpoint metadata source priority:
+      1. `ckpt['meta']` — saved by train_cls.py ≥ 2026-04-22 (authoritative)
+      2. sibling `config.json` next to the checkpoint — backwards compat
+      3. hardcoded fallback (efficientnet_b0, 224) — legacy checkpoints
+    """
     ckpt = torch.load(model_path, map_location=device, weights_only=False)
 
-    # Try to load config from sibling config.json
-    config_path = model_path.parent / "config.json"
-    if config_path.exists():
-        with open(config_path) as f:
-            config = json.load(f)
+    meta = ckpt.get("meta")
+    if meta:
+        config = dict(meta)
     else:
-        config = {"arch": "efficientnet_b0", "img_size": 224, "num_classes": 2}
+        config_path = model_path.parent / "config.json"
+        if config_path.exists():
+            with open(config_path) as f:
+                config = json.load(f)
+        else:
+            config = {"arch": "efficientnet_b0", "img_size": 224, "num_classes": 2}
 
     arch = config.get("arch", "efficientnet_b0")
-    model = build_model(arch, config.get("num_classes", 2))
+    num_classes = config.get("num_classes", 2)
+    model = build_model(arch, num_classes)
     model.load_state_dict(ckpt["model"])
     model.to(device)
     model.eval()
@@ -101,12 +126,14 @@ class ChipDataset(Dataset):
         chips: list[np.ndarray],
         indices: list[int],
         img_size: int = IMG_SIZE,
+        mean: list[float] | None = None,
+        std: list[float] | None = None,
     ):
         self.chips = chips
         self.indices = indices
         self.transform = transforms.Compose([
             transforms.ToTensor(),
-            transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+            transforms.Normalize(mean or IMAGENET_MEAN, std or IMAGENET_STD),
         ])
         self.img_size = img_size
 
@@ -231,12 +258,15 @@ def classify_chips(
     device: torch.device,
     img_size: int = IMG_SIZE,
     batch_size: int = 64,
+    preprocessing: dict | None = None,
 ) -> dict[int, float]:
     """Run classifier on chips. Returns {index: pv_probability}."""
     if not chips:
         return {}
 
-    dataset = ChipDataset(chips, indices, img_size)
+    mean = (preprocessing or {}).get("mean")
+    std = (preprocessing or {}).get("std")
+    dataset = ChipDataset(chips, indices, img_size, mean=mean, std=std)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
     results = {}
@@ -266,6 +296,7 @@ def classify_grid(
     area_cutoff: float = 30.0,
     img_size: int = 224,
     batch_size: int = 64,
+    preprocessing: dict | None = None,
 ) -> dict | None:
     """Classify predictions for one grid. Returns summary dict or None on error."""
     pred_path = results_dir / grid_id / "predictions_metric.gpkg"
@@ -292,7 +323,10 @@ def classify_grid(
           f"large (bypassed): {total - len(classified_idx) - len(skipped_idx)}")
 
     # Classify
-    pv_scores = classify_chips(model, chips, classified_idx, device, img_size, batch_size)
+    pv_scores = classify_chips(
+        model, chips, classified_idx, device, img_size, batch_size,
+        preprocessing=preprocessing,
+    )
 
     # Assign scores to all predictions
     # Default: large detections bypass classifier (assume PV)
@@ -322,18 +356,22 @@ def classify_grid(
     print(f"    Results: {n_pv} PV, {n_non_pv} non-PV "
           f"(removed {n_non_pv} / {n_actually_classified} classified)")
 
-    # --- Save outputs ---
+    # --- Save outputs (parallel artifacts, never overwriting originals) ---
     out_dir = results_dir / grid_id
 
-    # Full annotated gpkg (EPSG:32734)
+    # Full annotated gpkg (metric CRS, with cls_* columns on every feature)
     pred_gdf.to_file(str(out_dir / "predictions_metric_cls.gpkg"), driver="GPKG")
 
-    # EPSG:4326 export
+    # EPSG:4326 export for QGIS / manual inspection
     export_gdf = pred_gdf.to_crs(epsg=4326) if pred_gdf.crs and pred_gdf.crs.to_epsg() != 4326 else pred_gdf
     export_gdf.to_file(str(out_dir / "predictions_cls.geojson"), driver="GeoJSON")
 
-    # Filtered (PV only)
+    # Filtered (PV only) — canonical file consumed by
+    # detect_and_evaluate.py --classifier-filtered-gpkg. Written to both the
+    # plan-canonical name and the legacy `_cls_filtered` name for backwards
+    # compat with earlier consumers; see exp_cls_detector_integration.md.
     filtered = pred_gdf[pred_gdf["cls_label"] == "pv"].copy()
+    filtered.to_file(str(out_dir / "predictions_metric_filtered.gpkg"), driver="GPKG")
     filtered.to_file(str(out_dir / "predictions_metric_cls_filtered.gpkg"), driver="GPKG")
 
     # Summary JSON
@@ -418,7 +456,10 @@ def main():
     print(f"Loading classifier from {model_path} (device={device})...")
     model, model_config = load_classifier(model_path, device)
     img_size = model_config.get("img_size", img_size)
+    preprocessing = model_config.get("preprocessing")
     print(f"  Arch: {model_config.get('arch', '?')}, "
+          f"training_mode: {model_config.get('training_mode', '?')}, "
+          f"aug_profile: {model_config.get('aug_profile', '?')}, "
           f"threshold={pv_threshold}, area_cutoff={area_cutoff}")
 
     # Process each grid
@@ -430,6 +471,7 @@ def main():
             area_cutoff=area_cutoff,
             img_size=img_size,
             batch_size=args.batch_size,
+            preprocessing=preprocessing,
         )
         if summary:
             summaries.append(summary)

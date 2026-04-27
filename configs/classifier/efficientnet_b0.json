@@ -1,0 +1,16 @@
+{
+  "_meta": {
+    "description": "EfficientNet-B0 baseline config for PV vs non-PV classifier",
+    "plan": "docs/experiments/exp_cls_backbone_ablation.md",
+    "status": "baseline_default"
+  },
+  "arch": "efficientnet_b0",
+  "training_mode": "full_ft",
+  "aug_profile": "current",
+  "img_size": 224,
+  "batch_size": 32,
+  "freeze_epochs": 5,
+  "finetune_epochs": 25,
+  "lr": 1e-3,
+  "lr_finetune": 1e-4
+}
