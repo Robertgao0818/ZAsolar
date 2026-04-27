@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-04-27: chore(env): add timm + pytest, route bootstrap through CUDA wheel index
+- 2026-04-27: feat(imagery): JPEG95 tiled GeoTIFF + --force in tile download
+- 2026-04-27: feat(vexcel): SA urban Vexcel coverage + stratified eval sampling
+- 2026-04-27: feat(analysis): SAM mask refinement + area aggregate eval + nonpv subtype
+- 2026-04-27: feat(classifier): backbone ablation + cascade sweep + source auditor
+- 2026-04-27: feat(core): extract Mask R-CNN builder + add stage profiler
+- 2026-04-27: docs(strategy): add V1.4 validation framework + ROADMAP V1.4 section
 - 2026-04-27: docs(progress): add 2026-04-22/24/26 daily logs + sync entries.json
-- 2026-04-26: chore(infra): migrate large data from /mnt/d/ZAsolar to ~/zasolar_data (WSL ext4)
-- 2026-04-22: docs(roadmap): refresh Recently Completed block
-- 2026-04-22: docs(progress): sync logs 2026-04-01 → 2026-04-21 + V1.2 pipeline plans
-- 2026-04-22: chore(workload): simplify to polygon-count-only (no buffer-merge)
-- 2026-04-22: feat(sync): Dropbox/Collab sync hooks + progress-log auto-sync
-- 2026-04-22: data(review): update 21 CT reviewed gpkgs + add --predictions-dir override
-- 2026-04-22: deprecate(geid): mark v3c_geid_2024_02 model_run as broken (bounds bug)
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
