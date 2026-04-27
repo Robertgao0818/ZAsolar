@@ -233,5 +233,65 @@
     "timestamp": "2026-04-27T08:38:07Z",
     "source": "commit:ec217c21",
     "summary": "chore(env): add timm + pytest, route bootstrap through CUDA wheel index"
+  },
+  {
+    "timestamp": "2026-04-27T08:38:25Z",
+    "source": "commit:b160768c",
+    "summary": "docs(progress): refresh Recently Completed + entries.json from 2026-04-27 commits"
+  },
+  {
+    "timestamp": "2026-04-27T08:42:11Z",
+    "source": "commit:cb231a24",
+    "summary": "docs(experiments): add 9-cell detector × SAM mode matrix to integration doc"
+  },
+  {
+    "timestamp": "2026-04-27T08:51:26Z",
+    "source": "commit:6c3e6950",
+    "summary": "feat(classifier): cascade-source dataset builder with cross-detector dedup"
+  },
+  {
+    "timestamp": "2026-04-27T08:56:53Z",
+    "source": "commit:1535aad4",
+    "summary": "feat(classifier): cascade-pool nonpv subtype labeler (HTML)"
+  },
+  {
+    "timestamp": "2026-04-27T08:59:23Z",
+    "source": "commit:4f837c83",
+    "summary": "feat(classifier): add ground_road_marking subtype to nonpv labeler"
+  },
+  {
+    "timestamp": "2026-04-27T09:08:51Z",
+    "source": "commit:e6da20de",
+    "summary": "fix(classifier): chip_path alignment + labeler clarity (min-span + polygon outline)"
+  },
+  {
+    "timestamp": "2026-04-27T09:23:19Z",
+    "source": "commit:8f780fed",
+    "summary": "feat(classifier): add corrugated_metal_roof + blue_tarp_or_pool subtypes"
+  },
+  {
+    "timestamp": "2026-04-27T10:12:44Z",
+    "source": "commit:10dede4f",
+    "summary": "feat(classifier): cross-grid dedup for cascade pool"
+  },
+  {
+    "timestamp": "2026-04-27T10:19:15Z",
+    "source": "commit:03a8b18b",
+    "summary": "feat(classifier): Li GT supplement + V4.2 subtype propagation + matrix rerun"
+  },
+  {
+    "timestamp": "2026-04-27T10:23:44Z",
+    "source": "commit:a0c660c8",
+    "summary": "feat(classifier): zero-shot OOD eval on JHB CBD audit set"
+  },
+  {
+    "timestamp": "2026-04-27T10:39:21Z",
+    "source": "commit:355ad39f",
+    "summary": "docs(experiments): freeze cls v2 protocol + new promotion rules"
+  },
+  {
+    "timestamp": "2026-04-27T11:52:11Z",
+    "source": "commit:fcc1737a",
+    "summary": "chore(gitignore): ignore generated classifier artifacts"
   }
 ]

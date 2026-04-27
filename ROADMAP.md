@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-04-27: chore(env): add timm + pytest, route bootstrap through CUDA wheel index
-- 2026-04-27: feat(imagery): JPEG95 tiled GeoTIFF + --force in tile download
-- 2026-04-27: feat(vexcel): SA urban Vexcel coverage + stratified eval sampling
-- 2026-04-27: feat(analysis): SAM mask refinement + area aggregate eval + nonpv subtype
-- 2026-04-27: feat(classifier): backbone ablation + cascade sweep + source auditor
-- 2026-04-27: feat(core): extract Mask R-CNN builder + add stage profiler
-- 2026-04-27: docs(strategy): add V1.4 validation framework + ROADMAP V1.4 section
-- 2026-04-27: docs(progress): add 2026-04-22/24/26 daily logs + sync entries.json
+- 2026-04-27: chore(gitignore): ignore generated classifier artifacts
+- 2026-04-27: docs(experiments): freeze cls v2 protocol + new promotion rules
+- 2026-04-27: feat(classifier): zero-shot OOD eval on JHB CBD audit set
+- 2026-04-27: feat(classifier): Li GT supplement + V4.2 subtype propagation + matrix rerun
+- 2026-04-27: feat(classifier): cross-grid dedup for cascade pool
+- 2026-04-27: feat(classifier): add corrugated_metal_roof + blue_tarp_or_pool subtypes
+- 2026-04-27: fix(classifier): chip_path alignment + labeler clarity (min-span + polygon outline)
+- 2026-04-27: feat(classifier): add ground_road_marking subtype to nonpv labeler
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
