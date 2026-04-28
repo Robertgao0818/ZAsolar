@@ -27,13 +27,19 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
+DATA_ROOT = Path.home() / "zasolar_data" / "tiles"
+
 # 17-grid holdout (G1977 has no local GT — kept for classifier filtering counts
 # but excluded from installation aggregate per v1 convention).
+# tiles_root is the layer-specific dir because classify_predictions._find_tile
+# expects a flat <root>/<grid>/ layout, so we point it at the layer dir which
+# does have that layout under it.
 HOLDOUT = {
     "ct": {
         "model_run": "v3c_targeted_hn_aerial_2025",
         "imagery_layer": "aerial_2025",
         "region_arg": "cape_town",
+        "tiles_root": DATA_ROOT / "cape_town" / "aerial_2025",
         "grids": ["G1971", "G1973", "G1977", "G1981", "G2027", "G2029", "G2032"],
         "missing_gt_grids": {"G1977"},
     },
@@ -41,6 +47,7 @@ HOLDOUT = {
         "model_run": "v4_aerial_2023",
         "imagery_layer": "aerial_2023",
         "region_arg": "johannesburg",
+        "tiles_root": DATA_ROOT / "johannesburg" / "aerial_2023",
         "grids": ["G0856", "G0890", "G0892", "G1110", "G1111",
                   "G1144", "G1146", "G1183", "G1250", "G1253"],
         "missing_gt_grids": set(),
@@ -177,6 +184,7 @@ def main() -> int:
                         "--model-path", str(ckpt),
                         "--pv-threshold", str(thr),
                         "--area-cutoff", "30",
+                        "--tiles-root", str(info["tiles_root"]),
                         "--results-dir", str(results_dir),
                     ]
                     rc = run(cmd_cls, bb_logs / f"{grid}_{region}_classify.log")
@@ -209,14 +217,27 @@ def main() -> int:
                     print(f"    SKIP_EVAL {grid} (no local GT)")
                     continue
 
-                # 3. Eval raw + filtered
+                # 3. Eval raw + filtered.
+                # For both variants we pass --classifier-filtered-gpkg so
+                # detect_and_evaluate runs in eval-only mode and consumes the
+                # exact prediction set we want — never re-running detection.
+                # raw → original predictions_metric.gpkg (V3-C/V4 baseline)
+                # filtered → predictions_metric_filtered.gpkg (PV-only after cls)
+                raw_gpkg = grid_dir / "predictions_metric.gpkg"
                 filtered_gpkg = grid_dir / "predictions_metric_filtered.gpkg"
                 eval_jobs = [
-                    ("raw", None, f"cls_v2_{backbone_key}_raw"),
+                    ("raw", raw_gpkg, f"cls_v2_{backbone_key}_raw"),
                     ("filtered", filtered_gpkg, f"cls_v2_{backbone_key}_filtered"),
                 ]
                 for variant, gpkg, eval_subdir in eval_jobs:
+                    if not gpkg.exists():
+                        print(f"    EVAL_NO_GPKG {grid}/{variant} ({gpkg.name})")
+                        failed.append({"backbone": backbone_key, "region": region,
+                                       "grid": grid, "phase": f"eval_{variant}",
+                                       "rc": "missing_gpkg"})
+                        continue
                     eval_out = grid_dir / eval_subdir
+                    eval_out.mkdir(parents=True, exist_ok=True)
                     cmd_eval = [
                         py, "detect_and_evaluate.py",
                         "--grid-id", grid,
@@ -225,9 +246,8 @@ def main() -> int:
                         "--model-run", info["model_run"],
                         "--postproc-config", "configs/postproc/v4_canonical.json",
                         "--output-subdir", eval_subdir,
+                        "--classifier-filtered-gpkg", str(gpkg),
                     ]
-                    if gpkg is not None:
-                        cmd_eval += ["--classifier-filtered-gpkg", str(gpkg)]
                     rc = run(cmd_eval, bb_logs / f"{grid}_{region}_{variant}.log")
                     if rc != 0:
                         print(f"    EVAL_FAIL {grid}/{variant} (rc={rc})")
