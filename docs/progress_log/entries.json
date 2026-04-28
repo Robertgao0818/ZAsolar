@@ -308,5 +308,20 @@
     "timestamp": "2026-04-27T11:57:20Z",
     "source": "commit:93dc7890",
     "summary": "data(metadata): record Li and classifier v2 provenance"
+  },
+  {
+    "timestamp": "2026-04-28T10:21:30Z",
+    "source": "commit:a3e0062c",
+    "summary": "docs(experiments): freeze CT v1 ConvNeXt baseline + Li GT audit writeup"
+  },
+  {
+    "timestamp": "2026-04-28T10:21:52Z",
+    "source": "commit:972ea91c",
+    "summary": "feat(classifier): v2 per-imagery threshold calibration + training tweaks"
+  },
+  {
+    "timestamp": "2026-04-28T10:22:05Z",
+    "source": "commit:8d9adbbf",
+    "summary": "feat(analysis): v2 cascade holdout runner + TP-lost overlap breakdown"
   }
 ]

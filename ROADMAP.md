@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-04-28: feat(analysis): v2 cascade holdout runner + TP-lost overlap breakdown
+- 2026-04-28: feat(classifier): v2 per-imagery threshold calibration + training tweaks
+- 2026-04-28: docs(experiments): freeze CT v1 ConvNeXt baseline + Li GT audit writeup
 - 2026-04-27: data(metadata): record Li and classifier v2 provenance
 - 2026-04-27: feat(classifier): add v2 dataset and training helpers
 - 2026-04-27: docs(progress): record classifier v2 experiment closure
 - 2026-04-27: chore(gitignore): ignore generated classifier artifacts
 - 2026-04-27: docs(experiments): freeze cls v2 protocol + new promotion rules
-- 2026-04-27: feat(classifier): zero-shot OOD eval on JHB CBD audit set
-- 2026-04-27: feat(classifier): Li GT supplement + V4.2 subtype propagation + matrix rerun
-- 2026-04-27: feat(classifier): cross-grid dedup for cascade pool
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
