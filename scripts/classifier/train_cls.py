@@ -404,6 +404,10 @@ def main():
         best_balanced_acc = resume_ckpt.get("best_balanced_acc", 0.0)
         start_stage = resume_ckpt.get("stage", 1)
         start_epoch = resume_ckpt.get("epoch", 0) + 1
+        history_path = args.output_dir / "training_history.json"
+        if history_path.exists():
+            with open(history_path) as f:
+                history = json.load(f)
         if "scaler" in resume_ckpt:
             scaler.load_state_dict(resume_ckpt["scaler"])
         print(f"Resumed from stage {start_stage}, epoch {start_epoch}, "

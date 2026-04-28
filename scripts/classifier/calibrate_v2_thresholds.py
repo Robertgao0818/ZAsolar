@@ -113,7 +113,8 @@ def collect_val_paths(data_dir: Path) -> tuple[list[Path], np.ndarray, list[str]
 
 
 def score_paths(arch: str, ckpt: Path, paths: list[Path],
-                device: torch.device, batch_size: int = 64) -> tuple[np.ndarray, dict]:
+                device: torch.device, batch_size: int = 64,
+                workers: int = 0) -> tuple[np.ndarray, dict]:
     print(f"\n  [{arch}] loading {ckpt}")
     model, config = load_classifier(ckpt, device)
     img_size = int(config.get("img_size", 224))
@@ -122,7 +123,7 @@ def score_paths(arch: str, ckpt: Path, paths: list[Path],
     pv_idx = config.get("class_names", ["non_pv", "pv"]).index("pv")
 
     ds = ChipDataset(paths, img_size, mean, std)
-    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=2)
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=workers)
 
     scores = np.zeros(len(paths), dtype=np.float32)
     with torch.no_grad():
@@ -165,11 +166,14 @@ def main() -> int:
     p.add_argument("--checkpoints", nargs="+", default=None,
                    help="(arch=path) overrides; defaults to cls_pv_thermal_v2_*")
     p.add_argument("--batch-size", type=int, default=64)
+    p.add_argument("--workers", type=int, default=0)
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--also-thresholds", nargs="+", type=float, default=[0.5, 0.7, 0.85, 0.9, 0.95],
                    help="Additional thresholds to report metrics at, per layer.")
     args = p.parse_args()
 
+    args.data_dir = args.data_dir.resolve()
+    args.output = args.output.resolve()
     device = torch.device(args.device)
 
     print("[1/3] Collect v2 val chips")
@@ -200,7 +204,9 @@ def main() -> int:
                 "min_nonpv_kill_on_layer": PROMOTION_LAYER,
                 "min_nonpv_kill": PROMOTION_MIN_KILL,
             },
-            "calibration_dataset": str(args.data_dir.relative_to(PROJECT_ROOT)),
+            "calibration_dataset": str(args.data_dir.relative_to(PROJECT_ROOT))
+            if args.data_dir.is_relative_to(PROJECT_ROOT)
+            else str(args.data_dir),
         },
         "by_backbone": {},
     }
@@ -210,7 +216,7 @@ def main() -> int:
         if not ckpt.exists():
             print(f"\n  [{arch}] checkpoint missing: {ckpt} — skipping")
             continue
-        scores, _meta = score_paths(arch, ckpt, paths, device, args.batch_size)
+        scores, _meta = score_paths(arch, ckpt, paths, device, args.batch_size, args.workers)
         per_layer: dict = {}
         for layer in sorted(set(layers)):
             mask = layer_arr == layer
@@ -240,8 +246,11 @@ def main() -> int:
                   f"pv_rec={per_layer[layer]['calibration']['achieved_pv_recall']:.3f} "
                   f"npv_kill={per_layer[layer]['calibration']['nonpv_kill']:.3f}")
 
+        ckpt_abs = ckpt.resolve()
         output["by_backbone"][arch] = {
-            "checkpoint": str(ckpt.relative_to(PROJECT_ROOT)),
+            "checkpoint": str(ckpt_abs.relative_to(PROJECT_ROOT))
+            if ckpt_abs.is_relative_to(PROJECT_ROOT)
+            else str(ckpt_abs),
             "thresholds": per_layer,
         }
 
