@@ -69,22 +69,46 @@ HOLDOUT_GRIDS: dict[str, list[tuple[str, str]]] = {
 
 REGION_DIR = {"ct": "cape_town", "jhb": "johannesburg"}
 
-BACKBONE_CONFIGS: dict[str, dict] = {
+BACKBONE_CONFIGS_V1: dict[str, dict] = {
     "effb0": {
         "model_path": "checkpoints/cls_pv_thermal_v1_effb0/best_cls.pth",
-        "label": "EfficientNet-B0",
+        "arch": "efficientnet_b0",
+        "label": "EfficientNet-B0 (v1)",
     },
     "convnext": {
         "model_path": "checkpoints/cls_pv_thermal_v1_convnext_tiny/best_cls.pth",
-        "label": "ConvNeXt-Tiny",
+        "arch": "convnext_tiny",
+        "label": "ConvNeXt-Tiny (v1)",
     },
     "dinov2": {
         "model_path": "checkpoints/cls_pv_thermal_v1_dinov2_vits14/best_cls.pth",
-        "label": "DINOv2-ViT-S/14",
+        "arch": "dinov2_vits14",
+        "label": "DINOv2-ViT-S/14 (v1)",
     },
 }
 
-PV_THRESHOLD = 0.5
+BACKBONE_CONFIGS_V2: dict[str, dict] = {
+    "effb0": {
+        "model_path": "checkpoints/cls_pv_thermal_v2_efficientnet_b0/best_cls.pth",
+        "arch": "efficientnet_b0",
+        "label": "EfficientNet-B0 (v2 per-imagery)",
+    },
+    "convnext": {
+        "model_path": "checkpoints/cls_pv_thermal_v2_convnext_tiny/best_cls.pth",
+        "arch": "convnext_tiny",
+        "label": "ConvNeXt-Tiny (v2 per-imagery)",
+    },
+    "dinov2": {
+        "model_path": "checkpoints/cls_pv_thermal_v2_dinov2_vits14/best_cls.pth",
+        "arch": "dinov2_vits14",
+        "label": "DINOv2-ViT-S/14 (v2 per-imagery)",
+    },
+}
+
+# Default v1 for backward compat; switched to v2 via --version v2.
+BACKBONE_CONFIGS: dict[str, dict] = BACKBONE_CONFIGS_V1
+
+PV_THRESHOLD = 0.5  # v1 single-threshold default; v2 overrides per imagery layer.
 AREA_CUTOFF = 30.0
 MATCH_IOU = 0.3  # any pred with IoU >= this against any GT counts as TP-ish
 THUMB_SIZE = 256  # px per chip in the gallery
@@ -230,6 +254,7 @@ def process_grid(
     imagery_layer: str,
     backbones: dict[str, dict],
     out_dirs: dict[str, Path],
+    threshold_lookup=None,
 ) -> dict[str, list[dict]]:
     """Run all backbones on one grid; return tp_lost records per backbone."""
     import rasterio
@@ -356,10 +381,15 @@ def process_grid(
         del model
         torch.cuda.empty_cache() if torch.cuda.is_available() else None
 
-        # Identify tp_lost: matched_TP AND classified AND cls_score < 0.5
+        # Identify tp_lost: matched_TP AND classified AND cls_score < threshold.
+        # Threshold is per-imagery in v2; falls back to PV_THRESHOLD for v1.
+        if threshold_lookup is not None:
+            cur_thr = threshold_lookup(cfg.get("arch"), imagery_layer)
+        else:
+            cur_thr = PV_THRESHOLD
         n_lost = 0
         for idx, score in scores.items():
-            if score >= PV_THRESHOLD:
+            if score >= cur_thr:
                 continue
             m = matches.get(idx)
             if not m or m["max_iou"] < MATCH_IOU:
@@ -686,18 +716,39 @@ applyLabels();
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--backbone", action="append", required=True,
-                    choices=list(BACKBONE_CONFIGS.keys()),
+                    choices=list(BACKBONE_CONFIGS_V1.keys()),
                     help="Backbone(s) to process; pass --backbone repeatedly")
-    ap.add_argument("--out-root", type=Path,
-                    default=PROJECT_ROOT / "results" / "analysis"
-                    / "cls_cascade_holdout" / "tp_lost_gallery")
+    ap.add_argument("--version", choices=["v1", "v2"], default="v1",
+                    help="Classifier dataset version (v1=single thr 0.5, "
+                         "v2=per-imagery thr from thresholds_v2.json)")
+    ap.add_argument("--thresholds-json", type=Path,
+                    default=PROJECT_ROOT / "configs" / "classifier"
+                    / "thresholds_v2.json",
+                    help="Per-imagery threshold JSON (used when --version v2)")
+    ap.add_argument("--out-root", type=Path, default=None)
     ap.add_argument("--grids", nargs="*", default=None,
                     help="Optional subset of grid IDs to process")
     args = ap.parse_args()
 
-    backbones = {k: BACKBONE_CONFIGS[k] for k in args.backbone}
-    args.out_root.mkdir(parents=True, exist_ok=True)
-    out_dirs = {bk: args.out_root / bk for bk in backbones}
+    if args.version == "v2":
+        configs = BACKBONE_CONFIGS_V2
+        thr_data = json.loads(args.thresholds_json.read_text())
+
+        def threshold_lookup(arch: str, imagery_layer: str) -> float:
+            return float(thr_data["by_backbone"][arch]["thresholds"]
+                         [imagery_layer]["threshold"])
+        default_out = (PROJECT_ROOT / "results" / "analysis"
+                       / "cls_cascade_holdout_v2" / "tp_lost_gallery")
+    else:
+        configs = BACKBONE_CONFIGS_V1
+        threshold_lookup = None
+        default_out = (PROJECT_ROOT / "results" / "analysis"
+                       / "cls_cascade_holdout" / "tp_lost_gallery")
+
+    out_root = args.out_root or default_out
+    backbones = {k: configs[k] for k in args.backbone}
+    out_root.mkdir(parents=True, exist_ok=True)
+    out_dirs = {bk: out_root / bk for bk in backbones}
     for d in out_dirs.values():
         (d / "chips").mkdir(parents=True, exist_ok=True)
 
@@ -708,13 +759,14 @@ def main():
             if args.grids and grid_id not in args.grids:
                 continue
             print(f"[{region}] {grid_id} ({model_run})")
-            recs = process_grid(grid_id, region, model_run, layer, backbones, out_dirs)
+            recs = process_grid(grid_id, region, model_run, layer,
+                                backbones, out_dirs, threshold_lookup)
             for bk, rs in recs.items():
                 all_records[bk].extend(rs)
 
     for bk, recs in all_records.items():
         out_dir = out_dirs[bk]
-        write_html(bk, BACKBONE_CONFIGS[bk]["label"], recs, out_dir)
+        write_html(bk, configs[bk]["label"], recs, out_dir)
         print(f"[{bk}] gallery -> {out_dir / 'index.html'} ({len(recs)} chips)")
 
 
