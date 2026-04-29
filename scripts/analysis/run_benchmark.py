@@ -199,11 +199,23 @@ def run_one_grid(
     run_id: str,
     force: bool,
     log_dir: Path,
+    predictions_source: str = "geoai",
 ) -> dict | None:
-    """Run detect_and_evaluate.py for one model x one grid.
+    """Run inference + evaluation for one model × one grid.
+
+    `predictions_source` selects the pipeline:
+      - "geoai" (default): legacy detect_and_evaluate.py end-to-end.
+      - "direct": new direct_maskrcnn_v1 chain
+        (detect_direct.py → finalize.py → evaluate_predictions.py).
 
     Returns failure dict on error, None on success.
     """
+    if predictions_source == "direct":
+        return _run_one_grid_direct(
+            model=model, grid_id=grid_id, suite=suite, preset=preset,
+            run_id=run_id, log_dir=log_dir,
+        )
+
     tag = model["tag"]
     subdir = build_output_subdir(run_id, tag)
     args = preset.get("default_args", {})
@@ -254,6 +266,110 @@ def run_one_grid(
         if result.returncode != 0:
             print(f"FAIL (exit={result.returncode})")
             return {"grid_id": grid_id, "model_tag": tag, "error": f"exit={result.returncode}", "log": str(log_file)}
+        print("OK")
+        return None
+    except subprocess.TimeoutExpired:
+        print("TIMEOUT")
+        return {"grid_id": grid_id, "model_tag": tag, "error": "timeout", "log": str(log_file)}
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return {"grid_id": grid_id, "model_tag": tag, "error": str(e)}
+
+
+def _run_one_grid_direct(
+    *,
+    model: dict, grid_id: str, suite: dict, preset: dict,
+    run_id: str, log_dir: Path,
+) -> dict | None:
+    """Direct pipeline: detect_direct.py → finalize.py → evaluate_predictions.py.
+
+    Writes its outputs into the same `result_dir` the benchmark would otherwise
+    produce, so `collect_grid_metrics` keeps working unchanged.
+    """
+    tag = model["tag"]
+    subdir = build_output_subdir(run_id, tag)
+    suite_region = get_suite_region(suite)
+    if not suite_region:
+        return {"grid_id": grid_id, "model_tag": tag,
+                "error": "direct path requires suite.region"}
+
+    args = preset.get("default_args", {})
+    result_dir = get_results_root(suite_region) / grid_id / subdir
+    result_dir.mkdir(parents=True, exist_ok=True)
+    raw_path = result_dir / "raw_detections.pkl"
+
+    # Layer + run resolution from suite (fall back to registry default).
+    imagery_layer = (
+        suite.get("imagery_layer")
+        or args.get("imagery_layer")
+    )
+    model_run = suite.get("model_run") or f"benchmark_{run_id}_{tag}"
+
+    # 1) detect_direct.py
+    detect_cmd = [
+        sys.executable, str(ROOT / "detect_direct.py"),
+        "--grid-id", grid_id,
+        "--region", suite_region,
+        "--model-path", str(model["checkpoint"]),
+        "--model-run", model_run,
+        "--output-dir", str(result_dir),
+    ]
+    if imagery_layer:
+        detect_cmd += ["--imagery-layer", imagery_layer]
+    for param, flag in [
+        ("chip_size", "--chip-size"),
+        ("overlap", "--overlap"),
+        ("mask_threshold", "--mask-threshold"),
+    ]:
+        v = args.get(param)
+        if v is not None:
+            detect_cmd += [flag, str(v)]
+
+    log_file = log_dir / f"{tag}_{grid_id}.log"
+    print(f"  [{tag}] {grid_id} (direct) ... ", end="", flush=True)
+    try:
+        with open(log_file, "w") as lf:
+            r = subprocess.run(detect_cmd, stdout=lf, stderr=subprocess.STDOUT,
+                               timeout=900, cwd=ROOT)
+            if r.returncode != 0:
+                print(f"FAIL (detect exit={r.returncode})")
+                return {"grid_id": grid_id, "model_tag": tag,
+                        "error": f"detect exit={r.returncode}", "log": str(log_file)}
+            # 2) finalize.py
+            finalize_cmd = [
+                sys.executable, str(ROOT / "finalize.py"),
+                "--input", str(raw_path),
+                "--output-dir", str(result_dir),
+                "--allow-overwrite-canonical",
+            ]
+            postproc = preset.get("postproc_config")
+            if postproc:
+                pp_path = ROOT / postproc
+                if pp_path.exists():
+                    finalize_cmd += ["--postproc-config", str(pp_path)]
+            r = subprocess.run(finalize_cmd, stdout=lf, stderr=subprocess.STDOUT,
+                               timeout=600, cwd=ROOT)
+            if r.returncode != 0:
+                print(f"FAIL (finalize exit={r.returncode})")
+                return {"grid_id": grid_id, "model_tag": tag,
+                        "error": f"finalize exit={r.returncode}", "log": str(log_file)}
+            # 3) evaluate_predictions.py
+            eval_cmd = [
+                sys.executable, str(ROOT / "evaluate_predictions.py"),
+                "--predictions-gpkg", str(result_dir / "predictions_metric.gpkg"),
+                "--region", suite_region,
+                "--grid-id", grid_id,
+                "--output-dir", str(result_dir),
+                "--evaluation-profile", args.get("evaluation_profile", "installation"),
+            ]
+            if imagery_layer:
+                eval_cmd += ["--imagery-layer", imagery_layer]
+            r = subprocess.run(eval_cmd, stdout=lf, stderr=subprocess.STDOUT,
+                               timeout=600, cwd=ROOT)
+            if r.returncode != 0:
+                print(f"FAIL (eval exit={r.returncode})")
+                return {"grid_id": grid_id, "model_tag": tag,
+                        "error": f"eval exit={r.returncode}", "log": str(log_file)}
         print("OK")
         return None
     except subprocess.TimeoutExpired:
@@ -868,6 +984,11 @@ def main():
                         help="Skip inference, collect existing results only")
     parser.add_argument("--checksum", choices=["auto", "skip", "force"], default="auto",
                         help="Checksum mode for model files (default: auto)")
+    parser.add_argument("--predictions-source", choices=["geoai", "direct"], default="geoai",
+                        help="Inference pipeline: 'geoai' (legacy detect_and_evaluate.py) "
+                             "or 'direct' (direct_maskrcnn_v1: detect_direct → finalize → evaluate). "
+                             "Direct path requires suite.region; reads suite.imagery_layer / "
+                             "suite.model_run if present.")
     args = parser.parse_args()
 
     # ── Load config ───────────────────────────────────────────────
@@ -960,6 +1081,7 @@ def main():
                     fail = run_one_grid(
                         model=m_, grid_id=gid_, suite=suite_, preset=preset,
                         run_id=run_id, force=args.force, log_dir=log_dir,
+                        predictions_source=args.predictions_source,
                     )
                     if fail:
                         failures.append(fail)
@@ -971,6 +1093,7 @@ def main():
                             run_one_grid,
                             model=m_, grid_id=gid_, suite=suite_, preset=preset,
                             run_id=run_id, force=args.force, log_dir=log_dir,
+                            predictions_source=args.predictions_source,
                         ): gid_
                         for m_, gid_, suite_ in tasks
                     }
