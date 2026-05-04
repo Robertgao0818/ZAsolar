@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-04-28: feat(analysis): v2 cascade holdout runner + TP-lost overlap breakdown
-- 2026-04-28: feat(classifier): v2 per-imagery threshold calibration + training tweaks
-- 2026-04-28: docs(experiments): freeze CT v1 ConvNeXt baseline + Li GT audit writeup
-- 2026-04-27: data(metadata): record Li and classifier v2 provenance
-- 2026-04-27: feat(classifier): add v2 dataset and training helpers
-- 2026-04-27: docs(progress): record classifier v2 experiment closure
-- 2026-04-27: chore(gitignore): ignore generated classifier artifacts
-- 2026-04-27: docs(experiments): freeze cls v2 protocol + new promotion rules
+- 2026-05-04: ops(runpod): Vexcel JHB CBD 25-grid batch + pack-and-pull helpers
+- 2026-05-04: feat(inference): geoai-parity finalize path + window-origin mode + review tweaks
+- 2026-05-04: data(channel2): JHB CBD 25-grid clean GT for exhaustive recall
+- 2026-05-04: feat(validation): Channel 1 stratified precision sampler + computer
+- 2026-05-04: feat(validation): GEID vintage probe across 6 cities × 12 years
+- 2026-05-04: feat(vexcel): JHB CBD 25-grid Vexcel 2024 ortho download pipeline
+- 2026-05-03: Daily log 2026-05-03: JHB Vexcel large-array recall, geoai-parity, clean GT policy
+- 2026-05-02: Daily log 2026-05-02: JHB CBD Vexcel recall analysis + SAM FN clustering口径
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
