@@ -403,5 +403,20 @@
     "timestamp": "2026-05-04T11:33:04Z",
     "source": "commit:f432e367",
     "summary": "chore(config): register Vexcel 2024 imagery layer + V3-C/V4.1 model runs"
+  },
+  {
+    "timestamp": "2026-05-04T11:33:14Z",
+    "source": "commit:deff0cde",
+    "summary": "docs(progress): week 2026-04-27 daily logs + weekly-summary skill"
+  },
+  {
+    "timestamp": "2026-05-04T11:33:26Z",
+    "source": "commit:6c38520e",
+    "summary": "feat(temporal): GEID anchor-presence install-date inference scaffold"
+  },
+  {
+    "timestamp": "2026-05-04T11:33:40Z",
+    "source": "commit:ec14d990",
+    "summary": "feat(temporal): GEID anchor-presence install-date inference scaffold"
   }
 ]
