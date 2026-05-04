@@ -3,14 +3,13 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-05-04: feat(temporal): GEID anchor-presence install-date inference scaffold
+- 2026-05-04: docs(progress): sync grouped commit log
 - 2026-05-04: feat(temporal): GEID anchor-presence install-date inference scaffold
 - 2026-05-04: docs(progress): week 2026-04-27 daily logs + weekly-summary skill
 - 2026-05-04: chore(config): register Vexcel 2024 imagery layer + V3-C/V4.1 model runs
 - 2026-05-04: ops(runpod): Vexcel JHB CBD 25-grid batch + pack-and-pull helpers
 - 2026-05-04: feat(inference): geoai-parity finalize path + window-origin mode + review tweaks
 - 2026-05-04: data(channel2): JHB CBD 25-grid clean GT for exhaustive recall
-- 2026-05-04: feat(validation): Channel 1 stratified precision sampler + computer
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
