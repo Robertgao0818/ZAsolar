@@ -8,7 +8,7 @@ from __future__ import annotations
 import numpy as np
 from affine import Affine
 
-from core.postproc import paint_and_vectorize_pixel_or
+from core.postproc import paint_and_vectorize_pixel_or, paint_geoai_parity_mask
 
 
 def _identity_transform() -> Affine:
@@ -175,3 +175,48 @@ def test_overhanging_detection_is_clipped():
     assert len(out) == 1
     # Visible area is 5 × 10 = 50
     assert 40 <= out[0].geom.area <= 60
+
+
+def test_geoai_parity_mask_paints_binary_and_score_bands():
+    """Geoai parity paint uses binary masks and max-updated score band."""
+    full_low = np.zeros((20, 20), dtype=np.uint8)
+    full_low[2:12, 2:12] = 255
+    full_high = np.zeros((20, 20), dtype=np.uint8)
+    full_high[7:17, 7:17] = 255
+    dets = [
+        {"mask_chip_uint8": full_low, "chip_source_offset": (0, 0), "score": 0.6},
+        {"mask_chip_uint8": full_high, "chip_source_offset": (0, 0), "score": 0.9},
+    ]
+
+    mask, conf, n = paint_geoai_parity_mask(
+        dets,
+        raster_height=20,
+        raster_width=20,
+        mask_threshold=0.3,
+        min_object_area=5,
+    )
+
+    assert n == 2
+    assert set(np.unique(mask)).issubset({0, 255})
+    assert mask[3, 3] == 255
+    assert conf[3, 3] == int(0.6 * 255)
+    # Overlap takes the higher score, matching geoai.generate_masks.
+    assert conf[8, 8] == int(0.9 * 255)
+
+
+def test_geoai_parity_mask_filters_by_binary_pixel_area_before_paint():
+    full = np.zeros((20, 20), dtype=np.uint8)
+    full[0:2, 0:2] = 255
+    dets = [{"mask_chip_uint8": full, "chip_source_offset": (0, 0), "score": 0.9}]
+
+    mask, conf, n = paint_geoai_parity_mask(
+        dets,
+        raster_height=20,
+        raster_width=20,
+        mask_threshold=0.3,
+        min_object_area=5,
+    )
+
+    assert n == 0
+    assert mask.max() == 0
+    assert conf.max() == 0

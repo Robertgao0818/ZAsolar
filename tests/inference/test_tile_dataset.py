@@ -56,6 +56,26 @@ def test_chunked_chip_count_with_overlap(tmp_path):
     assert len(ds) == 9
 
 
+def test_geoai_window_origin_mode_preserves_extra_edge_chip(tmp_path):
+    """Geoai parity mode includes geoai.CustomDataset's padded near-edge chip."""
+    p = tmp_path / "tile.tif"
+    _write_synthetic_tif(p, width=7524, height=7504)
+    direct = SlidingWindowDataset(
+        [p], chip_size=400, overlap=0.25, window_origin_mode="anchored"
+    )
+    geoai = SlidingWindowDataset(
+        [p], chip_size=400, overlap=0.25, window_origin_mode="geoai"
+    )
+    assert len(direct) == 625
+    assert len(geoai) == 676
+
+    windows = [geoai[i][1].valid_window for i in range(len(geoai))]
+    assert (7200, 0, 324, 400) in windows
+    assert (7124, 0, 400, 400) in windows
+    assert (0, 7200, 400, 304) in windows
+    assert (0, 7104, 400, 400) in windows
+
+
 def test_undersized_raster_yields_one_padded_chip(tmp_path):
     """100×100 raster, chip 400 → exactly one (0, 0) origin; chip is padded."""
     p = tmp_path / "tile.tif"
@@ -159,6 +179,13 @@ def test_chip_size_zero_raises(tmp_path):
     _write_synthetic_tif(p, width=400, height=400)
     with pytest.raises(ValueError, match="chip_size"):
         SlidingWindowDataset([p], chip_size=0)
+
+
+def test_invalid_window_origin_mode_raises(tmp_path):
+    p = tmp_path / "tile.tif"
+    _write_synthetic_tif(p, width=400, height=400)
+    with pytest.raises(ValueError, match="window_origin_mode"):
+        SlidingWindowDataset([p], window_origin_mode="bad")
 
 
 # ─────────────────────────────────────────────────────────────────────────

@@ -78,10 +78,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--prefetch-factor", type=int, default=2)
     p.add_argument("--chip-size", type=int, default=400)
     p.add_argument("--overlap", type=float, default=0.25)
+    p.add_argument("--parity-mode", choices=["direct", "geoai"], default="direct",
+                   help="direct = current raw crop artifact; geoai = store full-chip "
+                        "masks and use torchvision's default detections_per_img for "
+                        "closer geoai.SolarPanelDetector parity")
     p.add_argument("--detector-score-threshold", type=float, default=0.05,
                    help="model.roi_heads.score_thresh — controls what enters the artifact")
-    p.add_argument("--detections-per-img", type=int, default=300,
-                   help="model.roi_heads.detections_per_img (torchvision default 100)")
+    p.add_argument("--detections-per-img", type=int, default=None,
+                   help="model.roi_heads.detections_per_img; default is 300 in "
+                        "direct mode and torchvision/geoai default 100 in geoai mode")
     p.add_argument("--mask-threshold", type=float, default=0.3,
                    help="recorded only; soft mask binarization happens in finalize.py")
     p.add_argument("--raw-mask-storage", choices=["crop", "full_chip"], default="crop")
@@ -213,12 +218,20 @@ def run(args: argparse.Namespace) -> int:
     tif_paths = resolve_tile_paths(args, region_key)
     print(f"[detect_direct] {len(tif_paths)} source TIF(s)")
 
+    if args.detections_per_img is None:
+        args.detections_per_img = 100 if args.parity_mode == "geoai" else 300
+    if args.parity_mode == "geoai" and args.raw_mask_storage != "full_chip":
+        print("[detect_direct] geoai parity mode: forcing --raw-mask-storage full_chip")
+        args.raw_mask_storage = "full_chip"
+
     # ── Output dir ───────────────────────────────────────────────────
     out_dir = resolve_output_dir(args, region_arg)
     out_dir.mkdir(parents=True, exist_ok=True)
     raw_path = args.output_raw if args.output_raw is not None else out_dir / "raw_detections.pkl"
     print(f"[detect_direct] output_dir={out_dir}")
     print(f"[detect_direct] raw_path={raw_path}")
+    print(f"[detect_direct] parity_mode={args.parity_mode} raw_mask_storage={args.raw_mask_storage} "
+          f"detections_per_img={args.detections_per_img}")
 
     # ── Dataset ──────────────────────────────────────────────────────
     dataset = SlidingWindowDataset(
@@ -227,6 +240,7 @@ def run(args: argparse.Namespace) -> int:
         overlap=args.overlap,
         edge_pad=True,
         max_chips=args.max_chips,
+        window_origin_mode="geoai" if args.parity_mode == "geoai" else "anchored",
     )
     print(f"[detect_direct] dataset: {len(dataset)} chips, stride={dataset.stride}")
 
@@ -293,6 +307,9 @@ def run(args: argparse.Namespace) -> int:
                     out=out,
                     chip_size=args.chip_size,
                     raw_mask_storage=args.raw_mask_storage,
+                    geoai_binary_mask_threshold=(
+                        float(args.mask_threshold) if args.parity_mode == "geoai" else None
+                    ),
                 )
                 all_chips.append(chip)
                 n_detections += len(chip.detections)
@@ -370,6 +387,7 @@ def _process_one_chip(
     out: dict,
     chip_size: int,
     raw_mask_storage: str,
+    geoai_binary_mask_threshold: float | None = None,
 ) -> Chip:
     """Convert one torchvision detection output dict into a `Chip` artifact."""
     boxes = out["boxes"].detach().cpu().numpy()       # [N, 4]
@@ -389,7 +407,16 @@ def _process_one_chip(
         soft_uint8 = (np.clip(soft, 0.0, 1.0) * 255.0).astype(np.uint8)
 
         if raw_mask_storage == "full_chip":
-            mask_chip_uint8 = soft_uint8
+            if geoai_binary_mask_threshold is None:
+                mask_chip_uint8 = soft_uint8
+            else:
+                # Geoai generate_masks thresholds the float mask directly
+                # before painting full-raster band 1. Storing the binary
+                # full-chip mask here avoids uint8 soft-mask quantization drift
+                # in --parity-mode geoai while leaving crop storage untouched.
+                mask_chip_uint8 = (
+                    (soft > float(geoai_binary_mask_threshold)).astype(np.uint8) * 255
+                )
             # Crop to box for default storage too (always populated):
             mask_crop = soft_uint8[y1:y2, x1:x2].copy()
         else:

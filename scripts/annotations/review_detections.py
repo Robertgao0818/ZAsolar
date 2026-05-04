@@ -36,6 +36,7 @@ from urllib.parse import parse_qs, urlparse
 
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 import rasterio
 from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, box
@@ -50,13 +51,34 @@ from core.grid_utils import (
 )
 
 # ── SAM 2.1 integration (lazy loaded) ──
-SAM_CHECKPOINT = Path("/mnt/c/Users/gaosh/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins/GeoOSAM/sam2/checkpoints/sam2.1_hiera_large.pt")
+# Try local ext4 path first (resilient to /mnt/c drvfs hangs); fall back to
+# the QGIS GeoOSAM plugin path for backward compat.
+_SAM_CHECKPOINT_CANDIDATES = [
+    Path("/home/gaosh/zasolar_data/models/sam2/checkpoints/sam2.1_hiera_large.pt"),
+    Path("/mnt/c/Users/gaosh/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins/GeoOSAM/sam2/checkpoints/sam2.1_hiera_large.pt"),
+]
+SAM_CHECKPOINT = _SAM_CHECKPOINT_CANDIDATES[0]
+for _p in _SAM_CHECKPOINT_CANDIDATES:
+    try:
+        if _p.exists():
+            SAM_CHECKPOINT = _p
+            break
+    except OSError:
+        continue
 SAM_CONFIG = "configs/sam2.1/sam2.1_hiera_l"
 
 _sam_predictor = None
 _sam_available: bool | None = None  # None = not checked
-_sam_current_tile: str | None = None
-_sam_tile_cache: dict[str, np.ndarray] = {}
+# Crop-window cache: SAM2 internally resizes input to 1024² for the encoder, and
+# Vexcel tiles are ~7520×7503 px (~170 MB uint8 RGB) — feeding the full tile
+# every click is the dominant cost. Instead crop a SAM_CROP_SIZE window around
+# the click and re-encode only when subsequent points fall outside the window.
+SAM_CROP_SIZE = 1024
+_sam_crop: dict = {
+    "tile_path": None,
+    "origin_xy": None,   # (col_off, row_off) of crop in full-tile pixel coords
+    "size_xy": None,     # (w, h) of crop (may be < SAM_CROP_SIZE near tile edges)
+}
 
 
 def _sam_ensure_loaded() -> bool:
@@ -64,7 +86,13 @@ def _sam_ensure_loaded() -> bool:
     global _sam_predictor, _sam_available
     if _sam_available is not None:
         return _sam_available
-    if not SAM_CHECKPOINT.exists():
+    try:
+        ckpt_exists = SAM_CHECKPOINT.exists()
+    except OSError as e:
+        print(f"[SAM] Cannot stat checkpoint ({e}), SAM disabled")
+        _sam_available = False
+        return False
+    if not ckpt_exists:
         print("[SAM] Checkpoint not found, SAM disabled")
         _sam_available = False
         return False
@@ -88,25 +116,59 @@ def _sam_ensure_loaded() -> bool:
         return False
 
 
+def _sam_pick_crop(tile_path: str, points: list[list[float]]) -> tuple[int, int, int, int]:
+    """Pick a crop window in full-tile pixel coords that covers all points.
+    Centered on the points' bounding-box midpoint, sized SAM_CROP_SIZE, clamped
+    to the tile. Returns (col_off, row_off, width, height)."""
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    cx = (min(xs) + max(xs)) / 2.0
+    cy = (min(ys) + max(ys)) / 2.0
+    with rasterio.open(tile_path) as src:
+        W, H = src.width, src.height
+    half = SAM_CROP_SIZE // 2
+    col_off = int(round(cx) - half)
+    row_off = int(round(cy) - half)
+    col_off = max(0, min(max(0, W - SAM_CROP_SIZE), col_off))
+    row_off = max(0, min(max(0, H - SAM_CROP_SIZE), row_off))
+    w = min(SAM_CROP_SIZE, W - col_off)
+    h = min(SAM_CROP_SIZE, H - row_off)
+    return col_off, row_off, w, h
+
+
 def _sam_segment(tile_path: str, positive_points: list, negative_points: list):
-    """Run SAM segmentation.  Returns (mask, score).  Caches tile embedding."""
-    global _sam_current_tile
-    # Cache tile array
-    img_array = _sam_tile_cache.get(tile_path)
-    if img_array is None:
+    """Run SAM segmentation on a crop window. Returns (mask, score, crop_origin).
+    crop_origin is (col_off, row_off) in full-tile pixel coords; mask is in the
+    crop's local frame (size = crop w×h)."""
+    points_full = positive_points + negative_points
+    if not points_full:
+        raise ValueError("at least one point required")
+
+    # Reuse the existing crop only if same tile AND every point falls inside it.
+    crop = _sam_crop
+    reuse = (crop["tile_path"] == tile_path and crop["origin_xy"] is not None)
+    if reuse:
+        co, ro = crop["origin_xy"]
+        cw, ch = crop["size_xy"]
+        for x, y in points_full:
+            if not (co <= x < co + cw and ro <= y < ro + ch):
+                reuse = False
+                break
+
+    if not reuse:
+        co, ro, cw, ch = _sam_pick_crop(tile_path, points_full)
+        from rasterio.windows import Window
         with rasterio.open(tile_path) as src:
-            img_array = np.moveaxis(src.read()[:3], 0, -1)
-        _sam_tile_cache[tile_path] = img_array
-        if len(_sam_tile_cache) > 8:
-            _sam_tile_cache.pop(next(iter(_sam_tile_cache)))
-    # Set image only if tile changed
-    if _sam_current_tile != tile_path:
-        _sam_predictor.set_image(img_array)
-        _sam_current_tile = tile_path
-    points = positive_points + negative_points
-    labels = [1] * len(positive_points) + [0] * len(negative_points)
-    # SAM2: use multimask only for single-point prompts; for multi-point
-    # (including negative points) use single-mask mode so negatives are respected.
+            img = src.read([1, 2, 3], window=Window(co, ro, cw, ch))
+        img_rgb = np.moveaxis(img, 0, -1)
+        _sam_predictor.set_image(img_rgb)
+        crop.update(tile_path=tile_path, origin_xy=(co, ro), size_xy=(cw, ch))
+
+    co, ro = crop["origin_xy"]
+    pos_local = [[x - co, y - ro] for x, y in positive_points]
+    neg_local = [[x - co, y - ro] for x, y in negative_points]
+    points = pos_local + neg_local
+    labels = [1] * len(pos_local) + [0] * len(neg_local)
     multi = len(points) == 1
     masks, scores, _ = _sam_predictor.predict(
         point_coords=np.array(points, dtype=np.float32),
@@ -114,13 +176,20 @@ def _sam_segment(tile_path: str, positive_points: list, negative_points: list):
         multimask_output=multi,
     )
     best = int(np.argmax(scores))
-    return masks[best], float(scores[best])
+    return masks[best], float(scores[best]), crop["origin_xy"]
 
 
-def _mask_to_pixel_coords(mask: np.ndarray) -> list[list[float]] | None:
-    """Convert binary mask to pixel-coord polygon (largest component)."""
+def _sam_reset_crop() -> None:
+    _sam_crop.update(tile_path=None, origin_xy=None, size_xy=None)
+
+
+def _mask_to_pixel_coords(mask: np.ndarray,
+                          crop_origin: tuple[int, int] = (0, 0)) -> list[list[float]] | None:
+    """Convert binary mask to pixel-coord polygon (largest component) in
+    full-tile pixel coords (mask is in crop-local frame; offset by crop_origin)."""
     from rasterio.features import shapes as rio_shapes
     from rasterio.transform import Affine
+    co, ro = crop_origin
     polys = []
     for geom, val in rio_shapes(mask.astype(np.uint8), mask=mask > 0,
                                  transform=Affine.identity()):
@@ -131,14 +200,21 @@ def _mask_to_pixel_coords(mask: np.ndarray) -> list[list[float]] | None:
     if not polys:
         return None
     biggest = max(polys, key=lambda p: p.area)
-    return [[round(x, 1), round(y, 1)] for x, y in biggest.exterior.coords]
+    return [[round(x + co, 1), round(y + ro, 1)] for x, y in biggest.exterior.coords]
 
 
-def _mask_to_geo_polygon(mask: np.ndarray, tile_path: str) -> Polygon | None:
-    """Convert binary mask to EPSG:4326 polygon using tile geotransform."""
+def _mask_to_geo_polygon(mask: np.ndarray, tile_path: str,
+                         crop_origin: tuple[int, int] = (0, 0)) -> Polygon | None:
+    """Convert binary mask to EPSG:4326 polygon using tile geotransform.
+    Mask is in crop-local frame; crop_origin shifts back to full-tile pixels
+    before applying the raster's transform."""
     from rasterio.features import shapes as rio_shapes
+    from rasterio.transform import Affine
     with rasterio.open(tile_path) as src:
         tf = src.transform
+        src_crs = src.crs
+    co, ro = crop_origin
+    tf = tf * Affine.translation(co, ro)
     polys = []
     for geom, val in rio_shapes(mask.astype(np.uint8), mask=mask > 0, transform=tf):
         if val > 0:
@@ -147,7 +223,13 @@ def _mask_to_geo_polygon(mask: np.ndarray, tile_path: str) -> Polygon | None:
                 polys.append(p)
     if not polys:
         return None
-    return max(polys, key=lambda p: p.area)
+    biggest = max(polys, key=lambda p: p.area)
+    if src_crs and src_crs.to_epsg() != 4326:
+        import pyproj
+        from shapely.ops import transform as shp_transform
+        tfm = pyproj.Transformer.from_crs(src_crs, "EPSG:4326", always_xy=True)
+        biggest = shp_transform(tfm.transform, biggest)
+    return biggest
 
 
 STATUS_VALUES = {"correct", "delete", "edit", ""}
@@ -196,10 +278,23 @@ class DetectionReviewStore:
             if gdf.crs and gdf.crs.to_epsg() != 4326:
                 gdf = gdf.to_crs(epsg=4326)
             gdf["_source_grid"] = gid
+
+            # Append previously SAM-accepted polygons (per-grid sidecar) so the
+            # merged indices stay aligned with the local pred_ids in decisions.csv.
+            sam_path = review_dir / f"{gid}_sam_added.gpkg"
+            if sam_path.exists():
+                sam_gdf = gpd.read_file(str(sam_path))
+                if sam_gdf.crs and sam_gdf.crs.to_epsg() != 4326:
+                    sam_gdf = sam_gdf.to_crs(epsg=4326)
+                sam_gdf["_source_grid"] = gid
+                gdf = gpd.GeoDataFrame(
+                    pd.concat([gdf, sam_gdf], ignore_index=True),
+                    crs="EPSG:4326",
+                )
+                print(f"  Loaded {len(sam_gdf)} previously-accepted SAM polygons from {gid}")
             print(f"  Loaded {len(gdf)} predictions from {gid}")
             frames.append(gdf)
 
-        import pandas as pd
         self.pred_gdf = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True))
         print(f"  Total: {len(self.pred_gdf)} predictions across {len(grid_ids)} grid(s)")
 
@@ -239,13 +334,26 @@ class DetectionReviewStore:
             return None
 
         with rasterio.open(geo_path) as ds:
+            # tile_box is used to match reprojected (EPSG:4326) prediction
+            # geometries; convert from native CRS if needed (e.g., Vexcel tiles
+            # are EPSG:3857). bounds/transform stay native for pixel-coord work.
+            if ds.crs and ds.crs.to_epsg() != 4326:
+                from rasterio.warp import transform_bounds
+                tx_l, tx_b, tx_r, tx_t = transform_bounds(
+                    ds.crs, "EPSG:4326",
+                    ds.bounds.left, ds.bounds.bottom, ds.bounds.right, ds.bounds.top,
+                )
+            else:
+                tx_l, tx_b, tx_r, tx_t = (ds.bounds.left, ds.bounds.bottom,
+                                          ds.bounds.right, ds.bounds.top)
             meta = {
                 "path": geo_path,
                 "bounds": ds.bounds,
                 "width": ds.width,
                 "height": ds.height,
                 "transform": ds.transform,
-                "tile_box": box(ds.bounds.left, ds.bounds.bottom, ds.bounds.right, ds.bounds.top),
+                "native_crs": ds.crs,
+                "tile_box": box(tx_l, tx_b, tx_r, tx_t),
             }
         self._tile_meta_cache[tile_key] = meta
         return meta
@@ -594,9 +702,22 @@ class DetectionReviewStore:
     # ── SAM polygon acceptance / undo ──
     _last_sam_accept: dict | None = None  # for undo
 
+    def _persist_sam_added(self, gid: str) -> None:
+        """Rewrite the per-grid sidecar with all current SAM-added polygons so
+        they survive a server restart. Called after every accept/undo."""
+        if "source" not in self.pred_gdf.columns:
+            return
+        mask = (self.pred_gdf["_source_grid"] == gid) & (self.pred_gdf["source"] == "sam_fn_review")
+        sub = self.pred_gdf[mask]
+        path = self._review_dirs[gid] / f"{gid}_sam_added.gpkg"
+        if len(sub) == 0:
+            if path.exists():
+                path.unlink()
+            return
+        gpd.GeoDataFrame(sub.copy(), crs="EPSG:4326").to_file(str(path), driver="GPKG")
+
     def accept_sam_polygon(self, tile_key: str, geo_polygon: Polygon) -> int:
         """Add a SAM-segmented polygon as a new correct prediction.  Returns new pred_id."""
-        import pandas as pd
         gid = self._grid_id_for_tile(tile_key)
         # Compute area in metric CRS
         import pyproj
@@ -634,6 +755,7 @@ class DetectionReviewStore:
         # Mark as correct
         self.decisions[str(new_idx)] = "correct"
         self._write_decisions()
+        self._persist_sam_added(gid)
         self._last_sam_accept = {"idx": new_idx, "tile_key": tile_key}
         return new_idx
 
@@ -644,6 +766,7 @@ class DetectionReviewStore:
             return False
         idx = self._last_sam_accept["idx"]
         tile_key = self._last_sam_accept["tile_key"]
+        gid = self._grid_id_for_tile(tile_key)
         print(f"[SAM-UNDO] Removing pred #{idx} from tile {tile_key}")
         # Remove from all tile indices
         for tk, preds in self.tile_preds.items():
@@ -655,6 +778,7 @@ class DetectionReviewStore:
         if idx in self.pred_gdf.index:
             self.pred_gdf = self.pred_gdf.drop(index=idx)
         self._write_decisions()
+        self._persist_sam_added(gid)
         self._last_sam_accept = None
         return True
 
@@ -693,8 +817,16 @@ class DetectionReviewStore:
         if meta is None:
             return []
 
-        tile_box = meta["tile_box"]
-        transform = meta["transform"]
+        tile_box = meta["tile_box"]            # EPSG:4326
+        transform = meta["transform"]          # native pixel transform
+        native_crs = meta.get("native_crs")
+
+        # Predictions are stored in EPSG:4326 (loader reprojects). The pixel
+        # transform is in tile-native CRS, so we need a 4326 → native warp.
+        to_native = None
+        if native_crs and native_crs.to_epsg() != 4326:
+            from pyproj import Transformer
+            to_native = Transformer.from_crs(4326, native_crs, always_xy=True).transform
 
         indices = self.tile_preds.get(tile_key, [])
         polys = []
@@ -710,6 +842,8 @@ class DetectionReviewStore:
 
             coords = []
             for x, y in ring:
+                if to_native is not None:
+                    x, y = to_native(x, y)
                 px, py = (~transform) * (x, y)
                 coords.append([round(px, 1), round(py, 1)])
 
@@ -933,6 +1067,7 @@ def build_html() -> str:
         <span class="kbd">Q</span> all correct (quick pass)<br>
         <span class="kbd">M</span> toggle SAM FN mode<br>
         <span class="kbd">&larr;</span>/<span class="kbd">&rarr;</span> prev/next tile<br>
+        <span class="kbd">Space</span>+drag pan, wheel zoom (10–1200%)<br>
         <hr style="border:0;border-top:1px solid #efe5d6;margin:6px 0;">
         <b>SAM FN mode:</b><br>
         Left-click: + point, Right-click: - point<br>
@@ -966,8 +1101,9 @@ const ctx = canvas.getContext("2d");
 
 // ── Zoom & Pan state ──
 let scale=1, panX=0, panY=0;
-let isDragging=false, dragStartX=0, dragStartY=0, panStartX=0, panStartY=0;
-const MIN_SCALE=0.5, MAX_SCALE=12;
+let isPanning=false, downX=0, downY=0, panStartX=0, panStartY=0;
+let spaceDown=false;
+const MIN_SCALE=0.1, MAX_SCALE=12;
 
 function updateMarkerBtn() {
   const btn=document.getElementById("markerBtn");
@@ -1322,25 +1458,33 @@ canvas.addEventListener("wheel", e => {
   drawCanvas();
 }, {passive: false});
 
-// Click to select, drag to pan
+// QGIS-style pan: hold Space + left-drag, or middle-drag. Plain left-click
+// is reserved for select / SAM / FN-marker actions (no accidental drag-pan).
+function defaultCursor() { return spaceDown ? "grab" : (markerMode ? "cell" : "crosshair"); }
+
 canvas.addEventListener("mousedown", e => {
-  isDragging = true;
-  dragStartX = e.clientX; dragStartY = e.clientY;
+  downX = e.clientX; downY = e.clientY;
   panStartX = panX; panStartY = panY;
-  canvas.style.cursor = "grabbing";
+  if((e.button === 0 && spaceDown) || e.button === 1) {
+    isPanning = true;
+    canvas.style.cursor = "grabbing";
+    e.preventDefault();
+  }
 });
 
 canvas.addEventListener("mousemove", e => {
-  if(!isDragging) return;
-  panX = panStartX + (e.clientX - dragStartX);
-  panY = panStartY + (e.clientY - dragStartY);
+  if(!isPanning) return;
+  panX = panStartX + (e.clientX - downX);
+  panY = panStartY + (e.clientY - downY);
   drawCanvas();
 });
 
 canvas.addEventListener("mouseup", e => {
-  const dx = Math.abs(e.clientX - dragStartX), dy = Math.abs(e.clientY - dragStartY);
-  isDragging = false;
-  canvas.style.cursor = "crosshair";
+  const dx = Math.abs(e.clientX - downX), dy = Math.abs(e.clientY - downY);
+  const wasPanning = isPanning;
+  isPanning = false;
+  canvas.style.cursor = defaultCursor();
+  if(wasPanning) return;  // pan ended; don't fire click
 
   // Right-click is handled by contextmenu; ignore here so it doesn't double-fire as a left-click
   // (would add a positive SAM point at the same pixel as the negative point and cancel it out)
@@ -1394,6 +1538,10 @@ canvas.addEventListener("mouseup", e => {
 });
 
 canvas.addEventListener("mouseleave", () => { isDragging=false; canvas.style.cursor=markerMode?"cell":"crosshair"; });
+// Safety: if drag ends outside canvas, reset cursor on document mouseup
+document.addEventListener("mouseup", () => {
+  if(isDragging) { isDragging=false; canvas.style.cursor=markerMode?"cell":"crosshair"; }
+});
 
 // Right-click: SAM negative point or remove FN marker
 canvas.addEventListener("contextmenu", e => {
@@ -1452,6 +1600,31 @@ async function setSelectedStatus(status) {
   renderPredList();
 }
 
+// After SAM accept: refetch tile polys (the new polygon is appended at end with
+// status="correct") and jump to the next still-unreviewed pred in the SAME
+// tile. If no unreviewed remain, stay on the tile and deselect so the user
+// can keep drawing more FNs without losing their place — never auto-advance
+// to the next tile (use Right Arrow for that).
+function acceptSamAndAdvance() {
+  const tile = visible[currentIdx];
+  if(!tile) return;
+  fetch(`/api/tile_polys/${tile.tile_key}`).then(r=>r.json()).then(newPolys => {
+    polys = newPolys;
+    tile.n_reviewed = polys.filter(x=>x.status).length;
+    updateTileStats(tile);
+    updateSummary();
+    const nextUnrev = polys.findIndex(p => !p.status);
+    if(nextUnrev >= 0) {
+      selectedIdx = nextUnrev;
+      zoomToSelected();
+    } else {
+      selectedIdx = -1;
+      drawCanvas();
+    }
+    renderPredList();
+  });
+}
+
 async function markAllTile(status) {
   const tile=visible[currentIdx];
   if(!tile) return;
@@ -1485,15 +1658,19 @@ document.getElementById("markerBtn").addEventListener("click",()=>{markerMode=!m
 // Keyboard
 document.addEventListener("keydown", e => {
   if(e.target.tagName==="TEXTAREA"||e.target.tagName==="INPUT"||e.target.tagName==="SELECT") return;
+  if(e.code === "Space") {
+    if(!spaceDown) { spaceDown = true; canvas.style.cursor = "grab"; }
+    e.preventDefault();
+    return;
+  }
   switch(e.key) {
     case "ArrowLeft":  if(currentIdx>0){currentIdx--;loadCurrentTile();} e.preventDefault(); break;
     case "ArrowRight": if(currentIdx<visible.length-1){currentIdx++;loadCurrentTile();} e.preventDefault(); break;
     case "a": case "A":
       if(markerMode && samPolygon && samPolygon.coords) {
-        // Accept SAM polygon
         fetch("/api/sam_accept",{method:"POST"}).then(r=>r.json()).then(d=>{
           samPolygon=null; samPoints={pos:[],neg:[]};
-          loadCurrentTile();  // refresh to show new polygon
+          acceptSamAndAdvance();
         });
       } else { setSelectedStatus("correct"); }
       e.preventDefault(); break;
@@ -1513,7 +1690,7 @@ document.addEventListener("keydown", e => {
       if(markerMode && samPolygon && samPolygon.coords) {
         fetch("/api/sam_accept",{method:"POST"}).then(r=>r.json()).then(d=>{
           samPolygon=null; samPoints={pos:[],neg:[]};
-          loadCurrentTile();
+          acceptSamAndAdvance();
         });
         e.preventDefault();
       }
@@ -1548,6 +1725,14 @@ document.addEventListener("keydown", e => {
       e.preventDefault();
       break;
     case "f": case "F": if(selectedIdx>=0) zoomToSelected(); else resetView(); e.preventDefault(); break;
+  }
+});
+
+document.addEventListener("keyup", e => {
+  if(e.code === "Space") {
+    spaceDown = false;
+    if(!isPanning) canvas.style.cursor = defaultCursor();
+    e.preventDefault();
   }
 });
 
@@ -1683,9 +1868,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 self._json_response({"error": "tile not found"}, 404)
                 return
             try:
-                mask, score = _sam_segment(str(tile_path), st["pos"], st["neg"])
-                pixel_coords = _mask_to_pixel_coords(mask)
-                geo_poly = _mask_to_geo_polygon(mask, str(tile_path))
+                mask, score, crop_origin = _sam_segment(str(tile_path), st["pos"], st["neg"])
+                pixel_coords = _mask_to_pixel_coords(mask, crop_origin=crop_origin)
+                geo_poly = _mask_to_geo_polygon(mask, str(tile_path), crop_origin=crop_origin)
                 area_m2 = 0.0
                 if geo_poly:
                     import pyproj
@@ -1731,6 +1916,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
             ReviewHandler._sam_state.update(
                 tile_key=None, pos=[], neg=[],
                 pixel_coords=None, geo_poly=None, score=None, area_m2=None)
+            _sam_reset_crop()
             self._json_response({"ok": True})
 
         else:
@@ -1770,6 +1956,8 @@ def main():
                        help="Directory with <grid>/predictions_metric.gpkg (multi-grid override)")
     parser.add_argument("--region", default=None,
                        help="Region hint for grid spec lookup (e.g. 'jhb' for Johannesburg)")
+    parser.add_argument("--imagery-layer", default=None,
+                       help="Imagery layer id (e.g. 'vexcel_2024') — overrides region default for tile resolution")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args()
@@ -1853,7 +2041,7 @@ def main():
         if grid_region is None and "results_joburg" in str(pred_path):
             grid_region = "jhb"
             print(f"[INFO] Auto-detected region=jhb for {gid} from prediction path")
-        tiles_dir = resolve_tiles_dir(gid, region=grid_region)
+        tiles_dir = resolve_tiles_dir(gid, region=grid_region, imagery_layer=args.imagery_layer)
         if not tiles_dir.exists():
             print(f"[WARN] Tiles not found for {gid}: {tiles_dir}, skipping")
             continue

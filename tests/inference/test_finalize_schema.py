@@ -171,9 +171,59 @@ def test_finalize_writes_min_schema(tmp_path):
 
     cfg = json.loads(config.read_text())
     assert cfg["pipeline_version"] == "direct_maskrcnn_v1"
+    assert cfg["parity_mode"] == "direct"
     assert cfg["confidence_source"] == "score"
     assert cfg["result_count"] == 1
     assert cfg["stage_counts"]["raw_total"] == 1
+
+
+def test_finalize_geoai_parity_mode_preserves_mask_band_confidence(tmp_path):
+    """Geoai parity mode writes geoai-style mask/vector sidecars and keeps band-2 confidence."""
+    pytest.importorskip("geoai")
+
+    tif = tmp_path / "G1110_mosaic.tif"
+    tif_meta = _write_synthetic_jhb_tif(tif)
+    artifact = _make_synthetic_artifact(tif_meta)
+    det = artifact.chips[0].detections[0]
+    full = np.zeros((400, 400), dtype=np.uint8)
+    x0, y0 = det.mask_crop_offset
+    h, w = det.mask_crop_uint8.shape
+    full[y0:y0 + h, x0:x0 + w] = det.mask_crop_uint8
+    det.mask_chip_uint8 = full
+    artifact.raw_mask_storage = "full_chip"
+
+    raw_path = tmp_path / "raw_detections.pkl"
+    write_artifact(artifact, raw_path)
+    out_dir = tmp_path / "out_geoai"
+
+    cmd = [
+        sys.executable, str(REPO_ROOT / "finalize.py"),
+        "--input", str(raw_path),
+        "--output-dir", str(out_dir),
+        "--parity-mode", "geoai",
+    ]
+    result = subprocess.run(
+        cmd, cwd=str(REPO_ROOT), capture_output=True, text=True, timeout=90,
+    )
+    if result.returncode != 0:
+        pytest.fail(f"finalize.py geoai parity failed:\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+
+    gpkg = out_dir / "predictions_metric.gpkg"
+    mask = out_dir / "masks" / f"{tif.stem}_mask.tif"
+    vector = out_dir / "vectors" / f"{tif.stem}_vectors.geojson"
+    assert gpkg.exists()
+    assert mask.exists()
+    assert vector.exists()
+
+    g = gpd.read_file(gpkg)
+    assert len(g) == 1
+    # geoai.generate_masks uses int(score * 255), then zonal mean / 255.
+    assert abs(g.iloc[0]["confidence"] - int(0.9 * 255) / 255) < 1e-6
+
+    cfg = json.loads((out_dir / "config.json").read_text())
+    assert cfg["parity_mode"] == "geoai"
+    assert cfg["confidence_source"] == "existing"
+    assert cfg["result_count"] == 1
 
 
 def test_canonical_overwrite_guard(tmp_path):

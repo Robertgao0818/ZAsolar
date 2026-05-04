@@ -52,6 +52,7 @@ from core.postproc import (
     compute_mask_mean_confidence,
     compute_rgb_zonal_means,
     load_postproc_config,
+    paint_geoai_parity_mask,
     paint_and_vectorize_pixel_or,
     spatial_nms,
     vectorize_chip_mask,
@@ -83,6 +84,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "to a chunk-sized raster, OR-merge on overlap, vectorize once. "
                         "per-detection (diagnostic): each detection produces its own polygon, "
                         "merged later only via spatial_nms.")
+    p.add_argument("--parity-mode", choices=["direct", "geoai"], default="direct",
+                   help="direct = current direct finalizer; geoai = rebuild geoai-style "
+                        "two-band mask rasters and vectorize through geoai.orthogonalize")
     p.add_argument("--vectorize-multi-component",
                    choices=["largest", "union", "explode"], default="explode",
                    help="Only used in per-detection mode and for the leftover "
@@ -95,9 +99,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Disable legacy confidence_threshold → pre_vector cutoff")
     p.add_argument("--allow-overwrite-canonical", action="store_true",
                    help="Permit writing into a non-direct existing run dir")
-    p.add_argument("--confidence-source", choices=["score", "mask_mean_confidence"],
+    p.add_argument("--confidence-source", choices=["score", "mask_mean_confidence", "existing"],
                    default="score",
-                   help="Phase 1 default = score; mask_mean_confidence reserved for ablations")
+                   help="Phase 1 default = score; existing preserves a confidence column "
+                        "already produced by a parity/vectorization path")
     return p
 
 
@@ -253,6 +258,159 @@ def _vectorize_pixel_or(
     return chip_gdfs
 
 
+def _geoai_parity_vectorize(
+    artifact,
+    *,
+    output_dir: Path,
+    postproc_cfg: dict[str, Any],
+    mask_threshold: float,
+) -> list[gpd.GeoDataFrame]:
+    """Rebuild geoai-style two-band masks, then call geoai.orthogonalize.
+
+    This mirrors the legacy path in detect_and_evaluate.py:
+      SolarPanelDetector.generate_masks(...) -> mask GeoTIFF with
+      band 1=binary mask and band 2=score confidence;
+      geoai.orthogonalize(..., epsilon=0.2);
+      zonal mean of band 2 becomes `confidence`.
+    """
+    try:
+        import geoai
+    except ImportError as exc:
+        raise RuntimeError(
+            "finalize --parity-mode geoai requires geoai-py in the environment"
+        ) from exc
+
+    import rasterio
+
+    masks_dir = output_dir / "masks"
+    vectors_dir = output_dir / "vectors"
+    masks_dir.mkdir(parents=True, exist_ok=True)
+    vectors_dir.mkdir(parents=True, exist_ok=True)
+
+    src_meta_by_path = {s.path: s for s in artifact.source_tiles}
+    grouped: dict[str, list[dict]] = {}
+    for chip in artifact.chips:
+        if not chip.detections:
+            continue
+        col_off, row_off, _w, _h = chip.window
+        for det in chip.detections:
+            grouped.setdefault(chip.source_tif, []).append({
+                "mask_chip_uint8": det.mask_chip_uint8,
+                "mask_crop_uint8": det.mask_crop_uint8,
+                "chip_source_offset": (int(col_off), int(row_off)),
+                "source_offset": (
+                    int(col_off) + int(det.mask_crop_offset[0]),
+                    int(row_off) + int(det.mask_crop_offset[1]),
+                ),
+                "score": float(det.score),
+                "label": int(det.label),
+            })
+
+    min_object_area = float(postproc_cfg.get("min_object_area", 5.0))
+    max_object_area = postproc_cfg.get("max_object_area")
+    if max_object_area is not None:
+        max_object_area = float(max_object_area)
+
+    out_gdfs: list[gpd.GeoDataFrame] = []
+    for source_tif, detections in grouped.items():
+        meta = src_meta_by_path.get(source_tif)
+        if meta is None:
+            continue
+        raster_height, raster_width = int(meta.shape[0]), int(meta.shape[1])
+        mask_array, conf_array, n_painted = paint_geoai_parity_mask(
+            detections,
+            raster_height=raster_height,
+            raster_width=raster_width,
+            mask_threshold=mask_threshold,
+            min_object_area=min_object_area,
+            max_object_area=max_object_area,
+        )
+        if n_painted == 0:
+            continue
+
+        source_stem = Path(source_tif).stem
+        mask_path = masks_dir / f"{source_stem}_mask.tif"
+        vector_path = vectors_dir / f"{source_stem}_vectors.geojson"
+        with rasterio.open(source_tif) as src:
+            profile = src.profile.copy()
+        for stale_key in (
+            "photometric",
+            "photometric_interpretation",
+            "jpeg_quality",
+            "jpegtables",
+            "ycbcr_subsampling",
+        ):
+            profile.pop(stale_key, None)
+        profile.update(dtype=rasterio.uint8, count=2, compress="lzw", nodata=0)
+        with rasterio.open(mask_path, "w", **profile) as dst:
+            dst.write(mask_array, 1)
+            dst.write(conf_array, 2)
+
+        try:
+            gdf_tile = geoai.orthogonalize(
+                input_path=str(mask_path),
+                output_path=str(vector_path),
+                epsilon=0.2,
+            )
+        except Exception as exc:
+            if "No valid polygons" in str(exc) or "No geometries" in str(exc):
+                continue
+            raise
+
+        if gdf_tile is None or len(gdf_tile) == 0:
+            continue
+        gdf_tile = gdf_tile.copy()
+        gdf_tile["confidence"] = _zonal_band_mean(gdf_tile, mask_path, band=2) / 255.0
+        gdf_tile["mask_mean_confidence_painted"] = gdf_tile["confidence"].astype(float)
+        # Legacy detect_and_evaluate.py computes geoai geometric properties
+        # while each tile is still in its source CRS, then reprojects the
+        # GeoDataFrame later. Preserve that attribute-ordering in parity mode.
+        try:
+            gdf_tile = geoai.add_geometric_properties(gdf_tile)
+        except Exception:
+            pass
+        gdf_tile["source_tile"] = source_stem
+        gdf_tile["source_tif"] = source_tif
+        gdf_tile["chip_index"] = -1
+        gdf_tile["label"] = 1
+        out_gdfs.append(gdf_tile)
+
+    return out_gdfs
+
+
+def _zonal_band_mean(gdf: gpd.GeoDataFrame, raster_path: Path, *, band: int) -> np.ndarray:
+    """Mean raster band value inside each geometry, matching nodata=0 behavior."""
+    try:
+        import rasterstats as rs
+        stats = rs.zonal_stats(gdf, str(raster_path), band=band, stats=["mean"], nodata=0)
+        return np.array([
+            float(s["mean"]) if s.get("mean") is not None else 0.0
+            for s in stats
+        ], dtype=np.float64)
+    except Exception:
+        from rasterio import open as rio_open
+        from rasterio.features import geometry_mask
+
+        means = np.zeros(len(gdf), dtype=np.float64)
+        with rio_open(raster_path) as src:
+            arr = src.read(band)
+            transform = src.transform
+            out_shape = arr.shape
+        for i, geom in enumerate(gdf.geometry.values):
+            if geom is None or geom.is_empty:
+                continue
+            try:
+                m = geometry_mask([geom], out_shape=out_shape, transform=transform,
+                                  invert=True, all_touched=False)
+            except Exception:
+                continue
+            vals = arr[m]
+            vals = vals[vals != 0]
+            if vals.size:
+                means[i] = float(vals.mean())
+        return means
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Main pipeline
 # ─────────────────────────────────────────────────────────────────────────
@@ -326,8 +484,19 @@ def run(args: argparse.Namespace) -> int:
         print(f"[finalize] pre-vector score filter (≥{cutoff}): "
               f"{n_raw_total} → {n_after_pre_vector}")
 
+    if args.parity_mode == "geoai" and args.confidence_source == "score":
+        args.confidence_source = "existing"
+        print("[finalize] geoai parity mode: preserving mask-band confidence")
+
     # ── Vectorize ────────────────────────────────────────────────────
-    if args.merge_mode == "pixel-or":
+    if args.parity_mode == "geoai":
+        chip_gdfs = _geoai_parity_vectorize(
+            artifact,
+            output_dir=args.output_dir,
+            postproc_cfg=postproc_cfg,
+            mask_threshold=mask_threshold,
+        )
+    elif args.merge_mode == "pixel-or":
         chip_gdfs = _vectorize_pixel_or(
             artifact,
             mask_threshold=mask_threshold,
@@ -377,17 +546,30 @@ def run(args: argparse.Namespace) -> int:
     pred_metric = pred.to_crs(metric_crs)
 
     # ── Geometric properties ─────────────────────────────────────────
-    pred_metric = compute_geometric_properties(pred_metric)
+    if args.parity_mode == "geoai" and "area_m2" in pred_metric.columns:
+        # Already computed pre-reprojection in _geoai_parity_vectorize to match
+        # detect_and_evaluate.py legacy behavior.
+        pass
+    elif args.parity_mode == "geoai":
+        try:
+            import geoai
+            pred_metric = geoai.add_geometric_properties(pred_metric)
+        except Exception:
+            pred_metric = compute_geometric_properties(pred_metric)
+    else:
+        pred_metric = compute_geometric_properties(pred_metric)
 
     # ── Mask mean confidence ─────────────────────────────────────────
-    if "mask_mean_confidence_painted" in pred_metric.columns:
+    if "mask_mean_confidence" in pred_metric.columns:
+        pred_metric["mask_mean_confidence"] = pred_metric["mask_mean_confidence"].astype(float)
+    elif "mask_mean_confidence_painted" in pred_metric.columns:
         # pixel-OR mode already computed it from the merged raster
         pred_metric["mask_mean_confidence"] = pred_metric["mask_mean_confidence_painted"].astype(float)
         pred_metric = pred_metric.drop(columns=["mask_mean_confidence_painted"])
     else:
         masks_by_index = {}
         for i, row in pred_metric.iterrows():
-            if row["_mask_crop"] is not None:
+            if "_mask_crop" in pred_metric.columns and row["_mask_crop"] is not None:
                 masks_by_index[int(i)] = (row["_mask_crop"], row["_mask_offset"])
         pred_metric["mask_mean_confidence"] = compute_mask_mean_confidence(
             list(pred_metric.index), masks_by_index, mask_threshold=mask_threshold,
@@ -413,19 +595,36 @@ def run(args: argparse.Namespace) -> int:
         pred_metric.loc[group.index, "mean_b"] = mb
 
     # ── Confidence column (Phase 1: confidence = score) ─────────────
-    pred_metric["confidence"] = pred_metric[args.confidence_source].astype(float)
+    if args.confidence_source != "existing":
+        pred_metric["confidence"] = pred_metric[args.confidence_source].astype(float)
+    elif "confidence" not in pred_metric.columns:
+        raise ValueError("confidence_source=existing but no confidence column is present")
+    else:
+        pred_metric["confidence"] = pred_metric["confidence"].astype(float)
     print(f"[finalize] confidence_source = {args.confidence_source}")
 
-    # ── Post-proc filters ────────────────────────────────────────────
-    pred_filtered, stats = apply_postproc_filters(pred_metric, postproc_cfg)
-    n_after_postproc = len(pred_filtered)
-    print(f"[finalize] postproc filters: {stats}")
+    if args.parity_mode == "geoai":
+        # Legacy detect_and_evaluate.py does grid-level spatial NMS before
+        # area / elongation / confidence filters.
+        pred_nms_first = spatial_nms(pred_metric, iou_threshold=float(args.nms_iou))
+        n_after_nms_first = len(pred_nms_first)
+        print(f"[finalize] geoai-parity spatial_nms before postproc "
+              f"(IoU={args.nms_iou}): {len(pred_metric)} → {n_after_nms_first}")
+        pred_nms, stats = apply_postproc_filters(pred_nms_first, postproc_cfg)
+        n_after_postproc = len(pred_nms)
+        n_after_nms = len(pred_nms)
+        print(f"[finalize] postproc filters: {stats}")
+    else:
+        # ── Post-proc filters ────────────────────────────────────────────
+        pred_filtered, stats = apply_postproc_filters(pred_metric, postproc_cfg)
+        n_after_postproc = len(pred_filtered)
+        print(f"[finalize] postproc filters: {stats}")
 
-    # ── Grid-level spatial NMS ───────────────────────────────────────
-    pred_nms = spatial_nms(pred_filtered, iou_threshold=float(args.nms_iou))
-    n_after_nms = len(pred_nms)
-    print(f"[finalize] grid-level spatial_nms (IoU={args.nms_iou}): "
-          f"{n_after_postproc} → {n_after_nms}")
+        # ── Grid-level spatial NMS ───────────────────────────────────────
+        pred_nms = spatial_nms(pred_filtered, iou_threshold=float(args.nms_iou))
+        n_after_nms = len(pred_nms)
+        print(f"[finalize] grid-level spatial_nms (IoU={args.nms_iou}): "
+              f"{n_after_postproc} → {n_after_nms}")
 
     # ── Write outputs ────────────────────────────────────────────────
     _write_outputs(
@@ -506,6 +705,7 @@ def _write_outputs(
         "postproc_config_path": str(args.postproc_config) if args.postproc_config else "",
         "postproc_config_sha256": postproc_hash,
         "postproc_config_resolved": _stringify_for_json(postproc_cfg),
+        "parity_mode": args.parity_mode,
         "confidence_source": args.confidence_source,
         "merge_mode": args.merge_mode,
         "nms_iou": float(args.nms_iou),
@@ -534,6 +734,8 @@ def _write_outputs(
         f"- imagery_layer: {artifact.imagery_layer_id}\n"
         f"- model_run: {artifact.model_run_id}\n"
         f"- model_path: {artifact.model_path}\n\n"
+        f"- parity_mode: {args.parity_mode}\n"
+        f"- confidence_source: {args.confidence_source}\n\n"
         f"## Stage counts\n\n"
         f"| Stage | Count |\n|---|---|\n"
         f"| Raw detector output (≥ score_thresh {artifact.detector_score_threshold}) | {n_raw_total} |\n"

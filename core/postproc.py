@@ -53,6 +53,7 @@ _KNOWN_KEYS = {
     "mask_threshold",
     "post_conf_threshold",
     "min_object_area",
+    "max_object_area",
     "max_elongation",
     "min_solidity",
     "shadow_rgb_thresh",
@@ -327,6 +328,92 @@ class PaintedPolygon:
     mask_mean_confidence: float
     label: int
     contributing_detection_count: int
+
+
+def paint_geoai_parity_mask(
+    detections: list[dict],
+    *,
+    raster_height: int,
+    raster_width: int,
+    mask_threshold: float,
+    min_object_area: float,
+    max_object_area: float | None = None,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Recreate `geoai.ObjectDetector.generate_masks` two-band raster paint.
+
+    Returns `(mask_array, conf_array, n_painted)` where:
+      - band 1 / `mask_array`: binary uint8 mask values 0 or 255.
+      - band 2 / `conf_array`: detection score scaled to uint8, max-merged
+        where binary mask pixels are positive.
+
+    This intentionally follows geoai's generate-mask semantics instead of the
+    direct pipeline's soft-mask merge:
+      - threshold each detection mask before painting;
+      - filter by binary pixel area before painting;
+      - overlap mask uses max;
+      - overlap confidence updates only where new confidence is higher.
+    """
+    mask_array = np.zeros((raster_height, raster_width), dtype=np.uint8)
+    conf_array = np.zeros((raster_height, raster_width), dtype=np.uint8)
+    if raster_height <= 0 or raster_width <= 0 or not detections:
+        return mask_array, conf_array, 0
+
+    max_area = float("inf") if max_object_area is None else float(max_object_area)
+    n_painted = 0
+    threshold_value = float(mask_threshold) * 255.0
+
+    for det in detections:
+        mask = det.get("mask_chip_uint8")
+        x0_src, y0_src = det.get("chip_source_offset", det.get("source_offset", (0, 0)))
+        if mask is None:
+            # Fallback for older crop-only artifacts. This is useful for smoke
+            # tests and re-postprocessing, but exact geoai parity requires
+            # full-chip masks from detect_direct --parity-mode geoai.
+            mask = det.get("mask_crop_uint8")
+            x0_src, y0_src = det.get("source_offset", (x0_src, y0_src))
+        if mask is None or mask.size == 0:
+            continue
+
+        binary_mask = (mask > threshold_value).astype(np.uint8) * 255
+        object_area = int(np.sum(binary_mask > 0))
+        if object_area < float(min_object_area) or object_area > max_area:
+            continue
+
+        h, w = binary_mask.shape
+        x0_src = int(x0_src)
+        y0_src = int(y0_src)
+        x1_src = x0_src + int(w)
+        y1_src = y0_src + int(h)
+
+        cx0 = max(0, x0_src)
+        cy0 = max(0, y0_src)
+        cx1 = min(raster_width, x1_src)
+        cy1 = min(raster_height, y1_src)
+        if cx1 <= cx0 or cy1 <= cy0:
+            continue
+
+        crop_x0 = cx0 - x0_src
+        crop_y0 = cy0 - y0_src
+        crop_x1 = crop_x0 + (cx1 - cx0)
+        crop_y1 = crop_y0 + (cy1 - cy0)
+        binary_crop = binary_mask[crop_y0:crop_y1, crop_x0:crop_x1]
+
+        mask_view = mask_array[cy0:cy1, cx0:cx1]
+        np.maximum(mask_view, binary_crop, out=mask_view)
+
+        mask_region = binary_crop > 0
+        if mask_region.any():
+            conf_value = int(float(det.get("score", 0.0)) * 255.0)
+            current_conf = conf_array[cy0:cy1, cx0:cx1]
+            update_mask = np.logical_and(
+                mask_region,
+                np.logical_or(current_conf == 0, current_conf < conf_value),
+            )
+            if update_mask.any():
+                current_conf[update_mask] = conf_value
+                n_painted += 1
+
+    return mask_array, conf_array, n_painted
 
 
 def vectorize_chip_mask(

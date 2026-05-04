@@ -57,6 +57,10 @@ class SlidingWindowDataset(Dataset):
             yielded chip is exactly chip_size × chip_size.
         bands: source bands to read (default first 3 = RGB).
         max_chips: optional cap (smoke-test).
+        window_origin_mode: "anchored" preserves the direct pipeline's current
+            coverage rule. "geoai" reproduces geoai.CustomDataset row/column
+            start positions, including the extra padded near-edge chip before
+            the anchored last chip.
     """
 
     def __init__(
@@ -68,6 +72,7 @@ class SlidingWindowDataset(Dataset):
         edge_pad: bool = True,
         bands: Sequence[int] = (1, 2, 3),
         max_chips: int | None = None,
+        window_origin_mode: str = "anchored",
     ) -> None:
         if not tif_paths:
             raise ValueError("tile_paths is empty")
@@ -81,8 +86,14 @@ class SlidingWindowDataset(Dataset):
         self.overlap = float(overlap)
         self.edge_pad = bool(edge_pad)
         self.bands = tuple(int(b) for b in bands)
+        self.window_origin_mode = window_origin_mode
         if len(self.bands) != 3:
             raise ValueError(f"bands must specify exactly 3 RGB bands; got {self.bands}")
+        if self.window_origin_mode not in {"anchored", "geoai"}:
+            raise ValueError(
+                "window_origin_mode must be 'anchored' or 'geoai': "
+                f"got {self.window_origin_mode!r}"
+            )
 
         # Pre-compute all (tif_index, window) pairs.
         self._items: list[tuple[int, Window]] = []
@@ -195,19 +206,38 @@ class SlidingWindowDataset(Dataset):
         stride = self._stride
         cs = self.chip_size
 
-        if width <= cs:
-            col_offsets = [0]
-        else:
-            col_offsets = list(range(0, width - cs + 1, stride))
-            if col_offsets[-1] + cs < width:
-                col_offsets.append(width - cs)
+        if self.window_origin_mode == "geoai":
+            # Matches geoai.extract.CustomDataset:
+            #   for c in range((width - 1) // stride): starts.append(c * stride)
+            #   if width > chip: starts.append(width - chip)
+            # This intentionally includes a padded partial near-edge chip
+            # (e.g. origin 7200 for a 7524px raster) before the anchored last
+            # full chip (7124). The order is also preserved.
+            col_offsets = [c * stride for c in range((width - 1) // stride)]
+            if width > cs:
+                col_offsets.append(max(0, width - cs))
+            elif not col_offsets:
+                col_offsets.append(0)
 
-        if height <= cs:
-            row_offsets = [0]
+            row_offsets = [r * stride for r in range((height - 1) // stride)]
+            if height > cs:
+                row_offsets.append(max(0, height - cs))
+            elif not row_offsets:
+                row_offsets.append(0)
         else:
-            row_offsets = list(range(0, height - cs + 1, stride))
-            if row_offsets[-1] + cs < height:
-                row_offsets.append(height - cs)
+            if width <= cs:
+                col_offsets = [0]
+            else:
+                col_offsets = list(range(0, width - cs + 1, stride))
+                if col_offsets[-1] + cs < width:
+                    col_offsets.append(width - cs)
+
+            if height <= cs:
+                row_offsets = [0]
+            else:
+                row_offsets = list(range(0, height - cs + 1, stride))
+                if row_offsets[-1] + cs < height:
+                    row_offsets.append(height - cs)
 
         for r in row_offsets:
             for c in col_offsets:
