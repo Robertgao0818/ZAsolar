@@ -1,0 +1,33 @@
+# GEID historical PV anchor-presence defaults.
+# Existing aerial/Vexcel masks are used as anchors, not exact historical masks.
+
+anchor_manifest:
+  chip_min_half_m: 18.0
+  chip_max_half_m: 45.0
+  mask_margin_m: 8.0
+  search_radius_m: 10.0
+  anchor_policy: gt_centroid_buffered_bbox
+
+geid_download:
+  zoom_from: 21
+  zoom_to: 21
+  requested_date_month_day: "06-15"
+  save_root_win: "D:\\ZAsolar\\geid_raw\\temporal_pv"
+  downloader_bridge: "/home/gaosh/projects/geid_reverse_engineering/python/geid_historical_cli_batch.py"
+
+presence_scoring:
+  task_type: anchor_conditioned_binary_presence
+  default_threshold: 0.5
+  shifted_crop_aggregation: max_or_topk_mean
+  use_exact_source_mask_for_history: false
+  ambiguity_flags:
+    - missing_chip
+    - no_date_metadata
+    - large_best_offset
+    - cloud_shadow
+    - nonmonotonic_timeseries
+
+breakpoint_inference:
+  min_consecutive_present: 1
+  use_capture_date_before_requested_date: true
+  monotonicity_policy: flag_later_absence_as_ambiguous
