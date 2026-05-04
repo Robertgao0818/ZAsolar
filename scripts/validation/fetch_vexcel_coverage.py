@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -18,25 +19,15 @@ DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "datasets" / "vexcel_urban_coverage.
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "vexcel_coverage"
 DEFAULT_ENV = PROJECT_ROOT / ".env"
 
+sys.path.insert(0, str(PROJECT_ROOT))
+from core.vexcel_auth import load_env, resolve_token  # noqa: E402
+
 
 def display_path(path: Path) -> str:
     try:
         return str(path.relative_to(PROJECT_ROOT))
     except ValueError:
         return str(path)
-
-
-def load_env(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.exists():
-        return values
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
-    return values
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -107,9 +98,7 @@ def main() -> None:
 
     env = load_env(args.env_file)
     base_url = env.get("VEXCEL_API_BASE", "https://api.vexcelgroup.com/v2")
-    token = env.get("VEXCEL_TOKEN")
-    if not token:
-        raise RuntimeError(f"VEXCEL_TOKEN not found in {args.env_file}")
+    token = resolve_token(env, base_url)
 
     config = load_config(args.config)
     selected = set(args.regions or config["regions"].keys())

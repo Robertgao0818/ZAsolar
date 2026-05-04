@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,6 +20,9 @@ from shapely.geometry import box
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV = PROJECT_ROOT / ".env"
+
+sys.path.insert(0, str(PROJECT_ROOT))
+from core.vexcel_auth import load_env, resolve_token  # noqa: E402
 DEFAULT_SAMPLE = PROJECT_ROOT / "data" / "vexcel_eval_samples" / "vexcel_eval_grids_seed42_per_region10.csv"
 DEFAULT_GRID_DIR = PROJECT_ROOT / "data" / "vexcel_task_grids"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "tiles" / "vexcel_eval_60_seed42"
@@ -32,19 +36,6 @@ def display_path(path: Path) -> str:
         return str(path.relative_to(PROJECT_ROOT))
     except ValueError:
         return str(path)
-
-
-def load_env(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    if not path.exists():
-        return values
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
-    return values
 
 
 def iter_tile_geometries(geom, tile_size_deg: float):
@@ -203,10 +194,8 @@ def write_region_boundaries(sample: pd.DataFrame, grid_dir: Path, output_root: P
 
 def download_sample(args: argparse.Namespace) -> pd.DataFrame:
     env = load_env(args.env_file)
-    token = env.get("VEXCEL_TOKEN")
-    if not token:
-        raise RuntimeError(f"VEXCEL_TOKEN not found in {args.env_file}")
     base_url = env.get("VEXCEL_API_BASE", "https://api.vexcelgroup.com/v2")
+    token = resolve_token(env, base_url)
 
     sample = pd.read_csv(args.sample_csv)
     if args.regions:
