@@ -323,5 +323,85 @@
     "timestamp": "2026-04-28T10:22:05Z",
     "source": "commit:8d9adbbf",
     "summary": "feat(analysis): v2 cascade holdout runner + TP-lost overlap breakdown"
+  },
+  {
+    "timestamp": "2026-04-28T10:22:18Z",
+    "source": "commit:d5500931",
+    "summary": "docs(progress): sync grouped commit log"
+  },
+  {
+    "timestamp": "2026-04-28T11:42:54Z",
+    "source": "commit:db6737fb",
+    "summary": "fix(analysis): v2 cascade holdout uses eval-only mode + per-region tiles_root"
+  },
+  {
+    "timestamp": "2026-04-28T11:43:03Z",
+    "source": "commit:d162a0a9",
+    "summary": "feat(analysis): TP-lost gallery v2 mode with per-imagery thresholds"
+  },
+  {
+    "timestamp": "2026-04-29T12:11:42Z",
+    "source": "commit:abe93114",
+    "summary": "feat(inference): shared postproc + raw artifact + tile dataset modules"
+  },
+  {
+    "timestamp": "2026-04-29T12:12:24Z",
+    "source": "commit:dcc78105",
+    "summary": "feat(inference): direct Mask R-CNN pipeline (detect_direct + finalize + eval)"
+  },
+  {
+    "timestamp": "2026-04-30T11:47:00Z",
+    "source": "session",
+    "summary": "Daily log 2026-04-30: JHB CBD Vexcel CH1 review + SAM FN GUI fixes"
+  },
+  {
+    "timestamp": "2026-05-01T11:43:00Z",
+    "source": "session",
+    "summary": "Daily log 2026-05-01: continue JHB CBD Vexcel CH1 review and export checks"
+  },
+  {
+    "timestamp": "2026-05-02T11:47:00Z",
+    "source": "session",
+    "summary": "Daily log 2026-05-02: JHB CBD Vexcel recall analysis + SAM FN clustering口径"
+  },
+  {
+    "timestamp": "2026-05-03T11:11:00Z",
+    "source": "session",
+    "summary": "Daily log 2026-05-03: JHB Vexcel large-array recall, geoai-parity, clean GT policy"
+  },
+  {
+    "timestamp": "2026-05-04T11:31:30Z",
+    "source": "commit:8abfd9d5",
+    "summary": "feat(vexcel): JHB CBD 25-grid Vexcel 2024 ortho download pipeline"
+  },
+  {
+    "timestamp": "2026-05-04T11:31:38Z",
+    "source": "commit:825072b4",
+    "summary": "feat(validation): GEID vintage probe across 6 cities × 12 years"
+  },
+  {
+    "timestamp": "2026-05-04T11:31:47Z",
+    "source": "commit:5a514aa7",
+    "summary": "feat(validation): Channel 1 stratified precision sampler + computer"
+  },
+  {
+    "timestamp": "2026-05-04T11:32:04Z",
+    "source": "commit:996bc9ba",
+    "summary": "data(channel2): JHB CBD 25-grid clean GT for exhaustive recall"
+  },
+  {
+    "timestamp": "2026-05-04T11:32:45Z",
+    "source": "commit:503fdcf0",
+    "summary": "feat(inference): geoai-parity finalize path + window-origin mode + review tweaks"
+  },
+  {
+    "timestamp": "2026-05-04T11:32:56Z",
+    "source": "commit:d3cf3944",
+    "summary": "ops(runpod): Vexcel JHB CBD 25-grid batch + pack-and-pull helpers"
+  },
+  {
+    "timestamp": "2026-05-04T11:33:04Z",
+    "source": "commit:f432e367",
+    "summary": "chore(config): register Vexcel 2024 imagery layer + V3-C/V4.1 model runs"
   }
 ]
