@@ -52,16 +52,23 @@ def parse_args():
     return p.parse_args()
 
 
-def find_chunk_for_geom(grid_id, tiles_root, cent_4326):
+def find_chunk_for_geom(grid_id, tiles_root, cent_metric):
+    """Locate the chunk containing `cent_metric` (Point in METRIC_CRS).
+
+    Reprojects the centroid to each chunk's CRS so this works regardless of
+    whether the chunks are EPSG:4326 (aerial_2023) or EPSG:3857 (vexcel_2024).
+    """
     grid_dir = tiles_root / grid_id
     if not grid_dir.is_dir():
         return None
-    cx, cy = cent_4326.x, cent_4326.y
+    cent_series = gpd.GeoSeries([cent_metric], crs=METRIC_CRS)
     for tif in grid_dir.glob(f"{grid_id}_*_*_geo.tif"):
         with rasterio.open(tif) as src:
             b = src.bounds
-            if b.left <= cx <= b.right and b.bottom <= cy <= b.top:
-                return tif
+            chunk_crs = str(src.crs)
+        c = cent_series.to_crs(chunk_crs).iloc[0]
+        if b.left <= c.x <= b.right and b.bottom <= c.y <= b.top:
+            return tif
     return None
 
 
@@ -123,7 +130,6 @@ def run_one_grid(grid_id, src_root, tiles_root, out_root, processor, model, devi
     if len(preds) == 0:
         return {"grid": grid_id, "n_in": 0, "n_out": 0}
 
-    preds_4326 = preds.to_crs("EPSG:4326")
     out_records = []
     n_in = len(preds)
     n_no_chunk = 0
@@ -133,8 +139,7 @@ def run_one_grid(grid_id, src_root, tiles_root, out_root, processor, model, devi
         geom_metric = row.geometry
         if geom_metric is None or geom_metric.is_empty:
             continue
-        cent_4326 = preds_4326.iloc[i].geometry.centroid
-        chunk = find_chunk_for_geom(grid_id, tiles_root, cent_4326)
+        chunk = find_chunk_for_geom(grid_id, tiles_root, geom_metric.centroid)
         if chunk is None:
             n_no_chunk += 1
             continue
