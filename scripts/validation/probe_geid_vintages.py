@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# DEPRECATED 2026-05-05: Migrated to solar_backdating subrepo (V1.4 sub-line pivot).
+# Authoritative copy: /home/gaosh/projects/solar_backdating/scripts/validation/probe_geid_vintages.py
+# This file is frozen; scheduled for removal after 2026-05-31. Bug fixes go to subrepo first.
 """Generate GEID probe tasks to map historical vintage availability per Vexcel city.
 
 The install-date back-dating sub-line requires a GEID time-stack per detected
@@ -42,7 +45,7 @@ DEFAULT_SAMPLE_CSV = (
 )
 DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "geid_vintage_probe" / "probe_tasks.csv"
 DEFAULT_ANCHORS = PROJECT_ROOT / "data" / "geid_vintage_probe" / "probe_anchors.csv"
-DEFAULT_SAVE_ROOT = r"D:\ZAsolar\geid_raw\vintage_probe"
+DEFAULT_SAVE_ROOT = str(Path.home() / "zasolar_data" / "geid_raw" / "vintage_probe")
 DEFAULT_BBOX_HALF_M = 100.0
 DEFAULT_PROBE_DATE_MONTH_DAY = "06-15"
 DEFAULT_ZOOM_FROM = 18
@@ -63,7 +66,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sample-csv", type=Path, default=DEFAULT_SAMPLE_CSV)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="GEID probe task CSV.")
     parser.add_argument("--anchors-csv", type=Path, default=DEFAULT_ANCHORS, help="Anchor manifest CSV.")
-    parser.add_argument("--save-root", default=DEFAULT_SAVE_ROOT, help="Windows root passed to GEID 'Save to' field.")
+    parser.add_argument(
+        "--save-root",
+        default=DEFAULT_SAVE_ROOT,
+        help="Root for GEID probe task folders. Defaults to WSL canonical ~/zasolar_data; pass a Windows/UNC path explicitly only for Windows downloader staging.",
+    )
     parser.add_argument(
         "--years",
         type=int,

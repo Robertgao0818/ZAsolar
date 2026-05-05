@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# DEPRECATED 2026-05-05: Migrated to solar_backdating subrepo (V1.4 sub-line pivot).
+# Authoritative copy: /home/gaosh/projects/solar_backdating/scripts/temporal/export_geid_temporal_tasks.py
+# This file is frozen; scheduled for removal after 2026-05-31. Bug fixes go to subrepo first.
 """Export GEID historical download tasks from temporal PV anchors.
 
 The output CSV is compatible with
@@ -24,7 +27,7 @@ from scripts.temporal.geid_temporal_common import (
 
 DEFAULT_ANCHORS = PROJECT_ROOT / "data" / "geid_temporal" / "anchors.csv"
 DEFAULT_OUTPUT = PROJECT_ROOT / "data" / "geid_temporal" / "geid_tasks.csv"
-DEFAULT_SAVE_ROOT_WIN = r"D:\ZAsolar\geid_raw\temporal_pv"
+DEFAULT_SAVE_ROOT = Path.home() / "zasolar_data" / "geid_raw" / "temporal_anchor_presence"
 TASK_FIELDS = [
     "grid_id",
     "task_name",
@@ -47,7 +50,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dates", nargs="*", help="Explicit requested dates, YYYY-MM-DD.")
     parser.add_argument("--years", nargs=2, type=int, metavar=("START", "END"), help="Inclusive year range if --dates is not given.")
     parser.add_argument("--date-md", default="06-15", help="Month-day for --years mode. Default: 06-15")
-    parser.add_argument("--save-root-win", default=DEFAULT_SAVE_ROOT_WIN, help="Windows root passed to GEID downloader.exe.")
+    parser.add_argument(
+        "--save-root",
+        default=str(DEFAULT_SAVE_ROOT),
+        help="Root for downloaded GEID task folders. Defaults to WSL canonical ~/zasolar_data. "
+        "Pass a Windows/UNC path explicitly only for Windows downloader staging.",
+    )
+    parser.add_argument(
+        "--save-root-win",
+        dest="save_root",
+        help="Deprecated alias for --save-root; retained for old command lines.",
+    )
     parser.add_argument("--zoom-from", type=int, default=21)
     parser.add_argument("--zoom-to", type=int, default=21)
     parser.add_argument("--limit-anchors", type=int, help="Optional cap for smoke/dry-run task exports.")
@@ -74,7 +87,7 @@ def main() -> None:
     rows = build_geid_task_rows(
         anchors,
         dates,
-        save_root_win=args.save_root_win,
+        save_root_win=args.save_root,
         zoom_from=args.zoom_from,
         zoom_to=args.zoom_to,
     )

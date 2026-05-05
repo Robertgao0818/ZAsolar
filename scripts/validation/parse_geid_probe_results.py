@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# DEPRECATED 2026-05-05: Migrated to solar_backdating subrepo (V1.4 sub-line pivot).
+# Authoritative copy: /home/gaosh/projects/solar_backdating/scripts/validation/parse_geid_probe_results.py
+# This file is frozen; scheduled for removal after 2026-05-31. Bug fixes go to subrepo first.
 """Parse GEID vintage-probe download results into a vintage-availability table.
 
 After running scripts/validation/probe_geid_vintages.py and feeding its output
@@ -33,7 +36,7 @@ Outputs:
 
 Usage:
   python scripts/validation/parse_geid_probe_results.py \\
-      --geid-root /mnt/d/ZAsolar/geid_raw/vintage_probe \\
+      --geid-root ~/zasolar_data/geid_raw/vintage_probe \\
       --anchors-csv data/geid_vintage_probe/probe_anchors.csv
 """
 
@@ -51,7 +54,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ANCHORS = PROJECT_ROOT / "data" / "geid_vintage_probe" / "probe_anchors.csv"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "geid_vintage_probe" / "results"
-DEFAULT_GEID_ROOT_WSL = Path("/mnt/d/ZAsolar/geid_raw/vintage_probe")
+DEFAULT_GEID_ROOT_WSL = Path.home() / "zasolar_data" / "geid_raw" / "vintage_probe"
 JPEG_SOI = b"\xff\xd8\xff"
 COMMENT_RE = re.compile(rb"\*AD\*(\d{4}):(\d{2}):(\d{2})\*")
 

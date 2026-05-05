@@ -1,3 +1,6 @@
+# DEPRECATED 2026-05-05: Migrated to solar_backdating subrepo (V1.4 sub-line pivot).
+# Authoritative copy: /home/gaosh/projects/solar_backdating/scripts/temporal/geid_temporal_common.py
+# This file is frozen; scheduled for removal after 2026-05-31. Bug fixes go to subrepo first.
 from __future__ import annotations
 
 import csv
@@ -282,13 +285,26 @@ def safe_task_token(value: object, *, max_len: int = 120) -> str:
     return token[:max_len]
 
 
-def win_join(root: str, *parts: object) -> str:
-    out = root.rstrip("\\/")
+def join_task_root(root: str, *parts: object) -> str:
+    """Join GEID task output path parts while preserving root path style.
+
+    Canonical local storage is WSL/POSIX under ``~/zasolar_data``.  Windows
+    drive and UNC roots are still supported for explicit downloader staging.
+    """
+    root_text = str(root).strip()
+    use_backslash = bool(re.match(r"^[A-Za-z]:[\\/]", root_text)) or root_text.startswith("\\\\")
+    sep = "\\" if use_backslash else "/"
+    out = root_text.rstrip("\\/")
     for part in parts:
         token = str(part).strip().strip("\\/")
         if token:
-            out += "\\" + token
+            out += sep + token
     return out
+
+
+def win_join(root: str, *parts: object) -> str:
+    """Backward-compatible wrapper for older callers/tests."""
+    return join_task_root(root, *parts)
 
 
 def build_geid_task_rows(
@@ -323,7 +339,7 @@ def build_geid_task_rows(
                 {
                     "grid_id": anchor_id,
                     "task_name": task_name,
-                    "save_to": win_join(save_root_win, region, grid_id, safe_task_token(anchor_id), str(d.year)),
+                    "save_to": join_task_root(save_root_win, region, grid_id, safe_task_token(anchor_id), str(d.year)),
                     "map_type": "",
                     "date": d.isoformat(),
                     "zoom_from": zoom_from,

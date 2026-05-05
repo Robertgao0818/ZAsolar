@@ -1,6 +1,8 @@
 # Architecture — Cape Town Solar Panel Detection
 
-> **V1.4 (2026-04-22)**: Success metric reframes from per-polygon F1 to aggregate installation inventory at grid level, suited for economic analysis. Sub-repo `geid_bbox` pivots from GEID free detection to location-conditioned install-date back-dating. Validation framework: four channels (stratified precision, exhaustive recall, plausibility, opportunistic external) with task grid as primary aggregation unit. See [`validation_strategy.md`](validation_strategy.md) for the full spec.
+> **V1.4 (2026-04-22)**: Success metric reframes from per-polygon F1 to aggregate installation inventory at grid level, suited for economic analysis. Sub-repo split landed 2026-05-05: install-date back-dating moved to **`solar_backdating`** at `/home/gaosh/projects/solar_backdating/` (plugin of this repo via shared venv + PYTHONPATH; old `geid_bbox` GEID free-detection prototype archived under `/home/gaosh/projects/_archive/geid_bbox_legacy_2026-05-05/`). Validation framework: four channels (stratified precision, exhaustive recall, plausibility, opportunistic external) with task grid as primary aggregation unit. See [`validation_strategy.md`](validation_strategy.md) for the full spec.
+>
+> Main-repo copies of `scripts/temporal/`, `scripts/validation/{probe_geid_vintages,parse_geid_probe_results,run_geid_vintage_probe}.*`, and `tests/temporal/` are frozen with deprecation headers; scheduled for removal after 2026-05-31. Bug fixes go to `solar_backdating` first.
 >
 > **V1.3 (2026-04-03)**: Task definition updated from installation-level footprint segmentation to reviewed prediction footprint segmentation. `installation` evaluation profile name preserved; GT annotations still follow installation-level rules. Some sections below may reference historical V1.2 conventions.
 

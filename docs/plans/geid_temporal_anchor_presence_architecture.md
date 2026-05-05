@@ -1,5 +1,9 @@
 # GEID Temporal Anchor-Presence Detection Architecture
 
+> **DEPRECATED 2026-05-05.** Migrated to solar_backdating subrepo (V1.4 sub-line pivot).
+> Authoritative copy: `/home/gaosh/projects/solar_backdating/docs/geid_temporal_anchor_presence_architecture.md`.
+> This file is frozen; scheduled for removal after 2026-05-31. Edits go to subrepo first.
+
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task if this evolves beyond the initial skeleton.
 
 **Goal:** Infer rooftop PV installation timing by anchoring on known installation locations, downloading GEID historical chips, scoring PV presence/absence per capture date, and finding the first stable absent→present breakpoint.
@@ -115,20 +119,39 @@ Required fields:
 - Fill `pv_present` manually for smoke tests.
 - Validate breakpoint inference before training anything.
 
-### Phase 1: anchor-conditioned binary classifier
+### Phase 1: anchor-conditioned presence classifier
 
 Input: buffered RGB chip centered near an existing GT installation.
 
-Output: PV present probability.
+Output: three-class frame decision:
+
+- `present`: PV is visibly present near the anchor.
+- `absent`: imagery is readable and PV is not visible near the anchor.
+- `unusable`: imagery is too blurred, low-resolution, shadowed, mixed-date, missing, or otherwise not reliable enough to score as present/absent.
 
 Recommended robustness:
 
 - Use chip context larger than the GT mask.
-- Evaluate shifted crops around the anchor within `search_radius_m`.
-- Aggregate by `max` or top-k mean score to tolerate offset.
+- Evaluate shifted crops / patch tokens around the anchor within `search_radius_m`.
+- Freeze the first search-window geometry for reproducibility: start with a 3×3 patch-token grid around the anchor for DINOv2 ViT-S/14 at GEID z=21; revise only through an explicit experiment note if GSD/source changes demand it.
+- Aggregate by top-k mean score (`k=2` or `k=3`) rather than raw max, to reduce single-patch artifact sensitivity.
 - Keep an `alignment_score`/`best_offset_m` so large shifts can be flagged.
 
 This is preferred over immediately running Mask R-CNN segmentation on historical GEID because the temporal objective is binary presence, not exact footprint segmentation.
+
+Backbone order for the first real scoring experiment:
+
+1. LightGBM on handcrafted visual + metadata features, as the no-GPU floor.
+2. DINOv2 ViT-S/14 frozen encoder with patch-token MIL / top-k pooling and a small three-class MLP head.
+3. ConvNeXt-Tiny frozen encoder as the CNN local-texture baseline.
+
+Do not use a Siamese / change-detection architecture in Phase 1. The project has spatial anchors, not a same-sensor current GEID reference image for every anchor. Current aerial/Vexcel imagery is useful for anchor geometry, but cross-sensor difference features are expected to be dominated by sensor/domain gap.
+
+Calibration policy:
+
+- Calibrate `present` probabilities before temporal inference; do not feed raw softmax scores directly to breakpoint logic.
+- Use per-vintage-source temperature scaling at minimum, separating CBD GEID aerial-mosaic style from non-CBD true satellite style when labels are available.
+- Keep calibration separate from the monotonic time-series smoother so classifier calibration errors remain diagnosable.
 
 ### Phase 2: detector fallback
 
@@ -149,6 +172,7 @@ Mitigations:
 3. Use shifted-crop or detector max-pooling for binary presence.
 4. Store `best_offset_m` where possible; if best offset exceeds a threshold, mark `ambiguous` rather than forcing a date.
 5. Use monotonic time-series logic: real PV installation should not repeatedly disappear/reappear unless imagery/model quality is bad.
+6. Prefer strict monotonic / isotonic temporal smoothing over unconstrained changepoint fitting. If non-monotonic segments concentrate in poor-quality vintages, output `ambiguous_nonmonotonic` instead of forcing a breakpoint.
 
 ## 5. Minimal implementation tasks
 
@@ -170,7 +194,20 @@ Create `scripts/temporal/export_geid_temporal_tasks.py`.
 - Expand requested years/dates.
 - Export a CSV compatible with `geid_historical_cli_batch.py`.
 
-### Task 3: Presence schema and breakpoint inference
+### Task 3: Presence template / Phase-0 manual scoring bridge
+
+Create `scripts/temporal/score_anchor_presence.py`.
+
+- Read `anchors.csv` and `geid_tasks.csv`.
+- Resolve each GEID task output directory (`save_to` + `task_name`), including Windows `D:\...` roots translated to WSL `/mnt/d/...` paths.
+- Scan downloaded JPGs and parse embedded GEID capture dates (`*AD*YYYY:MM:DD*`).
+- Emit `presence_timeseries.csv` rows with `decision_source=manual_template` and blank `pv_present` / `pv_score` for human review.
+- The QA gallery must expose `present`, `absent`, `unusable`, and `unsure` labels. `unusable` and `unsure` rows keep `pv_present` blank so they do not become false absences.
+- Emit explicit `missing_chip` rows instead of guessing absence when downloads are absent.
+- Optionally merge a manually reviewed decisions CSV into the same schema.
+- Optionally write a local HTML QA gallery for small smoke batches.
+
+### Task 4: Presence schema and breakpoint inference
 
 Create `scripts/temporal/infer_install_dates.py` plus shared pure functions.
 
@@ -179,11 +216,12 @@ Create `scripts/temporal/infer_install_dates.py` plus shared pure functions.
 - Infer latest absent / earliest present interval.
 - Flag non-monotonic or sparse ambiguous sequences.
 
-### Task 4: Verification smoke
+### Task 5: Verification smoke
 
-- Unit-test breakpoint inference and task-row generation.
+- Unit-test breakpoint inference, task-row generation, and presence-template generation.
 - Dry-run anchor generation on one Joburg grid.
 - Dry-run GEID task CSV for 2 anchors × 2 dates.
+- Build a tiny manual presence template/QA page from synthetic or downloaded chips.
 - Do not run large downloads by default.
 
 ## 6. Acceptance criteria for the skeleton

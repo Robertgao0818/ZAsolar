@@ -1,3 +1,6 @@
+# DEPRECATED 2026-05-05: Migrated to solar_backdating subrepo (V1.4 sub-line pivot).
+# Authoritative copy: /home/gaosh/projects/solar_backdating/tests/temporal/test_geid_temporal_common.py
+# This file is frozen; scheduled for removal after 2026-05-31. Bug fixes go to subrepo first.
 import csv
 import tempfile
 import unittest
@@ -8,6 +11,7 @@ from scripts.temporal.geid_temporal_common import (
     PresenceObservation,
     build_geid_task_rows,
     infer_install_interval,
+    join_task_root,
     observation_from_row,
     read_csv_rows,
     write_csv_rows,
@@ -64,7 +68,15 @@ class TemporalCommonTests(unittest.TestCase):
         self.assertEqual(interval.status, "ambiguous_nonmonotonic")
         self.assertEqual(interval.confidence, "low")
 
-    def test_build_geid_task_rows(self):
+    def test_join_task_root_preserves_posix_and_windows_styles(self):
+        self.assertEqual(join_task_root("/home/gaosh/zasolar_data/geid_raw", "a", "b"), "/home/gaosh/zasolar_data/geid_raw/a/b")
+        self.assertEqual(join_task_root(r"D:\ZAsolar\geid_raw", "a", "b"), r"D:\ZAsolar\geid_raw\a\b")
+        self.assertEqual(
+            join_task_root(r"\\wsl.localhost\Ubuntu\home\gaosh\zasolar_data", "a", "b"),
+            r"\\wsl.localhost\Ubuntu\home\gaosh\zasolar_data\a\b",
+        )
+
+    def test_build_geid_task_rows_uses_posix_canonical_root(self):
         anchors = [
             {
                 "anchor_id": "johannesburg_G0922_a000001",
@@ -79,7 +91,7 @@ class TemporalCommonTests(unittest.TestCase):
         rows = build_geid_task_rows(
             anchors,
             ["2019-06-15", "2020-06-15"],
-            save_root_win=r"D:\ZAsolar\geid_raw\temporal_pv",
+            save_root_win="/home/gaosh/zasolar_data/geid_raw/temporal_anchor_presence",
             zoom_from=21,
             zoom_to=21,
         )
@@ -87,7 +99,7 @@ class TemporalCommonTests(unittest.TestCase):
         self.assertEqual(rows[0]["task_name"], "johannesburg_G0922_a000001_20190615")
         self.assertEqual(rows[0]["top_latitude"], "-26.1000000000")
         self.assertEqual(rows[0]["bottom_latitude"], "-26.2000000000")
-        self.assertIn(r"johannesburg\G0922\johannesburg_G0922_a000001\2019", rows[0]["save_to"])
+        self.assertIn("johannesburg/G0922/johannesburg_G0922_a000001/2019", rows[0]["save_to"])
 
     def test_csv_write_read_round_trip(self):
         with tempfile.TemporaryDirectory() as td:

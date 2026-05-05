@@ -3,13 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-05-05: feat(validation): Channel 2 exhaustive recall script for 25-grid clean GT
+- 2026-05-04: Daily log 2026-05-04: GEID temporal scaffold + JHB Vexcel Ch2/Ch3/SAM validation
+- 2026-05-04: docs(progress): final log sync + de-dupe duplicate entry
 - 2026-05-04: docs(progress): sync grouped commit log
+- 2026-05-04: feat(temporal): GEID anchor-presence install-date inference scaffold
 - 2026-05-04: feat(temporal): GEID anchor-presence install-date inference scaffold
 - 2026-05-04: docs(progress): week 2026-04-27 daily logs + weekly-summary skill
 - 2026-05-04: chore(config): register Vexcel 2024 imagery layer + V3-C/V4.1 model runs
-- 2026-05-04: ops(runpod): Vexcel JHB CBD 25-grid batch + pack-and-pull helpers
-- 2026-05-04: feat(inference): geoai-parity finalize path + window-origin mode + review tweaks
-- 2026-05-04: data(channel2): JHB CBD 25-grid clean GT for exhaustive recall
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
@@ -214,7 +215,9 @@ Reframes the project's success metric for **economically usable** inventory use 
 
 ### Goal restatement
 - **Main repo**: produce a per-region installation inventory where **aggregate counts per grid are unbiased**. Precision and recall serve the aggregate, not individual polygons.
-- **Sub-repo (geid_bbox)**: pivot from GEID free detection to **location-conditioned temporal back-dating** — given a main-repo high-confidence installation, estimate install date from the GEID historical stack.
+- **Sub-repo (`solar_backdating`)**: pivot from GEID free detection to **location-conditioned temporal back-dating** — given a main-repo high-confidence installation, estimate install date from the GEID historical stack.
+  - 2026-05-05: subrepo split landed at `/home/gaosh/projects/solar_backdating/` (plugin of main repo via shared venv + PYTHONPATH; imports `core.*` from main repo). Replaces the now-archived `geid_bbox` GEID free-detection prototype (cold archive at `/home/gaosh/projects/_archive/geid_bbox_legacy_2026-05-05/`).
+  - Main-repo copies of `scripts/temporal/*`, `scripts/validation/{probe_geid_vintages,parse_geid_probe_results,run_geid_vintage_probe}.*`, and `tests/temporal/*` are frozen with deprecation headers; scheduled for removal **after 2026-05-31**. Bug fixes go to subrepo first.
 
 ### Four-channel validation (primary aggregation unit = task grid)
 1. **Stratified RA precision audit** — sample detected polygons by (region × grid_type), RA adjudicates, report precision ± CI per stratum.
@@ -237,11 +240,12 @@ Bonus Channel 5 — **temporal consistency** via sub-repo install-date estimator
 - [ ] `configs/postproc/v4_high.json` + `v4_agg.json` + calibration script
 - [ ] `docs/experiments/exp_validation_v1_4.md` — running log of channel results
 
-### Sub-repo pivot (geid_bbox)
-- Existing GEID free-detection work frozen as baseline (`git tag baseline-free-detection`, README deprecation notice)
-- New module `geid_bbox/install_date/`: binary patch classifier (installed / not installed) + first-appearance estimator on GEID temporal stack
-- Input: main-repo `v4_high.json` output `(lat, lon, footprint, grid_id)`
-- Output: `(anchor_id, install_date, confidence)` + `install_date_MAE` vs spot-checked GT
+### Sub-repo pivot (`solar_backdating`)
+- Old `geid_bbox` GEID free-detection prototype archived under `/home/gaosh/projects/_archive/geid_bbox_legacy_2026-05-05/` (no git, cold reference only).
+- New repo `solar_backdating` (V1.4 install-date sub-line) at `/home/gaosh/projects/solar_backdating/`. Plugin runtime: shares main-repo `.venv` + imports `core.*` via `PYTHONPATH`; data lives in `~/zasolar_data/`. Identity, runtime contract, and dependency surface in `solar_backdating/{AGENTS.md,CLAUDE.md,SHARED_FROM_ZASOLAR.md}`.
+- New module `src/solar_backdating/install_date/` (planned): binary patch classifier (installed / not installed) + first-appearance estimator on GEID temporal stack.
+- Input: main-repo `v4_high.json` output `(lat, lon, footprint, grid_id)`.
+- Output: `(anchor_id, install_date, confidence)` + `install_date_MAE` vs spot-checked GT.
 
 ### Decision log
 - Per-polygon F1 remains as **diagnostic** metric (continuity with V1.2/V1.3 reports); no longer the headline.

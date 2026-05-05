@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# DEPRECATED 2026-05-05: Migrated to solar_backdating subrepo (V1.4 sub-line pivot).
+# Authoritative copy: /home/gaosh/projects/solar_backdating/scripts/temporal/infer_install_dates.py
+# This file is frozen; scheduled for removal after 2026-05-31. Bug fixes go to subrepo first.
 """Infer PV installation intervals from binary historical presence observations.
 
 Input CSV schema is intentionally simple and model-agnostic. Required columns:

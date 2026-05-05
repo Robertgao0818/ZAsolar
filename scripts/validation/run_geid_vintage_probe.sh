@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# DEPRECATED 2026-05-05: Migrated to solar_backdating subrepo (V1.4 sub-line pivot).
+# Authoritative copy: /home/gaosh/projects/solar_backdating/scripts/validation/run_geid_vintage_probe.sh
+# This file is frozen; scheduled for removal after 2026-05-31. Bug fixes go to subrepo first.
 # Drive Allmapsoft GEID 6.48 downloader.exe headlessly from WSL over the
 # vintage-probe task CSV. Each row → one CLI invocation with the [date]
 # positional arg (historical-imagery flow).
@@ -18,6 +21,7 @@ TASKS_CSV="${TASKS_CSV:-/home/gaosh/projects/ZAsolar/data/geid_vintage_probe/pro
 DOWNLOADER="${DOWNLOADER:-/mnt/c/allmapsoft/geid/downloader.exe}"
 LOG_DIR="${LOG_DIR:-/home/gaosh/projects/ZAsolar/data/geid_vintage_probe/run_logs}"
 PER_TASK_TIMEOUT="${PER_TASK_TIMEOUT:-180}"
+WSL_DISTRO_FOR_UNC="${WSL_DISTRO_FOR_UNC:-Ubuntu}"
 
 mkdir -p "$LOG_DIR"
 LOG_FILE="$LOG_DIR/run_$(date +%Y%m%d_%H%M%S).jsonl"
@@ -37,8 +41,19 @@ while IFS=, read -r grid_id task_name save_to map_type date zoom_from zoom_to L 
     if [[ "$grid_id" == "grid_id" ]]; then continue; fi
     idx=$((idx + 1))
 
-    # Convert Windows save_to to WSL path for existence check
-    wsl_save=$(echo "$save_to" | sed -E 's|^D:|/mnt/d|; s|\\|/|g')
+    # save_to is canonical WSL/POSIX by default.  Windows drive paths are still
+    # supported for explicit staging.  When invoking downloader.exe, POSIX paths
+    # are converted to a Windows UNC path so outputs still land in WSL storage.
+    if [[ "$save_to" =~ ^[A-Za-z]: ]]; then
+        wsl_save=$(echo "$save_to" | sed -E 's|^([A-Za-z]):|/mnt/\L\1|; s|\\|/|g')
+        win_save="$save_to"
+    elif [[ "$save_to" == \\\\* ]]; then
+        wsl_save=$(echo "$save_to" | sed -E "s|^\\\\\\\\wsl.localhost\\\\${WSL_DISTRO_FOR_UNC}||; s|\\\\|/|g")
+        win_save="$save_to"
+    else
+        wsl_save="${save_to%/}"
+        win_save="\\\\wsl.localhost\\${WSL_DISTRO_FOR_UNC}$(echo "$wsl_save" | sed 's|/|\\|g')"
+    fi
     wsl_save_task="$wsl_save/$task_name"
 
     # Skip if task folder already has any jpg
@@ -56,7 +71,7 @@ while IFS=, read -r grid_id task_name save_to map_type date zoom_from zoom_to L 
     timeout "$PER_TASK_TIMEOUT" "$DOWNLOADER" \
         "$task_name" "$zoom_from" "$zoom_to" \
         "$L" "$R" "$T" "$B" \
-        "$save_to" "$date" </dev/null >/dev/null 2>&1
+        "$win_save" "$date" </dev/null >/dev/null 2>&1
     rc=$?
     set -e
     elapsed=$(($(date +%s) - started))

@@ -1,3 +1,7 @@
+# DEPRECATED 2026-05-05: Migrated to solar_backdating subrepo (V1.4 sub-line pivot).
+# Authoritative copy: /home/gaosh/projects/solar_backdating/configs/geid_anchor_presence.yaml
+# This file is frozen; scheduled for removal after 2026-05-31. Edits go to subrepo first.
+#
 # GEID historical PV anchor-presence defaults.
 # Existing aerial/Vexcel masks are used as anchors, not exact historical masks.
 
@@ -12,7 +16,8 @@ geid_download:
   zoom_from: 21
   zoom_to: 21
   requested_date_month_day: "06-15"
-  save_root_win: "D:\\ZAsolar\\geid_raw\\temporal_pv"
+  save_root: "/home/gaosh/zasolar_data/geid_raw/temporal_anchor_presence"
+  legacy_windows_staging_root: "D:\\ZAsolar\\geid_raw\\temporal_anchor_presence"
   downloader_bridge: "/home/gaosh/projects/geid_reverse_engineering/python/geid_historical_cli_batch.py"
 
 presence_scoring:

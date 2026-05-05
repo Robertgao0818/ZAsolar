@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# DEPRECATED 2026-05-05: Migrated to solar_backdating subrepo (V1.4 sub-line pivot).
+# Authoritative copy: /home/gaosh/projects/solar_backdating/scripts/temporal/build_gt_anchor_manifest.py
+# This file is frozen; scheduled for removal after 2026-05-31. Bug fixes go to subrepo first.
 """Build buffered PV anchor chips from existing GT annotations.
 
 Existing aerial/Vexcel GT masks are used as location anchors, not as exact
