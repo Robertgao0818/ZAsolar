@@ -4,7 +4,16 @@ South Africa rooftop solar installation detection & evaluation pipeline. Uses ge
 
 **Task definition (V1.3)**: reviewed prediction footprint segmentation — model predictions reviewed and accepted by human annotators, exported as polygons. Ground-truth annotations follow installation-level rules (see `data/annotations/ANNOTATION_SPEC.md`), but the pipeline output is reviewed predictions, not installation-merged footprints.
 
-**V1.4 pivot (2026-04-22)**: the project's success metric reframes from per-polygon F1 to an **aggregate-inventory-at-grid-level** goal suited for economic analysis. Per-polygon F1 becomes diagnostic. Validation moves to a four-channel framework (stratified precision, exhaustive recall, plausibility, opportunistic external) with the task grid as the primary aggregation unit. Sub-repo `geid_bbox` pivots from GEID free detection to location-conditioned temporal back-dating (given a main-repo seed, estimate install date from GEID history). Full spec in [`docs/validation_strategy.md`](docs/validation_strategy.md).
+**V1.4 pivot (2026-04-22, subrepo split landed 2026-05-05)**: success metric reframes from per-polygon F1 to an **aggregate-inventory-at-grid-level** goal suited for economic analysis. Per-polygon F1 becomes diagnostic. Validation moves to a four-channel framework (stratified precision, exhaustive recall, plausibility, opportunistic external) with the task grid as the primary aggregation unit. Install-date back-dating moved to a sibling repo **`solar_backdating`** at `/home/gaosh/projects/solar_backdating/` (plugin of this repo via shared venv + PYTHONPATH). Old `geid_bbox` prototype archived at `/home/gaosh/projects/_archive/geid_bbox_legacy_2026-05-05/`. Full spec in [`docs/validation_strategy.md`](docs/validation_strategy.md).
+
+## Sibling subrepo: `solar_backdating`
+
+Location: `/home/gaosh/projects/solar_backdating/` (sibling, **not** under this repo). Agents/harness primarily live here in main repo, but agents launched from here will frequently write code into `solar_backdating/` — treat that path as a first-class write target.
+
+- Plugin runtime: subrepo shares this repo's `.venv`. From subrepo root, `source scripts/activate_env.sh` sources main repo's activator and prepends subrepo paths to `PYTHONPATH` (subrepo first, then `$ZASOLAR_ROOT`). Subrepo imports `core.region_registry`, `core.annotation_loader`, `core.grid_utils`, and reads `configs/datasets/regions.yaml` from this repo.
+- Boundary: subrepo handles install-date / temporal / GEHistoricalImagery / GEID history. This repo handles aerial census, training, V1.3/V1.4 evaluation, classifier work. Do not duplicate temporal logic in this repo — `scripts/temporal/`, `scripts/validation/{probe_geid_vintages,parse_geid_probe_results,run_geid_vintage_probe}.*`, and `tests/temporal/` here are **frozen with deprecation headers**, scheduled for removal after 2026-05-31. New temporal work goes in `solar_backdating/`.
+- Subrepo entry docs: `solar_backdating/{AGENTS.md, CLAUDE.md, README.md, SHARED_FROM_ZASOLAR.md}` define identity, runtime contract, and the dependency surface this repo exposes.
+- GEHistoricalImagery (the GEID-replacement provider) plan + wrappers live in `solar_backdating/docs/gehi_temporal_replacement_plan.md` and `solar_backdating/scripts/temporal/gehi_*.py`. Do not add new temporal provider code to this repo.
 
 ## Key References
 
@@ -16,6 +25,7 @@ South Africa rooftop solar installation detection & evaluation pipeline. Uses ge
 - Region registry (authoritative): [`configs/datasets/regions.yaml`](configs/datasets/regions.yaml)
 - Training set provenance: [`configs/datasets/training_sets.yaml`](configs/datasets/training_sets.yaml)
 - Cross-review harness: [`.agents/harness/README.md`](.agents/harness/README.md)
+- Subrepo (install-date back-dating): `/home/gaosh/projects/solar_backdating/` — see `solar_backdating/CLAUDE.md` and `solar_backdating/SHARED_FROM_ZASOLAR.md`
 
 ## Working Constraints
 
@@ -24,6 +34,7 @@ South Africa rooftop solar installation detection & evaluation pipeline. Uses ge
 3. `detect_and_evaluate.py` reuses prior outputs only when `results/<GridID>/config.json` matches current code/parameters. Use `--force` for intentional reruns.
 4. Empty-target chips in exported COCO datasets are intentional hard negatives — do not drop unless explicitly requested.
 5. Never commit large binary files (tiles, checkpoints, results) to git — see `docs/governance/repo-rules.md`.
+6. **Temporal / install-date / GEID-history work goes in `/home/gaosh/projects/solar_backdating/`, not this repo.** Main-repo `scripts/temporal/`, `scripts/validation/{probe_geid_vintages,parse_geid_probe_results,run_geid_vintage_probe}.*`, and `tests/temporal/` are frozen with deprecation headers (removal after 2026-05-31). Bug fixes go to subrepo first. When an agent launched from this repo needs to modify temporal code, it should `cd /home/gaosh/projects/solar_backdating/` and edit there.
 
 ## Environment
 

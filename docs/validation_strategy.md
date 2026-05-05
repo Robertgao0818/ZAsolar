@@ -90,7 +90,7 @@ report: Pearson r, slope, intercept, R², residual spatial autocorrelation
 
 ### Channel 5 (bonus) — Temporal consistency (sub-repo, free validation)
 
-**What**: once `geid_bbox/install_date` estimator is online, verify that per-install dates are monotonic (no panels "disappearing" between years), and that the distribution of install dates by year matches Eskom SSEG national cumulative capacity curves.
+**What**: once the `solar_backdating` install-date estimator is online (sibling repo at `/home/gaosh/projects/solar_backdating/`), verify that per-install dates are monotonic (no panels "disappearing" between years), and that the distribution of install dates by year matches Eskom SSEG national cumulative capacity curves.
 
 **Why**: a cross-check on both the main-repo inventory (positions should persist across years) and the sub-repo estimator. Free — emerges naturally from the sub-repo's output.
 
@@ -121,4 +121,4 @@ Both calibrations report Channel 2 recall as a diagnostic, not as a calibration 
 - Task definition and project constraints: `CLAUDE.md`, `docs/architecture.md`
 - Annotation workflow and Two-Axis Model: `data/annotations/ANNOTATION_SPEC.md`
 - Postprocess configs: `configs/postproc/`
-- Sub-repo temporal estimator: `.agents/harness/README.md`, `geid_bbox/` (pivot in progress)
+- Sub-repo temporal estimator: sibling repo `solar_backdating` at `/home/gaosh/projects/solar_backdating/` (V1.4 pivot landed 2026-05-05). Cross-review harness: `.agents/harness/README.md`. Old `geid_bbox` prototype archived under `/home/gaosh/projects/_archive/geid_bbox_legacy_2026-05-05/`.

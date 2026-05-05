@@ -284,3 +284,13 @@
 - [`docs/workflows.md`](docs/workflows.md)
 - [`ROADMAP.md`](ROADMAP.md)
 - [`data/annotations/ANNOTATION_SPEC.md`](data/annotations/ANNOTATION_SPEC.md)
+
+### 5.1 兄弟子仓：`solar_backdating`（屋顶光伏安装时间反推）
+
+把空间分布的检测结果升级为**带安装时间的面板数据**这一条 V1.4 子线，独立到一个 sibling 仓库：
+
+- 路径：`/home/gaosh/projects/solar_backdating/`（与本仓库平级，不是子目录；远端 `Robertgao0818/solar_backdating`）。
+- 任务：给定本仓库 `v4_high` inventory 的安装位置（lon/lat + 多边形），扫描历史卫星 / 航拍底图（GEHistoricalImagery、GEID 等），估计每个安装点最早出现的年份。
+- 共享方式：本地插件，复用本仓库的 `.venv` 与 `core/` 模块（`region_registry`、`annotation_loader`、`grid_utils`）。从子仓 `source scripts/activate_env.sh` 即可。
+- 历史回溯相关代码本仓库已停止接收新增（`scripts/temporal/`、`scripts/validation/{probe_geid_vintages,parse_geid_probe_results,run_geid_vintage_probe}.*`、`tests/temporal/` 已加 deprecation header，2026-05-31 后清理）。新增 / 修复都去子仓做。
+- 详细契约：`solar_backdating/{README.md, AGENTS.md, CLAUDE.md, SHARED_FROM_ZASOLAR.md}`。
