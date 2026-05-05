@@ -137,7 +137,18 @@ def _load_run_grids(region_key: str, run_id: str) -> list[tuple[str, Path]]:
     return pairs
 
 
-def _gt_spec_for(region_cfg, grid_id: str) -> tuple[Path, str | None] | None:
+def _gt_spec_for(
+    region_cfg,
+    grid_id: str,
+    gt_root_override: Path | None = None,
+    gt_pattern: str = "{grid}/{grid}_clean_gt.gpkg",
+) -> tuple[Path, str | None] | None:
+    if gt_root_override is not None:
+        candidate = gt_root_override / gt_pattern.format(grid=grid_id)
+        if candidate.exists():
+            return candidate, None
+        return None
+
     entry = region_cfg.grids.get(grid_id) or {}
     src = entry.get("annotation_source")
     layer = entry.get("annotation_layer")
@@ -152,14 +163,21 @@ def _gt_spec_for(region_cfg, grid_id: str) -> tuple[Path, str | None] | None:
     return gt_path, layer
 
 
-def evaluate_run(region_key: str, run_id: str) -> list[dict]:
+def evaluate_run(
+    region_key: str,
+    run_id: str,
+    gt_root_override: Path | None = None,
+    gt_pattern: str = "{grid}/{grid}_clean_gt.gpkg",
+) -> list[dict]:
     region_cfg = get_region_config(region_key)
     mr = get_model_run(region_key, run_id)
     metric_crs = region_cfg.crs_metric
 
     rows: list[dict] = []
     for grid_id, pred_path in _load_run_grids(region_key, run_id):
-        gt_spec = _gt_spec_for(region_cfg, grid_id)
+        gt_spec = _gt_spec_for(region_cfg, grid_id,
+                               gt_root_override=gt_root_override,
+                               gt_pattern=gt_pattern)
         if gt_spec is None:
             continue
         gt_path, gt_layer = gt_spec
@@ -286,6 +304,11 @@ def main() -> None:
     parser.add_argument("--skip-deprecated", action="store_true",
                         help="Skip model_runs flagged deprecated=true in regions.yaml")
     parser.add_argument("--output-dir", default="results/analysis/area_aggregate")
+    parser.add_argument("--gt-root", type=Path, default=None,
+                        help="Override GT lookup root. When set, GT for grid G is "
+                             "expected at <gt-root>/<gt-pattern>.")
+    parser.add_argument("--gt-pattern", default="{grid}/{grid}_clean_gt.gpkg",
+                        help="Path template under --gt-root; {grid} is substituted.")
     args = parser.parse_args()
 
     regions = args.region or list_regions()
@@ -306,7 +329,9 @@ def main() -> None:
                 print(f"[skip-deprecated] {region_key}/{run_id}")
                 continue
             print(f"[eval] {region_key}/{run_id} ...", flush=True)
-            rows = evaluate_run(region_key, run_id)
+            rows = evaluate_run(region_key, run_id,
+                                gt_root_override=args.gt_root,
+                                gt_pattern=args.gt_pattern)
             print(f"        {len(rows)} grids matched")
             all_rows.extend(rows)
 
