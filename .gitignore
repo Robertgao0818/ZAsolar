@@ -94,3 +94,11 @@ data/sseg_registration_geo.csv
 
 # Generated visual diagnostics / local imagery comparisons
 mosaics/
+
+# Channel 2 micro working set (per-grid Vexcel mosaics + draft GT/prediction
+# overlays for G0774/G0816/G0922 iteration). Curated outputs land in
+# data/annotations_channel2_clean/ which IS tracked.
+data/annotations_channel2_micro/
+
+# Claude Code scheduled-task runtime lock file
+.claude/scheduled_tasks.lock

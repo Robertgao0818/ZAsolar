@@ -423,5 +423,45 @@
     "timestamp": "2026-05-04T11:33:50Z",
     "source": "commit:2767f084",
     "summary": "docs(progress): sync grouped commit log"
+  },
+  {
+    "timestamp": "2026-05-04T11:34:29Z",
+    "source": "commit:9691c153",
+    "summary": "docs(progress): final log sync + de-dupe duplicate entry"
+  },
+  {
+    "timestamp": "2026-05-04T12:37:00Z",
+    "source": "session",
+    "summary": "Daily log 2026-05-04: GEID temporal scaffold + JHB Vexcel Ch2/Ch3/SAM validation"
+  },
+  {
+    "timestamp": "2026-05-05T03:05:25Z",
+    "source": "commit:9e07ea3c",
+    "summary": "feat(validation): Channel 2 exhaustive recall script for 25-grid clean GT"
+  },
+  {
+    "timestamp": "2026-05-05T06:23:29Z",
+    "source": "commit:e0c2581d",
+    "summary": "chore(temporal): freeze + deprecate temporal/validation scripts post-V1.4 pivot"
+  },
+  {
+    "timestamp": "2026-05-05T06:32:59Z",
+    "source": "commit:0325f165",
+    "summary": "fix(crs): native raster CRS for legacy_aerial_li + vexcel_2024 is EPSG:3857, not 4326"
+  },
+  {
+    "timestamp": "2026-05-05T06:33:11Z",
+    "source": "commit:35c27dd4",
+    "summary": "feat(area-eval): allow GT root + pattern override for clean_gt directories"
+  },
+  {
+    "timestamp": "2026-05-05T06:33:22Z",
+    "source": "commit:017b41e6",
+    "summary": "feat(analysis): G0925 Vexcel review HTML builder (GT + V3-C + V3-C+SAM overlays)"
+  },
+  {
+    "timestamp": "2026-05-05T06:33:37Z",
+    "source": "commit:bc2a91b2",
+    "summary": "feat(temporal-qa): GEID temporal anchor-presence review/QA HTML builders"
   }
 ]

@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-05-05: feat(temporal-qa): GEID temporal anchor-presence review/QA HTML builders
+- 2026-05-05: feat(analysis): G0925 Vexcel review HTML builder (GT + V3-C + V3-C+SAM overlays)
+- 2026-05-05: feat(area-eval): allow GT root + pattern override for clean_gt directories
+- 2026-05-05: fix(crs): native raster CRS for legacy_aerial_li + vexcel_2024 is EPSG:3857, not 4326
+- 2026-05-05: chore(temporal): freeze + deprecate temporal/validation scripts post-V1.4 pivot
 - 2026-05-05: feat(validation): Channel 2 exhaustive recall script for 25-grid clean GT
 - 2026-05-04: Daily log 2026-05-04: GEID temporal scaffold + JHB Vexcel Ch2/Ch3/SAM validation
 - 2026-05-04: docs(progress): final log sync + de-dupe duplicate entry
-- 2026-05-04: docs(progress): sync grouped commit log
-- 2026-05-04: feat(temporal): GEID anchor-presence install-date inference scaffold
-- 2026-05-04: feat(temporal): GEID anchor-presence install-date inference scaffold
-- 2026-05-04: docs(progress): week 2026-04-27 daily logs + weekly-summary skill
-- 2026-05-04: chore(config): register Vexcel 2024 imagery layer + V3-C/V4.1 model runs
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
