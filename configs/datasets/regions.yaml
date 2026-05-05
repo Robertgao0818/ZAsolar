@@ -1,5 +1,13 @@
 # Dataset Registry — Regions & Grids
 # 区域 → grids → 标注源 → 质量等级 → 基线指标
+#
+# imagery_layers[*].census_imagery_mid_date (optional, ISO YYYY-MM-DD):
+#   The flight mid-date of the census imagery this layer represents. Used by
+#   solar_backdating's install-date inference (`infer_install_dates.py`) as the
+#   upper bound when status=done_installed_during_census. Layers without an
+#   explicit field default to a mid-year fallback (`vintage`-MM-DD = 06-30) at
+#   the consumer side. Filled in for layers actively used by V1.4 install-date
+#   work; other layers can be added when needed.
 
 regions:
   cape_town:
@@ -41,6 +49,7 @@ regions:
         path: "/home/gaosh/zasolar_data/tiles/cape_town/aerial_2025"
         source: "aerial"
         vintage: "2025"
+        census_imagery_mid_date: "2025-06-30"  # mid-year fallback
         file_layout: "chunked"
         file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
         crs: "EPSG:4326"
@@ -136,6 +145,7 @@ regions:
         path: "/home/gaosh/zasolar_data/tiles/johannesburg/aerial_2023"
         source: "aerial"
         vintage: "2023"
+        census_imagery_mid_date: "2023-06-30"  # mid-year fallback; refine if exact aerial flight metadata becomes available
         file_layout: "chunked"
         file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
         crs: "EPSG:4326"
@@ -158,6 +168,7 @@ regions:
         path: "/home/gaosh/zasolar_data/tiles/johannesburg/geid_2024_02"
         source: "geid"
         vintage: "2024-02"
+        census_imagery_mid_date: "2024-02-15"  # specific month known
         file_layout: "mosaic"
         file_pattern: "{grid_id}_mosaic.tif"
         crs: "EPSG:4326"
@@ -189,6 +200,7 @@ regions:
         path: "/home/gaosh/zasolar_data/tiles/johannesburg/vexcel_2024"
         source: "vexcel"
         vintage: "2024"
+        census_imagery_mid_date: "2024-06-30"  # mid-year fallback; verify against Vexcel za-gp-johannesburg-2024 collection manifest when next refreshed
         file_layout: "chunked"
         file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
         crs: "EPSG:3857"
@@ -217,6 +229,16 @@ regions:
           off by up to ~30 m. GEID bbox detection task is now owned by the
           parallel ~/projects/geid_bbox/ project; do not rerun V3-C (mask
           R-CNN + installation semantics) on GEID.
+      v3c_geid_2024_02_rerun:
+        model_version: "exp003_C_targeted_hn"
+        imagery_layer: "geid_2024_02"
+        results_path: "results/johannesburg/v3c_geid_2024_02_rerun"
+        inference_date: "2026-04-22"
+        grid_count: 25
+        notes: |
+          V3-C re-run against post-fix GEID mosaics (5.29% underscale fix
+          landed 2026-04-21). Supersedes deprecated v3c_geid_2024_02.
+          Used as the GEID side for Vexcel↔GEID Ch2/Ch3 paired ablation.
       v3c_targeted_hn_aerial_2023:
         model_version: "exp003_C_targeted_hn"
         imagery_layer: "aerial_2023"
