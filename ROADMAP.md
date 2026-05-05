@@ -3,18 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-05-05: Phase-0 wiring + Task I 真跑 (10-anchor jhb_vexcel10_smoke, 4 high + 4 medium + 2 ambiguous after P1+P2)
-- 2026-05-05: subrepo solar_backdating: ring marker + census-GT prior + Gemini calibration clause + same-roof consistency
-- 2026-05-05: subrepo solar_backdating: GEHI vintage dedupe by date (74→74 vs 74→15; restored progressive walk-back)
-- 2026-05-05: subrepo solar_backdating: Task H mock integration smoke + Task E/F review fixes
+- 2026-05-05: Phase-0 wiring 完整跑通：Task E/F/G review fix + Task H smoke + Task I 真跑迭代 (3 轮 10-anchor)，最终 4 high+4 medium+2 ambiguous
+- 2026-05-05: feat(temporal-phase0): same-roof consistency hint in batch prompt
+- 2026-05-05: feat(temporal-phase0): ring marker + post-hoc census-GT check + Gemini calibration clause (P1+P2)
+- 2026-05-05: fix(gehi): dedupe vintage rows by capture_date, not by version (74→74 vs 74→15; restored progressive walk-back)
+- 2026-05-05: docs(progress): 2026-05-05 daily log + Phase-0 subrepo entry sync
+- 2026-05-05: test(temporal-phase0): Task H — pipeline mock integration smoke (subprocess-driven, no GEHI/Gemini)
+- 2026-05-05: fix(temporal-phase0): Task E/F review fixes — output path defaults + load failure abort
 - 2026-05-05: fix(region-registry): expose census_imagery_mid_date on ImageryLayerConfig
-- 2026-05-05: feat(regions): add census_imagery_mid_date to imagery layers (Task G)
-- 2026-05-05: docs: surface solar_backdating subrepo path + boundary in entry docs
-- 2026-05-05: chore: gitignore housekeeping + progress log sync (2026-05-04 daily, V1.4 pivot)
-- 2026-05-05: feat(temporal-qa): GEID temporal anchor-presence review/QA HTML builders
-- 2026-05-05: feat(analysis): G0925 Vexcel review HTML builder (GT + V3-C + V3-C+SAM overlays)
-- 2026-05-05: feat(area-eval): allow GT root + pattern override for clean_gt directories
-- 2026-05-05: fix(crs): native raster CRS for legacy_aerial_li + vexcel_2024 is EPSG:3857, not 4326
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
