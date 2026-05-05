@@ -40,6 +40,11 @@ class ImageryLayerConfig:
     crs: str
     coverage_grids: tuple[str, ...]
     provenance: str | None = None
+    # ISO YYYY-MM-DD mid-date of this imagery layer's capture window. Consumed by
+    # the install-date back-dating subrepo (solar_backdating) as the upper bound
+    # for status=done_installed_during_census. May be None for layers added before
+    # the field was introduced.
+    census_imagery_mid_date: str | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +106,7 @@ def _load_registry() -> dict[str, RegionConfig]:
                 crs=layer_data.get("crs", "EPSG:4326"),
                 coverage_grids=tuple(layer_data.get("coverage_grids", [])),
                 provenance=layer_data.get("provenance"),
+                census_imagery_mid_date=layer_data.get("census_imagery_mid_date"),
             )
 
         model_runs: dict[str, ModelRunConfig] = {}
