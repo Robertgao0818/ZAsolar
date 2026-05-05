@@ -463,5 +463,55 @@
     "timestamp": "2026-05-05T06:33:37Z",
     "source": "commit:bc2a91b2",
     "summary": "feat(temporal-qa): GEID temporal anchor-presence review/QA HTML builders"
+  },
+  {
+    "timestamp": "2026-05-05T06:34:17Z",
+    "source": "commit:5a0a674e",
+    "summary": "chore: gitignore housekeeping + progress log sync (2026-05-04 daily, V1.4 pivot)"
+  },
+  {
+    "timestamp": "2026-05-05T06:42:11Z",
+    "source": "commit:b17ca71c",
+    "summary": "docs: surface solar_backdating subrepo path + boundary in entry docs"
+  },
+  {
+    "timestamp": "2026-05-05T10:19:59Z",
+    "source": "commit:33c73f71",
+    "summary": "feat(regions): add census_imagery_mid_date to imagery layers (Task G)"
+  },
+  {
+    "timestamp": "2026-05-05T10:31:48Z",
+    "source": "commit:8a47eef7",
+    "summary": "fix(region-registry): expose census_imagery_mid_date on ImageryLayerConfig"
+  },
+  {
+    "timestamp": "2026-05-05T11:00:00Z",
+    "source": "subrepo:solar_backdating:e790e30",
+    "summary": "fix(temporal-phase0): Task E/F review fixes — output path defaults + load failure abort"
+  },
+  {
+    "timestamp": "2026-05-05T11:30:00Z",
+    "source": "subrepo:solar_backdating:525e22b",
+    "summary": "test(temporal-phase0): Task H — pipeline mock integration smoke (subprocess-driven, no GEHI/Gemini)"
+  },
+  {
+    "timestamp": "2026-05-05T12:30:00Z",
+    "source": "subrepo:solar_backdating:3574e67",
+    "summary": "fix(gehi): dedupe vintage rows by capture_date, not by version (74→74 vs 74→15; restored progressive walk-back)"
+  },
+  {
+    "timestamp": "2026-05-05T13:30:00Z",
+    "source": "subrepo:solar_backdating:04872a3",
+    "summary": "feat(temporal-phase0): ring marker + post-hoc census-GT check + Gemini calibration clause (P1+P2)"
+  },
+  {
+    "timestamp": "2026-05-05T14:00:00Z",
+    "source": "subrepo:solar_backdating:a28ff8a",
+    "summary": "feat(temporal-phase0): same-roof consistency hint in batch prompt"
+  },
+  {
+    "timestamp": "2026-05-05T14:30:00Z",
+    "source": "daily-log:2026-05-05",
+    "summary": "Phase-0 wiring 完整跑通：Task E/F/G review fix + Task H smoke + Task I 真跑迭代 (3 轮 10-anchor)，最终 4 high+4 medium+2 ambiguous"
   }
 ]
