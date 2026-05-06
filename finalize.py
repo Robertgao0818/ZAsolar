@@ -49,11 +49,12 @@ from core.postproc import (
     DEFAULT_ELONGATION_TIERED,
     apply_postproc_filters,
     compute_geometric_properties,
-    compute_mask_mean_confidence,
     compute_rgb_zonal_means,
+    affine_pixel_area,
     load_postproc_config,
     paint_geoai_parity_mask,
     paint_and_vectorize_pixel_or,
+    parse_threshold_area_tiers,
     spatial_nms,
     vectorize_chip_mask,
 )
@@ -79,18 +80,19 @@ def build_parser() -> argparse.ArgumentParser:
                    help="JSON config; defaults applied when omitted")
     p.add_argument("--strict-postproc-config", action="store_true",
                    help="Unknown keys raise instead of warn")
-    p.add_argument("--merge-mode", choices=["pixel-or", "per-detection"], default="pixel-or",
-                   help="pixel-or (default, geoai-equivalent): paint all detection masks "
+    p.add_argument("--merge-mode", choices=["pixel-or", "per-detection"], default=None,
+                   help="per-detection (default): vectorize each detection mask "
+                        "before grid-level NMS. pixel-or: paint all detection masks "
                         "to a chunk-sized raster, OR-merge on overlap, vectorize once. "
-                        "per-detection (diagnostic): each detection produces its own polygon, "
-                        "merged later only via spatial_nms.")
+                        "Can also be set in postproc config.")
     p.add_argument("--parity-mode", choices=["direct", "geoai"], default="direct",
                    help="direct = current direct finalizer; geoai = rebuild geoai-style "
                         "two-band mask rasters and vectorize through geoai.orthogonalize")
     p.add_argument("--vectorize-multi-component",
-                   choices=["largest", "union", "explode"], default="explode",
-                   help="Only used in per-detection mode and for the leftover "
-                        "'multi-component within one detection' case in pixel-or.")
+                   choices=["largest", "union", "explode"], default=None,
+                   help="For per-detection masks: largest is the default. "
+                        "For pixel-or masks: explode is the default. "
+                        "Can also be set in postproc config.")
     p.add_argument("--simplify-tolerance-pixels", type=float, default=0.0,
                    help="Pixel-space tolerance for shapely.simplify (0 = no simplify)")
     p.add_argument("--nms-iou", type=float, default=0.5,
@@ -103,6 +105,17 @@ def build_parser() -> argparse.ArgumentParser:
                    default="score",
                    help="Phase 1 default = score; existing preserves a confidence column "
                         "already produced by a parity/vectorization path")
+    p.add_argument("--mask-threshold-area-m2-tiers", default=None,
+                   help="Adaptive mask threshold tiers as JSON/list, e.g. "
+                        "'[[200,0.55],[100,0.45]]'. Overrides config key of same name.")
+    p.add_argument("--mask-threshold-area-px-tiers", default=None,
+                   help="Adaptive mask threshold tiers in pixels, e.g. "
+                        "'[[5000,0.55],[2000,0.45]]'. Mostly for tests/debug.")
+    p.add_argument("--mask-hysteresis-high-threshold", type=float, default=None,
+                   help="Keep only low-threshold mask components connected to "
+                        "pixels above this high threshold.")
+    p.add_argument("--mask-hysteresis-min-core-area-px", type=int, default=None,
+                   help="Minimum high-threshold core pixels required when hysteresis is enabled.")
     return p
 
 
@@ -115,13 +128,20 @@ def _vectorize_chip(
     mask_threshold: float,
     multi_component: str,
     simplify_tolerance_pixels: float,
+    mask_threshold_area_tiers: tuple[tuple[float, float], ...] | None,
+    mask_threshold_area_units: str,
+    mask_hysteresis_high_threshold: float | None,
+    mask_hysteresis_min_core_area_px: int,
 ) -> gpd.GeoDataFrame:
     """Build a per-chip GeoDataFrame in source_crs."""
     rows = []
-    chip_size = int(chip.chip_shape[0])
     for det in chip.detections:
         # Build the chip's affine transform from the stored 6-tuple.
         win_tr = Affine(*chip.window_transform)
+        threshold_area_scale = _threshold_area_scale(
+            win_tr,
+            mask_threshold_area_units,
+        )
         result = vectorize_chip_mask(
             det.mask_crop_uint8,
             tuple(det.mask_crop_offset),
@@ -130,6 +150,10 @@ def _vectorize_chip(
             source_crs=chip.source_crs,
             multi_component=multi_component,
             simplify_tolerance_pixels=simplify_tolerance_pixels,
+            threshold_area_tiers=mask_threshold_area_tiers,
+            threshold_area_scale=threshold_area_scale,
+            hysteresis_high_threshold=mask_hysteresis_high_threshold,
+            hysteresis_min_core_area_px=mask_hysteresis_min_core_area_px,
         )
 
         # Clip to chip valid window (reject polygons outside real raster data).
@@ -161,6 +185,9 @@ def _vectorize_chip(
                 "source_tif": chip.source_tif,
                 "source_detection_index": det.source_detection_index,
                 "n_components_dropped": result.n_components_dropped,
+                "mask_threshold_effective": result.effective_threshold,
+                "mask_hysteresis_high_threshold": result.high_threshold,
+                "mask_hysteresis_core_pixels": result.core_pixel_count,
                 # We need the soft-mask data for mask_mean_confidence later;
                 # carry crop + offset along.
                 "_mask_crop": det.mask_crop_uint8,
@@ -172,7 +199,9 @@ def _vectorize_chip(
             columns=[
                 "geometry", "score", "label", "chip_index",
                 "source_tile", "source_tif", "source_detection_index",
-                "n_components_dropped", "_mask_crop", "_mask_offset",
+                "n_components_dropped", "mask_threshold_effective",
+                "mask_hysteresis_high_threshold", "mask_hysteresis_core_pixels",
+                "_mask_crop", "_mask_offset",
             ],
             geometry="geometry",
             crs=chip.source_crs,
@@ -187,6 +216,10 @@ def _vectorize_pixel_or(
     mask_threshold: float,
     multi_component: str,
     simplify_tolerance_pixels: float,
+    mask_threshold_area_tiers: tuple[tuple[float, float], ...] | None,
+    mask_threshold_area_units: str,
+    mask_hysteresis_high_threshold: float | None,
+    mask_hysteresis_min_core_area_px: int,
 ) -> list[gpd.GeoDataFrame]:
     """Pixel-OR path: per source TIF, paint all detections to a chunk-sized
     raster and vectorize once.
@@ -224,6 +257,10 @@ def _vectorize_pixel_or(
         from affine import Affine
         src_tr = Affine(*meta.transform)
         H, W = meta.shape
+        threshold_area_scale = _threshold_area_scale(
+            src_tr,
+            mask_threshold_area_units,
+        )
 
         painted = paint_and_vectorize_pixel_or(
             detections,
@@ -234,6 +271,10 @@ def _vectorize_pixel_or(
             mask_threshold=mask_threshold,
             multi_component="explode",  # always explode in pixel-or; ORed mask is one connected blob per panel cluster
             simplify_tolerance_pixels=simplify_tolerance_pixels,
+            threshold_area_tiers=mask_threshold_area_tiers,
+            threshold_area_scale=threshold_area_scale,
+            hysteresis_high_threshold=mask_hysteresis_high_threshold,
+            hysteresis_min_core_area_px=mask_hysteresis_min_core_area_px,
         )
         if not painted:
             continue
@@ -250,6 +291,9 @@ def _vectorize_pixel_or(
                 "source_tif": source_tif,
                 "source_detection_index": -1,
                 "n_components_dropped": 0,
+                "mask_threshold_effective": p.effective_threshold,
+                "mask_hysteresis_high_threshold": p.high_threshold,
+                "mask_hysteresis_core_pixels": p.core_pixel_count,
                 "_mask_crop": None,
                 "_mask_offset": (0, 0),
             })
@@ -411,6 +455,100 @@ def _zonal_band_mean(gdf: gpd.GeoDataFrame, raster_path: Path, *, band: int) -> 
         return means
 
 
+def _threshold_area_scale(transform: Affine, area_units: str) -> float | None:
+    if area_units == "m2":
+        return affine_pixel_area(transform)
+    if area_units == "px":
+        return 1.0
+    return None
+
+
+def _json_arg(value: str | None) -> Any:
+    if value is None:
+        return None
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid JSON argument: {value!r}") from exc
+
+
+def _resolve_mask_shape_options(args: argparse.Namespace, postproc_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Resolve CLI/config controls for mask-to-polygon shaping."""
+    cli_m2 = _json_arg(args.mask_threshold_area_m2_tiers)
+    cli_px = _json_arg(args.mask_threshold_area_px_tiers)
+    cfg_m2 = postproc_cfg.get("mask_threshold_area_m2_tiers")
+    cfg_px = postproc_cfg.get("mask_threshold_area_px_tiers")
+
+    if cli_m2 is not None:
+        tiers = parse_threshold_area_tiers(cli_m2)
+        units = "m2"
+    elif cli_px is not None:
+        tiers = parse_threshold_area_tiers(cli_px)
+        units = "px"
+    elif cfg_m2 is not None:
+        tiers = parse_threshold_area_tiers(cfg_m2)
+        units = "m2"
+    elif cfg_px is not None:
+        tiers = parse_threshold_area_tiers(cfg_px)
+        units = "px"
+    else:
+        tiers = None
+        units = "none"
+
+    high = args.mask_hysteresis_high_threshold
+    if high is None:
+        high = postproc_cfg.get("mask_hysteresis_high_threshold")
+    high = None if high is None else float(high)
+
+    min_core = args.mask_hysteresis_min_core_area_px
+    if min_core is None:
+        min_core = postproc_cfg.get("mask_hysteresis_min_core_area_px", 1)
+    min_core = max(1, int(min_core))
+
+    return {
+        "mask_threshold_area_tiers": tiers,
+        "mask_threshold_area_units": units,
+        "mask_hysteresis_high_threshold": high,
+        "mask_hysteresis_min_core_area_px": min_core,
+    }
+
+
+def _resolve_vectorization_options(args: argparse.Namespace, postproc_cfg: dict[str, Any]) -> None:
+    if args.merge_mode is None:
+        args.merge_mode = str(postproc_cfg.get("merge_mode", "per-detection"))
+    if args.merge_mode not in {"pixel-or", "per-detection"}:
+        raise ValueError(f"unsupported merge_mode: {args.merge_mode!r}")
+
+    if args.vectorize_multi_component is None:
+        default_multi = "largest" if args.merge_mode == "per-detection" else "explode"
+        args.vectorize_multi_component = str(
+            postproc_cfg.get("vectorize_multi_component", default_multi)
+        )
+    if args.vectorize_multi_component not in {"largest", "union", "explode"}:
+        raise ValueError(
+            f"unsupported vectorize_multi_component: {args.vectorize_multi_component!r}"
+        )
+
+
+def _compute_per_detection_mask_mean_confidence(
+    pred_metric: gpd.GeoDataFrame,
+    *,
+    fallback_threshold: float,
+) -> np.ndarray:
+    out = np.full(len(pred_metric), np.nan, dtype=np.float64)
+    has_threshold = "mask_threshold_effective" in pred_metric.columns
+    for pos, (_idx, row) in enumerate(pred_metric.iterrows()):
+        mask = row.get("_mask_crop")
+        if mask is None:
+            continue
+        threshold = float(row["mask_threshold_effective"]) if has_threshold else fallback_threshold
+        cutoff = int(round(max(0.0, min(1.0, threshold)) * 255))
+        kept = mask[mask >= cutoff]
+        if kept.size:
+            out[pos] = float(kept.mean()) / 255.0
+    return out
+
+
 # ─────────────────────────────────────────────────────────────────────────
 # Main pipeline
 # ─────────────────────────────────────────────────────────────────────────
@@ -456,6 +594,26 @@ def run(args: argparse.Namespace) -> int:
     postproc_cfg.setdefault("shadow_rgb_thresh", 60)
     postproc_cfg.setdefault("over_bright_thresh", 250)
     mask_threshold = float(postproc_cfg.get("mask_threshold", artifact.mask_threshold_used))
+    _resolve_vectorization_options(args, postproc_cfg)
+    mask_shape_opts = _resolve_mask_shape_options(args, postproc_cfg)
+    print(
+        "[finalize] vectorization: "
+        f"merge_mode={args.merge_mode} "
+        f"multi_component={args.vectorize_multi_component} "
+        f"mask_threshold={mask_threshold}"
+    )
+    if mask_shape_opts["mask_threshold_area_tiers"] is not None:
+        print(
+            "[finalize] adaptive mask threshold tiers "
+            f"({mask_shape_opts['mask_threshold_area_units']}): "
+            f"{mask_shape_opts['mask_threshold_area_tiers']}"
+        )
+    if mask_shape_opts["mask_hysteresis_high_threshold"] is not None:
+        print(
+            "[finalize] mask hysteresis: "
+            f"high={mask_shape_opts['mask_hysteresis_high_threshold']} "
+            f"min_core_px={mask_shape_opts['mask_hysteresis_min_core_area_px']}"
+        )
 
     # ── Pre-vector score filter (legacy confidence_threshold → pre_vector) ──
     pre_vector_thresh = postproc_cfg.get("pre_vector_score_threshold")
@@ -502,6 +660,7 @@ def run(args: argparse.Namespace) -> int:
             mask_threshold=mask_threshold,
             multi_component=args.vectorize_multi_component,
             simplify_tolerance_pixels=args.simplify_tolerance_pixels,
+            **mask_shape_opts,
         )
     else:
         chip_gdfs = []
@@ -513,6 +672,7 @@ def run(args: argparse.Namespace) -> int:
                 mask_threshold=mask_threshold,
                 multi_component=args.vectorize_multi_component,
                 simplify_tolerance_pixels=args.simplify_tolerance_pixels,
+                **mask_shape_opts,
             )
             if len(g) > 0:
                 chip_gdfs.append(g)
@@ -567,12 +727,9 @@ def run(args: argparse.Namespace) -> int:
         pred_metric["mask_mean_confidence"] = pred_metric["mask_mean_confidence_painted"].astype(float)
         pred_metric = pred_metric.drop(columns=["mask_mean_confidence_painted"])
     else:
-        masks_by_index = {}
-        for i, row in pred_metric.iterrows():
-            if "_mask_crop" in pred_metric.columns and row["_mask_crop"] is not None:
-                masks_by_index[int(i)] = (row["_mask_crop"], row["_mask_offset"])
-        pred_metric["mask_mean_confidence"] = compute_mask_mean_confidence(
-            list(pred_metric.index), masks_by_index, mask_threshold=mask_threshold,
+        pred_metric["mask_mean_confidence"] = _compute_per_detection_mask_mean_confidence(
+            pred_metric,
+            fallback_threshold=mask_threshold,
         )
 
     # ── RGB zonal means GROUPED BY source_tif ────────────────────────
@@ -711,6 +868,30 @@ def _write_outputs(
         "nms_iou": float(args.nms_iou),
         "vectorize_multi_component": args.vectorize_multi_component,
         "simplify_tolerance_pixels": args.simplify_tolerance_pixels,
+        "mask_threshold_area_m2_tiers": _stringify_for_json({
+            "tiers": parse_threshold_area_tiers(
+                _json_arg(args.mask_threshold_area_m2_tiers)
+                if args.mask_threshold_area_m2_tiers is not None
+                else postproc_cfg.get("mask_threshold_area_m2_tiers")
+            )
+        })["tiers"],
+        "mask_threshold_area_px_tiers": _stringify_for_json({
+            "tiers": parse_threshold_area_tiers(
+                _json_arg(args.mask_threshold_area_px_tiers)
+                if args.mask_threshold_area_px_tiers is not None
+                else postproc_cfg.get("mask_threshold_area_px_tiers")
+            )
+        })["tiers"],
+        "mask_hysteresis_high_threshold": (
+            args.mask_hysteresis_high_threshold
+            if args.mask_hysteresis_high_threshold is not None
+            else postproc_cfg.get("mask_hysteresis_high_threshold")
+        ),
+        "mask_hysteresis_min_core_area_px": (
+            args.mask_hysteresis_min_core_area_px
+            if args.mask_hysteresis_min_core_area_px is not None
+            else postproc_cfg.get("mask_hysteresis_min_core_area_px", 1)
+        ),
         "detector_score_threshold": artifact.detector_score_threshold,
         "detections_per_img": artifact.detections_per_img,
         "mask_threshold_used": artifact.mask_threshold_used,
@@ -736,6 +917,8 @@ def _write_outputs(
         f"- model_path: {artifact.model_path}\n\n"
         f"- parity_mode: {args.parity_mode}\n"
         f"- confidence_source: {args.confidence_source}\n\n"
+        f"- merge_mode: {args.merge_mode}\n"
+        f"- vectorize_multi_component: {args.vectorize_multi_component}\n\n"
         f"## Stage counts\n\n"
         f"| Stage | Count |\n|---|---|\n"
         f"| Raw detector output (≥ score_thresh {artifact.detector_score_threshold}) | {n_raw_total} |\n"
@@ -751,7 +934,9 @@ def _stringify_for_json(d: dict) -> dict:
     """JSON-safe copy: tuples → lists; numpy scalars → python scalars."""
     out = {}
     for k, v in d.items():
-        if isinstance(v, tuple):
+        if v is None:
+            out[k] = None
+        elif isinstance(v, tuple):
             out[k] = list(v)
         elif isinstance(v, list):
             out[k] = [list(x) if isinstance(x, tuple) else x for x in v]

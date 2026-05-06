@@ -35,6 +35,22 @@ def test_accepts_v4_canonical_keys(tmp_path: Path):
     assert out["post_conf_threshold"] == 0.85
 
 
+def test_accepts_mask_shaping_keys(tmp_path: Path):
+    p = _write_json(tmp_path, {
+        "merge_mode": "per-detection",
+        "vectorize_multi_component": "largest",
+        "mask_threshold_area_m2_tiers": [[200, 0.55], [100, 0.45]],
+        "mask_hysteresis_high_threshold": 0.7,
+        "mask_hysteresis_min_core_area_px": 4,
+    })
+    out = load_postproc_config(p)
+    assert out["merge_mode"] == "per-detection"
+    assert out["vectorize_multi_component"] == "largest"
+    assert out["mask_threshold_area_m2_tiers"] == [[200, 0.55], [100, 0.45]]
+    assert out["mask_hysteresis_high_threshold"] == 0.7
+    assert out["mask_hysteresis_min_core_area_px"] == 4
+
+
 def test_legacy_confidence_threshold_maps_to_pre_vector(tmp_path: Path):
     """V1.4 plan A: legacy confidence_threshold → pre_vector_score_threshold."""
     p = _write_json(tmp_path, {"confidence_threshold": 0.3})

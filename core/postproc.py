@@ -51,6 +51,10 @@ _KNOWN_KEYS = {
     "detector_score_threshold",
     "pre_vector_score_threshold",
     "mask_threshold",
+    "mask_threshold_area_m2_tiers",
+    "mask_threshold_area_px_tiers",
+    "mask_hysteresis_high_threshold",
+    "mask_hysteresis_min_core_area_px",
     "post_conf_threshold",
     "min_object_area",
     "max_object_area",
@@ -60,6 +64,8 @@ _KNOWN_KEYS = {
     "over_bright_thresh",
     "elongation_tiered",
     "conf_tiered",
+    "merge_mode",
+    "vectorize_multi_component",
 }
 
 
@@ -310,6 +316,19 @@ class VectorizeResult:
     """Output of vectorize_chip_mask. `geoms` is in source_crs."""
     geoms: list  # list[shapely.geometry.Polygon]
     n_components_dropped: int
+    effective_threshold: float = DEFAULT_MASK_THRESHOLD
+    high_threshold: float | None = None
+    core_pixel_count: int = 0
+
+
+@dataclass(frozen=True)
+class MaskBinarizationResult:
+    """Binary mask plus the thresholds actually used to build it."""
+    binary: np.ndarray
+    effective_threshold: float
+    high_threshold: float | None
+    core_pixel_count: int
+    low_area_units: float
 
 
 @dataclass(frozen=True)
@@ -328,6 +347,9 @@ class PaintedPolygon:
     mask_mean_confidence: float
     label: int
     contributing_detection_count: int
+    effective_threshold: float = DEFAULT_MASK_THRESHOLD
+    high_threshold: float | None = None
+    core_pixel_count: int = 0
 
 
 def paint_geoai_parity_mask(
@@ -425,6 +447,10 @@ def vectorize_chip_mask(
     source_crs,
     multi_component: str = "largest",
     simplify_tolerance_pixels: float = 0.0,
+    threshold_area_tiers: Sequence[Sequence[float]] | None = None,
+    threshold_area_scale: float | None = None,
+    hysteresis_high_threshold: float | None = None,
+    hysteresis_min_core_area_px: int = 1,
 ) -> VectorizeResult:
     """Paste a cropped uint8 mask back at offset, threshold, vectorize.
 
@@ -447,10 +473,23 @@ def vectorize_chip_mask(
     if mask_crop_uint8.size == 0:
         return VectorizeResult(geoms=[], n_components_dropped=0)
 
-    cutoff = int(round(threshold * 255))
-    binary = (mask_crop_uint8 >= cutoff).astype(np.uint8)
+    binarized = binarize_mask_uint8(
+        mask_crop_uint8,
+        threshold=threshold,
+        threshold_area_tiers=threshold_area_tiers,
+        threshold_area_scale=threshold_area_scale,
+        hysteresis_high_threshold=hysteresis_high_threshold,
+        hysteresis_min_core_area_px=hysteresis_min_core_area_px,
+    )
+    binary = binarized.binary
     if not binary.any():
-        return VectorizeResult(geoms=[], n_components_dropped=0)
+        return VectorizeResult(
+            geoms=[],
+            n_components_dropped=0,
+            effective_threshold=binarized.effective_threshold,
+            high_threshold=binarized.high_threshold,
+            core_pixel_count=binarized.core_pixel_count,
+        )
 
     # Build a per-crop affine: chip_transform * translation(offset_x, offset_y).
     # rasterio.features.shapes uses a transform that maps (col, row) → CRS.
@@ -464,7 +503,13 @@ def vectorize_chip_mask(
         polys.append(_shape(geom_dict))
 
     if not polys:
-        return VectorizeResult(geoms=[], n_components_dropped=0)
+        return VectorizeResult(
+            geoms=[],
+            n_components_dropped=0,
+            effective_threshold=binarized.effective_threshold,
+            high_threshold=binarized.high_threshold,
+            core_pixel_count=binarized.core_pixel_count,
+        )
 
     n_dropped = 0
     if multi_component == "largest":
@@ -487,7 +532,180 @@ def vectorize_chip_mask(
         tol = simplify_tolerance_pixels * px_size_x
         out_polys = [g.simplify(tol, preserve_topology=True) for g in out_polys]
 
-    return VectorizeResult(geoms=out_polys, n_components_dropped=n_dropped)
+    return VectorizeResult(
+        geoms=out_polys,
+        n_components_dropped=n_dropped,
+        effective_threshold=binarized.effective_threshold,
+        high_threshold=binarized.high_threshold,
+        core_pixel_count=binarized.core_pixel_count,
+    )
+
+
+def binarize_mask_uint8(
+    mask_uint8: np.ndarray,
+    *,
+    threshold: float,
+    threshold_area_tiers: Sequence[Sequence[float]] | None = None,
+    threshold_area_scale: float | None = None,
+    hysteresis_high_threshold: float | None = None,
+    hysteresis_min_core_area_px: int = 1,
+) -> MaskBinarizationResult:
+    """Convert a soft uint8 mask into a binary mask.
+
+    `threshold` is the low/base threshold. If `threshold_area_tiers` is set,
+    the low-threshold area selects an effective threshold. Tiers are ordered as
+    `(min_area, threshold)` and are interpreted in `threshold_area_scale` units;
+    use a pixel area scale of 1.0 for pixel tiers, or the affine pixel area for
+    approximate m2 tiers.
+
+    If `hysteresis_high_threshold` is set, the final binary keeps only
+    low/effective-threshold connected components that touch a high-threshold
+    core. This suppresses broad weak responses without requiring a manual
+    large-area rejection gate.
+    """
+    if mask_uint8.size == 0:
+        return MaskBinarizationResult(
+            binary=np.zeros_like(mask_uint8, dtype=np.uint8),
+            effective_threshold=float(threshold),
+            high_threshold=hysteresis_high_threshold,
+            core_pixel_count=0,
+            low_area_units=0.0,
+        )
+
+    base_threshold = _clamp_probability(threshold)
+    base_cutoff = _threshold_to_uint8(base_threshold)
+    base_binary = mask_uint8 >= base_cutoff
+    area_scale = 1.0 if threshold_area_scale is None else float(threshold_area_scale)
+    low_area_units = float(base_binary.sum()) * max(area_scale, 0.0)
+    effective_threshold = _select_area_threshold(
+        base_threshold,
+        low_area_units,
+        threshold_area_tiers,
+    )
+    effective_cutoff = _threshold_to_uint8(effective_threshold)
+    low_binary = mask_uint8 >= effective_cutoff
+
+    high_threshold = (
+        None
+        if hysteresis_high_threshold is None
+        else _clamp_probability(hysteresis_high_threshold)
+    )
+    core_pixel_count = 0
+    if high_threshold is not None and high_threshold > effective_threshold:
+        high_cutoff = _threshold_to_uint8(high_threshold)
+        core_binary = mask_uint8 >= high_cutoff
+        core_pixel_count = int(core_binary.sum())
+        if core_pixel_count < max(1, int(hysteresis_min_core_area_px)):
+            low_binary = np.zeros_like(low_binary, dtype=bool)
+        else:
+            low_binary = _keep_components_touching_core(low_binary, core_binary)
+
+    return MaskBinarizationResult(
+        binary=low_binary.astype(np.uint8),
+        effective_threshold=effective_threshold,
+        high_threshold=high_threshold,
+        core_pixel_count=core_pixel_count,
+        low_area_units=low_area_units,
+    )
+
+
+def parse_threshold_area_tiers(value: Any) -> tuple[tuple[float, float], ...] | None:
+    """Parse config/CLI threshold tiers into sorted `(min_area, threshold)` tuples."""
+    if value is None:
+        return None
+    tiers: list[tuple[float, float]] = []
+    for item in value:
+        if isinstance(item, dict):
+            if "min_area" in item:
+                min_area = item["min_area"]
+            elif "min_area_m2" in item:
+                min_area = item["min_area_m2"]
+            elif "min_area_px" in item:
+                min_area = item["min_area_px"]
+            else:
+                raise ValueError(f"threshold tier missing min_area: {item!r}")
+            threshold = item["threshold"]
+        else:
+            if len(item) != 2:
+                raise ValueError(f"threshold tier must have 2 values: {item!r}")
+            min_area, threshold = item
+        tiers.append((float(min_area), _clamp_probability(float(threshold))))
+    if not tiers:
+        return None
+    return tuple(sorted(tiers, key=lambda x: x[0], reverse=True))
+
+
+def affine_pixel_area(transform) -> float:
+    """Return one-pixel area in affine coordinate units squared."""
+    return abs(float(transform.a) * float(transform.e) - float(transform.b) * float(transform.d))
+
+
+def _select_area_threshold(
+    base_threshold: float,
+    area_units: float,
+    tiers: Sequence[Sequence[float]] | None,
+) -> float:
+    parsed = parse_threshold_area_tiers(tiers)
+    if not parsed:
+        return base_threshold
+    for min_area, threshold in parsed:
+        if area_units >= min_area:
+            return threshold
+    return base_threshold
+
+
+def _threshold_to_uint8(threshold: float) -> int:
+    return int(np.ceil(_clamp_probability(threshold) * 255))
+
+
+def _clamp_probability(value: float) -> float:
+    return float(min(1.0, max(0.0, value)))
+
+
+def _keep_components_touching_core(low_binary: np.ndarray, core_binary: np.ndarray) -> np.ndarray:
+    """Keep low-threshold connected components that contain high-threshold pixels."""
+    low = low_binary.astype(bool)
+    core = core_binary.astype(bool) & low
+    if not low.any() or not core.any():
+        return np.zeros_like(low, dtype=bool)
+
+    try:
+        import cv2
+
+        n_labels, labels = cv2.connectedComponents(low.astype(np.uint8), connectivity=4)
+        if n_labels <= 1:
+            return np.zeros_like(low, dtype=bool)
+        keep_labels = np.unique(labels[core])
+        keep_labels = keep_labels[keep_labels > 0]
+        if keep_labels.size == 0:
+            return np.zeros_like(low, dtype=bool)
+        return np.isin(labels, keep_labels)
+    except Exception:
+        return _keep_components_touching_core_fallback(low, core)
+
+
+def _keep_components_touching_core_fallback(low: np.ndarray, core: np.ndarray) -> np.ndarray:
+    """Pure-numpy flood fill fallback for environments without cv2."""
+    from collections import deque
+
+    out = np.zeros_like(low, dtype=bool)
+    q: deque[tuple[int, int]] = deque()
+    ys, xs = np.nonzero(core)
+    for y, x in zip(ys, xs):
+        if not out[y, x]:
+            out[y, x] = True
+            q.append((int(y), int(x)))
+
+    h, w = low.shape
+    while q:
+        y, x = q.popleft()
+        for ny, nx in ((y - 1, x), (y + 1, x), (y, x - 1), (y, x + 1)):
+            if ny < 0 or nx < 0 or ny >= h or nx >= w:
+                continue
+            if low[ny, nx] and not out[ny, nx]:
+                out[ny, nx] = True
+                q.append((ny, nx))
+    return out
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -503,6 +721,10 @@ def paint_and_vectorize_pixel_or(
     mask_threshold: float,
     multi_component: str = "explode",
     simplify_tolerance_pixels: float = 0.0,
+    threshold_area_tiers: Sequence[Sequence[float]] | None = None,
+    threshold_area_scale: float | None = None,
+    hysteresis_high_threshold: float | None = None,
+    hysteresis_min_core_area_px: int = 1,
 ) -> list[PaintedPolygon]:
     """Geoai-equivalent merge: paint every detection's soft mask onto a
     chunk-sized raster (max-merging on overlap), threshold, vectorize.
@@ -550,6 +772,20 @@ def paint_and_vectorize_pixel_or(
         crop_x0 = cx0 - int(x0_src); crop_y0 = cy0 - int(y0_src)
         crop_x1 = crop_x0 + (cx1 - cx0); crop_y1 = crop_y0 + (cy1 - cy0)
         crop_slice = crop[crop_y0:crop_y1, crop_x0:crop_x1]
+        shaped_binary = None
+        if threshold_area_tiers is not None or hysteresis_high_threshold is not None:
+            shaped = binarize_mask_uint8(
+                crop_slice,
+                threshold=mask_threshold,
+                threshold_area_tiers=threshold_area_tiers,
+                threshold_area_scale=threshold_area_scale,
+                hysteresis_high_threshold=hysteresis_high_threshold,
+                hysteresis_min_core_area_px=hysteresis_min_core_area_px,
+            )
+            if not shaped.binary.any():
+                continue
+            shaped_binary = shaped.binary.astype(bool)
+            crop_slice = np.where(shaped_binary, crop_slice, 0).astype(np.uint8)
 
         # Soft mask: max-merge on overlap (parity with geoai's raster paint)
         soft_view = soft_raster[cy0:cy1, cx0:cx1]
@@ -557,7 +793,10 @@ def paint_and_vectorize_pixel_or(
 
         # Score: paint det.score into the binary footprint of this detection
         det_score_uint8 = int(round(float(det["score"]) * 255))
-        binary_crop = (crop_slice >= cutoff).astype(np.uint8)
+        if shaped_binary is None:
+            binary_crop = (crop_slice >= cutoff).astype(np.uint8)
+        else:
+            binary_crop = shaped_binary.astype(np.uint8)
         if binary_crop.any():
             score_paint = (binary_crop * det_score_uint8).astype(np.uint8)
             score_view = score_raster[cy0:cy1, cx0:cx1]
@@ -567,7 +806,15 @@ def paint_and_vectorize_pixel_or(
     if n_painted == 0:
         return []
 
-    binary = (soft_raster >= cutoff).astype(np.uint8)
+    binarized = binarize_mask_uint8(
+        soft_raster,
+        threshold=mask_threshold,
+        threshold_area_tiers=threshold_area_tiers,
+        threshold_area_scale=threshold_area_scale,
+        hysteresis_high_threshold=hysteresis_high_threshold,
+        hysteresis_min_core_area_px=hysteresis_min_core_area_px,
+    )
+    binary = binarized.binary
     if not binary.any():
         return []
 
@@ -619,6 +866,9 @@ def paint_and_vectorize_pixel_or(
             out.append(PaintedPolygon(
                 geom=poly, score=0.0, mask_mean_confidence=0.0,
                 label=1, contributing_detection_count=0,
+                effective_threshold=binarized.effective_threshold,
+                high_threshold=binarized.high_threshold,
+                core_pixel_count=binarized.core_pixel_count,
             ))
             continue
         local_tr = window_transform(
@@ -633,6 +883,9 @@ def paint_and_vectorize_pixel_or(
             out.append(PaintedPolygon(
                 geom=poly, score=0.0, mask_mean_confidence=0.0,
                 label=1, contributing_detection_count=0,
+                effective_threshold=binarized.effective_threshold,
+                high_threshold=binarized.high_threshold,
+                core_pixel_count=binarized.core_pixel_count,
             ))
             continue
         soft_local = soft_raster[row_off:row_off + wh, col_off:col_off + ww]
@@ -641,10 +894,14 @@ def paint_and_vectorize_pixel_or(
             out.append(PaintedPolygon(
                 geom=poly, score=0.0, mask_mean_confidence=0.0,
                 label=1, contributing_detection_count=0,
+                effective_threshold=binarized.effective_threshold,
+                high_threshold=binarized.high_threshold,
+                core_pixel_count=binarized.core_pixel_count,
             ))
             continue
         soft_inside = soft_local[m]
-        soft_above = soft_inside[soft_inside >= cutoff]
+        stat_cutoff = _threshold_to_uint8(binarized.effective_threshold)
+        soft_above = soft_inside[soft_inside >= stat_cutoff]
         mmc = float(soft_above.mean()) / 255.0 if soft_above.size else 0.0
         score_inside = score_local[m]
         score_above = score_inside[score_inside > 0]
@@ -652,6 +909,9 @@ def paint_and_vectorize_pixel_or(
         out.append(PaintedPolygon(
             geom=poly, score=sc_max, mask_mean_confidence=mmc,
             label=1, contributing_detection_count=0,  # not tracked in this fast path
+            effective_threshold=binarized.effective_threshold,
+            high_threshold=binarized.high_threshold,
+            core_pixel_count=binarized.core_pixel_count,
         ))
 
     return out

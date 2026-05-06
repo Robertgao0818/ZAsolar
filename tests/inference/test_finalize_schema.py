@@ -173,6 +173,8 @@ def test_finalize_writes_min_schema(tmp_path):
     assert cfg["pipeline_version"] == "direct_maskrcnn_v1"
     assert cfg["parity_mode"] == "direct"
     assert cfg["confidence_source"] == "score"
+    assert cfg["merge_mode"] == "per-detection"
+    assert cfg["vectorize_multi_component"] == "largest"
     assert cfg["result_count"] == 1
     assert cfg["stage_counts"]["raw_total"] == 1
 
