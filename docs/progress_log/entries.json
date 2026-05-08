@@ -583,5 +583,60 @@
     "timestamp": "2026-05-08T09:44:28Z",
     "source": "commit:c633b269",
     "summary": "feat(model): optional 56×56 mask head resolution for cat-3 fix"
+  },
+  {
+    "timestamp": "2026-05-08T10:13:47Z",
+    "source": "commit:6ee95a85",
+    "summary": "docs(progress): restructure week folders to canonical Wed-start grouping"
+  },
+  {
+    "timestamp": "2026-05-08T10:15:05Z",
+    "source": "commit:7b671ca6",
+    "summary": "chore(li-gt): archive Li GT material to docs/experiment-archive/"
+  },
+  {
+    "timestamp": "2026-05-08T10:16:02Z",
+    "source": "commit:ffede383",
+    "summary": "feat(training): add JHB Phase A boundary-aware retrain pipeline"
+  },
+  {
+    "timestamp": "2026-05-08T10:16:32Z",
+    "source": "commit:1a45075f",
+    "summary": "docs(experiments): record train20_val5_hn V3-C continued retrain as negative"
+  },
+  {
+    "timestamp": "2026-05-08T10:17:26Z",
+    "source": "commit:a45f684d",
+    "summary": "chore(li-gt): drop Li GT references from active analysis/validation code"
+  },
+  {
+    "timestamp": "2026-05-08T10:17:45Z",
+    "source": "commit:60758819",
+    "summary": "docs(experiments): V1.4 validation running log + supporting probes"
+  },
+  {
+    "timestamp": "2026-05-08T10:18:17Z",
+    "source": "commit:2943860c",
+    "summary": "feat(probes): postproc & recall recovery probes for V3-C ceiling analysis"
+  },
+  {
+    "timestamp": "2026-05-08T10:18:53Z",
+    "source": "commit:ce2bc927",
+    "summary": "feat(imagery): nationwide admin-grid imagery acquisition scaffolding"
+  },
+  {
+    "timestamp": "2026-05-08T10:21:15Z",
+    "source": "commit:8be0d463",
+    "summary": "chore(docs): purge Li GT references and update week-folder paths"
+  },
+  {
+    "timestamp": "2026-05-08T10:21:49Z",
+    "source": "commit:cee2466c",
+    "summary": "feat(claude-config): auto-update git pod remote when SSH details change"
+  },
+  {
+    "timestamp": "2026-05-08T10:21:49Z",
+    "source": "commit:b7c5d46e",
+    "summary": "feat(annotations): expand_cut_polygons utility + joburg vexcel grid row"
   }
 ]

@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-05-05: Phase-0 wiring 完整跑通：Task E/F/G review fix + Task H smoke + Task I 真跑迭代 (3 轮 10-anchor)，最终 4 high+4 medium+2 ambiguous
-- 2026-05-05: feat(temporal-phase0): same-roof consistency hint in batch prompt
-- 2026-05-05: feat(temporal-phase0): ring marker + post-hoc census-GT check + Gemini calibration clause (P1+P2)
-- 2026-05-05: fix(gehi): dedupe vintage rows by capture_date, not by version (74→74 vs 74→15; restored progressive walk-back)
-- 2026-05-05: docs(progress): 2026-05-05 daily log + Phase-0 subrepo entry sync
-- 2026-05-05: test(temporal-phase0): Task H — pipeline mock integration smoke (subprocess-driven, no GEHI/Gemini)
-- 2026-05-05: fix(temporal-phase0): Task E/F review fixes — output path defaults + load failure abort
-- 2026-05-05: fix(region-registry): expose census_imagery_mid_date on ImageryLayerConfig
+- 2026-05-08: feat(claude-config): auto-update git pod remote when SSH details change
+- 2026-05-08: feat(annotations): expand_cut_polygons utility + joburg vexcel grid row
+- 2026-05-08: chore(docs): purge Li GT references and update week-folder paths
+- 2026-05-08: feat(imagery): nationwide admin-grid imagery acquisition scaffolding
+- 2026-05-08: feat(probes): postproc & recall recovery probes for V3-C ceiling analysis
+- 2026-05-08: docs(experiments): V1.4 validation running log + supporting probes
+- 2026-05-08: chore(li-gt): drop Li GT references from active analysis/validation code
+- 2026-05-08: docs(experiments): record train20_val5_hn V3-C continued retrain as negative
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
