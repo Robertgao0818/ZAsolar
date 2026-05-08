@@ -13,7 +13,7 @@ Core idea:
 
 Typical Joburg CBD usage:
   python3 scripts/analysis/cluster_level_eval.py \
-      --annotation-dir /mnt/d/ZAsolar/annotations_inbox/Joburg_CBD_Li \
+      --annotation-dir data/annotations_channel2_clean/G0816 \
       --results-root results \
       --region jhb \
       --output-dir results/analysis/joburg_cbd_cluster_eval_<run_id>

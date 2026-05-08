@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Build model area/coverage tracker from existing prediction and GT polygons.
 
-This is the reusable version of the 25-grid GEID Li area-eval frame.  It
-answers two questions per model/grid:
+This tracker answers two questions per model/grid:
 
 1. Coverage / discovery: how much of the human-cut solar area did the model
    find, and what fraction of GT installations have substantial model coverage?
@@ -55,16 +54,6 @@ OUTPUT_MD = OUTPUT_DIR / "model_area_coverage_tracker.md"
 
 REGION_KEY = {"ct": "cape_town", "jhb": "johannesburg", "cape_town": "cape_town", "johannesburg": "johannesburg"}
 MAX_PLAUSIBLE_POLY_M2 = 20_000.0
-
-# Li independent GT locations (human annotations that are NOT the reviewed-prediction
-# self-loop GT). Evaluating predictions against these gives the blueprint benchmark:
-# how much human-cut solar area did the model find, and how close is the total area.
-LI_GT_DIRS: dict[str, list[Path]] = {
-    "cape_town": [REPO_ROOT / "data" / "annotations" / "Capetown_Li"],
-    "johannesburg": [
-        Path("/mnt/d/ZAsolar/annotations_inbox/Joburg_CBD_Li"),
-    ],
-}
 
 COLUMNS = [
     "region",
@@ -209,15 +198,6 @@ def _reviewed_gt_spec(region: str, grid_id: str) -> tuple[Path, str | None] | No
     return None
 
 
-def _li_gt_spec(region: str, grid_id: str) -> tuple[Path, str | None] | None:
-    """Independent Li human annotation GT. Returns None if no Li file for this grid."""
-    for ann_dir in LI_GT_DIRS.get(region, []):
-        found = _find_gpkg_in_dir(ann_dir, grid_id)
-        if found:
-            return found, None
-    return None
-
-
 # Back-compat alias; nothing else should call this, but keep it so external scripts
 # that may have imported `_gt_spec` don't break silently.
 def _gt_spec(region: str, grid_id: str) -> tuple[Path, str | None] | None:
@@ -331,9 +311,8 @@ def discover_prediction_rows() -> list[dict[str, str]]:
     """Walk results/ for every predictions_metric.gpkg and synthesize tracker-shaped rows.
 
     Many grids have predictions but no presence_metrics.csv (inference-only runs).
-    Those are invisible to the grid-metrics tracker but still evaluable against Li GT.
-    Rows produced here mimic the shape of model_grid_metrics_tracker.csv rows so the
-    downstream evaluation loop is unchanged.
+    Rows produced here mimic the shape of model_grid_metrics_tracker.csv rows so
+    the downstream evaluation loop is unchanged.
     """
     base = REPO_ROOT / "results"
     if not base.exists():
@@ -384,24 +363,11 @@ def merge_row_sources(
     return list(by_key.values())
 
 
-def _benchmark_alias(r: dict[str, str], gt_source_type: str) -> str:
-    """Stable report alias for historical Li benchmark artifacts."""
-    if gt_source_type != "li" or r.get("region") != "jhb":
-        return ""
-    run = r.get("model_run", "")
-    if run == "v3c_geid_2024_02":
-        return "v3c_vs_li_20260419"
-    if run == "v4_aerial_2023":
-        return "v4_vs_li_20260419"
-    return ""
-
-
 def _blank_out_row(r: dict[str, str], gt_source_type: str) -> dict[str, Any]:
     out = {k: "" for k in COLUMNS}
     for k in ["region", "model_family", "model_run", "imagery_layer", "grid_id", "result_dir"]:
         out[k] = r.get(k, "")
     out["gt_source_type"] = gt_source_type
-    out["benchmark_alias"] = _benchmark_alias(r, gt_source_type)
     return out
 
 
@@ -445,11 +411,7 @@ def _evaluate_single_gt(
 
 
 def evaluate_tracker_row(r: dict[str, str]) -> list[dict[str, Any]]:
-    """Emit one output row per available GT source (reviewed + Li).
-
-    Li GT is evaluated independently of ``is_valid_eval`` — the whole point of
-    the Li benchmark is that it does not rely on prior reviewed eval.
-    """
+    """Emit one output row for the reviewed GT source, when available."""
     region = REGION_KEY.get(r.get("region", ""), "")
     grid_id = r.get("grid_id", "")
     if not region or not grid_id:
@@ -465,24 +427,14 @@ def evaluate_tracker_row(r: dict[str, str]) -> list[dict[str, Any]]:
         out["skip_reason"] = f"missing predictions_metric.gpkg: {pred_path.relative_to(REPO_ROOT)}"
         return [out]
 
-    rows: list[dict[str, Any]] = []
-
     reviewed = _reviewed_gt_spec(region, grid_id)
     if reviewed is not None:
-        rows.append(_evaluate_single_gt(r, region, grid_id, pred_path, "reviewed", reviewed[0], reviewed[1]))
-    # else: silently skip the reviewed row when GT is missing — we don't want
-    # to double-count "no Li, no reviewed" as two skipped rows.
+        return [_evaluate_single_gt(r, region, grid_id, pred_path, "reviewed", reviewed[0], reviewed[1])]
 
-    li = _li_gt_spec(region, grid_id)
-    if li is not None:
-        rows.append(_evaluate_single_gt(r, region, grid_id, pred_path, "li", li[0], li[1]))
-
-    if not rows:
-        out = _blank_out_row(r, "")
-        out["eval_status"] = "skipped"
-        out["skip_reason"] = "no GT source (neither reviewed nor Li)"
-        return [out]
-    return rows
+    out = _blank_out_row(r, "")
+    out["eval_status"] = "skipped"
+    out["skip_reason"] = "no reviewed GT source"
+    return [out]
 
 
 def summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -573,7 +525,7 @@ def write_outputs(rows: list[dict[str, Any]], summaries: list[dict[str, Any]]) -
         return out
 
     def _imagery_bucket(run: str) -> str:
-        """Group key for splitting Li runs by imagery layer."""
+        """Group key for splitting reviewed runs by imagery layer."""
         if "geid_2024_02" in run:
             return "geid_2024_02"
         if "aerial_2023" in run:
@@ -582,47 +534,7 @@ def write_outputs(rows: list[dict[str, Any]], summaries: list[dict[str, Any]]) -
             return "aerial_2025"
         return "other"
 
-    li_summaries = [s for s in summaries if s.get("gt_source_type") == "li"]
     reviewed_summaries = [s for s in summaries if s.get("gt_source_type") == "reviewed"]
-
-    # ---- TL;DR ----
-    li_jhb_cbd = [s for s in li_summaries if _imagery_bucket(s["model_run"]) == "geid_2024_02"]
-    if li_jhb_cbd:
-        top3 = sorted(li_jhb_cbd, key=lambda s: s.get("area_f1", 0), reverse=True)[:3]
-        md.append("## TL;DR — top runs on V1.4 main canon (25-grid JHB CBD GEID × Li GT)")
-        md.append("")
-        md.append("| rank | model_run | area F1 | area R | pred/GT | cov≥0.5 |")
-        md.append("|---|---|---:|---:|---:|---:|")
-        for i, s in enumerate(top3):
-            md.append(
-                f"| {i+1} | `{s['model_run']}` | **{_fmt(s['area_f1'])}** | {_fmt(s['area_recall'])} | "
-                f"{_fmt(s['pred_gt_area_ratio'])} | {_fmt(s['mean_gt_coverage_ge_05_rate'])} |"
-            )
-        md.append("")
-
-    # ---- Section: V1.4 main canon ----
-    md.append("## V1.4 main canon: 25-grid JHB CBD GEID × independent Li human GT")
-    md.append("")
-    md.append("Headline area-eval frame. Li GT is independent of the model (no self-loop bias).")
-    md.append("All runs use the same 25 grids, same chunked GEID 2024-02 imagery, same v4_canonical postproc.")
-    md.append("Sorted by area F1 desc; ⭐ on the top row.")
-    md.append("")
-    if li_jhb_cbd:
-        md.extend(_render_narrow(li_jhb_cbd))
-    else:
-        md.append("_(no geid_2024_02 Li-evaluated runs)_")
-    md.append("")
-
-    # ---- Section: Other Li runs (different imagery domains, not directly comparable) ----
-    li_other = [s for s in li_summaries if _imagery_bucket(s["model_run"]) != "geid_2024_02"]
-    if li_other:
-        md.append("## Other Li GT runs (different imagery domains — not directly comparable to canon)")
-        md.append("")
-        md.append("Runs on `aerial_2023` / `aerial_2025` / other layers. Imagery vintage and resolution differ from")
-        md.append("the GEID canon, so these area F1 values are not apples-to-apples with the canon table above.")
-        md.append("")
-        md.extend(_render_narrow(li_other))
-        md.append("")
 
     # ---- Section: Reviewed GT (diagnostic only) ----
     md.append("## Reviewed-GT diagnostic (self-loop biased — for trend tracking only)")
@@ -677,7 +589,7 @@ def main() -> int:
             ok_by_type[r.get("gt_source_type", "")] += 1
     print(
         f"[summary] ok_reviewed={ok_by_type.get('reviewed', 0)} "
-        f"ok_li={ok_by_type.get('li', 0)} total_rows={len(rows)} summaries={len(summaries)}"
+        f"total_rows={len(rows)} summaries={len(summaries)}"
     )
     return 0
 

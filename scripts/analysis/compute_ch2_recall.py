@@ -24,7 +24,7 @@ Caveat
 ------
 clean GT was built from the same V3-C predictions used here for V3-C recall.
 The V3C_TP source subset is therefore self-recall (~100% expected). The
-informative numbers are: paired V4.1 recall on the same GT, and per-source
+informative numbers are paired V4.1 recall on the same GT and per-source
 breakdown (SAM_supp + Li_include reflect what V3-C originally missed).
 """
 from __future__ import annotations
