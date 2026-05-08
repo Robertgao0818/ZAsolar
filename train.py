@@ -1,12 +1,12 @@
 """
-Fine-tune geoai's Mask R-CNN (ResNet50-FPN) on Cape Town solar panel annotations.
+Fine-tune Mask R-CNN (ResNet50-FPN) on Cape Town solar panel annotations.
 
 Two-stage training:
   Stage 1 — Heads-only:  ROI heads + mask head, backbone frozen, 3 epochs, LR=1e-3
   Stage 2 — Full fine-tune: all parameters, up to 20 epochs, LR=1e-4, cosine decay
 
 Checkpoint selection: best validation segm_AP50.
-Output: .pth file compatible with geoai SolarPanelDetector(model_path=...).
+Output: .pth state_dict, loadable via core.models.build_solar_maskrcnn.
 
 Usage:
     python train.py --coco-dir data/coco [--output-dir checkpoints] [--epochs2 20]
@@ -554,8 +554,8 @@ def main():
     parser.add_argument("--coco-dir", default="data/coco", help="COCO dataset directory")
     parser.add_argument("--output-dir", default="checkpoints", help="Output directory for checkpoints")
     parser.add_argument(
-        "--pretrained", default=None,
-        help="Path to geoai pretrained .pth (default: auto-download from HuggingFace)",
+        "--pretrained", default="checkpoints/exp003_C_targeted_hn/best_model.pth",
+        help="Path to pretrained .pth used as initial weights (default: V3-C best_model.pth)",
     )
     parser.add_argument("--epochs1", type=int, default=3, help="Stage 1 epochs (heads-only)")
     parser.add_argument("--epochs2", type=int, default=20, help="Stage 2 epochs (full fine-tune)")
@@ -575,6 +575,12 @@ def main():
         "--profile", action="store_true",
         help="Print per-stage wall/GPU timing breakdown after each epoch",
     )
+    parser.add_argument(
+        "--jhb-phaseA-spec", default=None,
+        help="If set, use JHBRawPartsDataset + boundary-aware mask supervision "
+             "(see core.training.boundary_aware_mask). Path to "
+             "configs/datasets/jhb_phaseA.yaml. Bypasses --coco-dir.",
+    )
     args = parser.parse_args()
 
     device = torch.device("cuda:0")
@@ -589,22 +595,47 @@ def main():
         print("[AMP] Mixed precision training enabled")
 
     # ── Resolve pretrained weights ────────────────────────────────────
-    pretrained_path = args.pretrained
-    if pretrained_path is None:
-        from huggingface_hub import hf_hub_download
-        pretrained_path = hf_hub_download(
-            repo_id="giswqs/geoai",
-            filename="solar_panel_detection.pth",
+    pretrained_path = Path(args.pretrained)
+    if not pretrained_path.is_file():
+        raise FileNotFoundError(
+            f"Pretrained checkpoint not found: {pretrained_path}. "
+            "Pass --pretrained <path-to-.pth> explicitly."
         )
-        print(f"[MODEL] Using geoai weights: {pretrained_path}")
+    print(f"[MODEL] Using pretrained weights: {pretrained_path}")
 
     # ── Datasets ──────────────────────────────────────────────────────
-    train_ds = CocoSolarDataset(
-        coco_dir / "train.json", coco_dir, transforms=TrainTransforms(args.chip_size)
-    )
-    val_ds = CocoSolarDataset(
-        coco_dir / "val.json", coco_dir, transforms=ValTransforms()
-    )
+    if args.jhb_phaseA_spec:
+        from core.training.boundary_aware_mask import install_patch, stash_batch_supervision
+        from core.training.jhb_phaseA_dataset import JHBRawPartsDataset, load_spec
+        from core.training.jhb_phaseA_transforms import (
+            BoundaryAwareTrainTransforms,
+            ValTransforms as _PhaseAValTransforms,
+        )
+
+        install_patch()
+        print(f"[PATCH] boundary-aware maskrcnn_loss installed")
+
+        spec = load_spec(args.jhb_phaseA_spec)
+        train_ds = JHBRawPartsDataset(
+            spec, "train", transforms=BoundaryAwareTrainTransforms(args.chip_size)
+        )
+        val_ds = JHBRawPartsDataset(
+            spec, "val", transforms=_PhaseAValTransforms()
+        )
+        # Stash supervision tensors before each forward (only when training).
+        _stash_fn = stash_batch_supervision
+
+        def _pre_forward_hook(module, args_in):
+            if module.training and len(args_in) >= 2 and args_in[1] is not None:
+                _stash_fn(args_in[1])
+    else:
+        train_ds = CocoSolarDataset(
+            coco_dir / "train.json", coco_dir, transforms=TrainTransforms(args.chip_size)
+        )
+        val_ds = CocoSolarDataset(
+            coco_dir / "val.json", coco_dir, transforms=ValTransforms()
+        )
+        _pre_forward_hook = None
     print(f"[DATA] Train: {len(train_ds)} images, Val: {len(val_ds)} images")
 
     loader_kwargs = dict(
@@ -622,6 +653,10 @@ def main():
     # ── Model ─────────────────────────────────────────────────────────
     model = build_model(pretrained_path, num_classes=2)
     model.to(device)
+
+    if _pre_forward_hook is not None:
+        model.register_forward_pre_hook(_pre_forward_hook)
+        print("[HOOK] forward_pre_hook registered for boundary-aware supervision")
 
     best_ap50 = 0.0
     best_f1 = 0.0

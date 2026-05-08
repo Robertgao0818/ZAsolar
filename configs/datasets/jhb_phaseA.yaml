@@ -1,0 +1,86 @@
+spec_name: jhb_phaseA
+created_at: "2026-05-08"
+purpose: |
+  JHB CBD Vexcel 2024 retrain pool with boundary-aware mask supervision.
+  Replaces train20_val5_hn (CT mixed in, SAM-supp clean_gt as strict mask
+  target). This spec uses raw V3-C reviewed predictions + sam_added per
+  grid, NOT the dissolved clean_gt. Mask supervision is differential by
+  source so V3-C halo never enters mask BCE.
+
+  See docs/plans/2026-05-08-jhb-phaseA-retrain.md for full rationale.
+
+# Tile + chip settings
+imagery:
+  region: johannesburg
+  imagery_layer: vexcel_2024  # Vexcel ortho 6.7 cm GSD
+  chip_size: 400
+  overlap: 0.25
+  tile_crs: "EPSG:3857"  # Vexcel native; polygons reprojected per-tile
+
+# Annotation source roots (relative to project root)
+sources:
+  reviewed_root: results/johannesburg/v3c_vexcel_2024_ch1_sample
+  reviewed_pattern: "{grid_id}/review/{grid_id}_reviewed.gpkg"
+  sam_added_pattern: "{grid_id}/review/{grid_id}_sam_added.gpkg"
+  metric_crs: "EPSG:32735"  # for area calculation
+
+# Mask supervision schedule (per source / area bucket)
+# Keys: review_status=correct -> v3c_correct; review_status=delete -> hard neg;
+#       review_status=edit    -> drop (replaced by sam_added)
+supervision:
+  v3c_correct:
+    use_for_mask: false       # mask_weight = 0
+    use_for_box_cls: true
+  v3c_edit:
+    drop: true
+  v3c_delete:
+    drop: true                # currently treated as no-annotation regions; chip is bg
+    use_for_box_cls: false
+  sam_added:
+    use_for_mask: true
+    use_for_box_cls: true
+    mask_weight: 1.0
+    boundary_ignore_px:
+      "<600": 2
+      ">=600": 3
+
+# Splits (whole-grid splits to avoid train/val leakage)
+splits:
+  train:
+    grids:
+      - G0772
+      - G0773
+      - G0774
+      - G0775
+      - G0814
+      - G0815
+      - G0818
+      - G0853
+      - G0854
+      - G0855
+      - G0856
+      - G0857
+      - G0888
+      - G0889
+      - G0890
+      - G0892
+      - G0922
+      - G0923
+      - G0924
+      - G0926
+    dropped:
+      - {grid_id: G0776, reason: "10 polygons; skylight-FP-heavy"}
+      - {grid_id: G0891, reason: "15 polygons; skylight-FP-heavy"}
+  val:
+    grids: [G0816, G0817, G0925]
+    note: |
+      Same val grids as train20_val5_hn for comparability. Val GT for
+      headline metrics still uses data/annotations_channel2_clean/<G>/<G>_clean_gt.gpkg
+      via downstream eval scripts (per feedback_eval_gt_lock_clean.md).
+      The dataset class below uses the same raw-parts source for val
+      chip-level F1@0.85 only, applying boundary_ignore_px to the eval
+      target so chip metric uses identical mask semantics as training.
+
+# Negative chip ratio (chips with no positive annotation, post-balance)
+neg_ratio: 0.15
+seed: 42
