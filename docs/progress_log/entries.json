@@ -643,5 +643,10 @@
     "timestamp": "2026-05-08T10:21:49Z",
     "source": "commit:1bd626ac",
     "summary": "chore(progress): refresh ROADMAP and entries.json from today's commits"
+  },
+  {
+    "timestamp": "2026-05-08T10:28:08Z",
+    "source": "commit:2f97a71a",
+    "summary": "fix(progress-tracker): break the catch-up commit infinite loop"
   }
 ]
