@@ -1,0 +1,15 @@
+{
+  "_comment": "Tier-gentle: lower mask threshold for big detections to fill cat-3 interior cutoffs without affecting small-installation halo. Detection area >=200 m² → 0.22, >=500 m² → 0.18.",
+  "confidence_threshold": 0.3,
+  "mask_threshold": 0.3,
+  "mask_threshold_area_m2_tiers": [
+    {"min_area_m2": 200, "threshold": 0.22},
+    {"min_area_m2": 500, "threshold": 0.18}
+  ],
+  "post_conf_threshold": 0.85,
+  "min_object_area": 5,
+  "max_elongation": 8.0,
+  "min_solidity": 0.0,
+  "shadow_rgb_thresh": 60,
+  "merge_mode": "pixel-or"
+}

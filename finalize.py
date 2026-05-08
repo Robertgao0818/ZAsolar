@@ -51,6 +51,7 @@ from core.postproc import (
     compute_geometric_properties,
     compute_rgb_zonal_means,
     affine_pixel_area,
+    dissolve_hairline_gaps,
     load_postproc_config,
     paint_geoai_parity_mask,
     paint_and_vectorize_pixel_or,
@@ -97,6 +98,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Pixel-space tolerance for shapely.simplify (0 = no simplify)")
     p.add_argument("--nms-iou", type=float, default=0.5,
                    help="IoU threshold for grid-level spatial_nms after vectorize")
+    p.add_argument("--dissolve-hairline-tolerance-m", type=float, default=0.0,
+                   help="If >0, after spatial_nms merge polygon pairs whose "
+                        "boundary-to-boundary distance ≤ tolerance metres. "
+                        "Targets cat-1 (single installation split across TIF chunk seam). "
+                        "0.5 m is safe — smaller than typical inter-installation gap. "
+                        "0.0 (default) disables.")
     p.add_argument("--no-pre-vector-filter", action="store_true",
                    help="Disable legacy confidence_threshold → pre_vector cutoff")
     p.add_argument("--allow-overwrite-canonical", action="store_true",
@@ -782,6 +789,15 @@ def run(args: argparse.Namespace) -> int:
         n_after_nms = len(pred_nms)
         print(f"[finalize] grid-level spatial_nms (IoU={args.nms_iou}): "
               f"{n_after_postproc} → {n_after_nms}")
+
+    # ── Cross-TIF hairline dissolve (cat-1 fix) ──────────────────────
+    dissolve_tol = float(args.dissolve_hairline_tolerance_m)
+    if dissolve_tol > 0:
+        n_before_dissolve = len(pred_nms)
+        pred_nms = dissolve_hairline_gaps(pred_nms, tolerance_m=dissolve_tol)
+        n_after_nms = len(pred_nms)
+        print(f"[finalize] dissolve_hairline_gaps (tol={dissolve_tol} m): "
+              f"{n_before_dissolve} → {n_after_nms}")
 
     # ── Write outputs ────────────────────────────────────────────────
     _write_outputs(

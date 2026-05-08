@@ -150,6 +150,99 @@ def spatial_nms(gdf, iou_threshold: float = 0.5):
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# Cross-TIF dissolve — fixes cat-1 (single installation split at TIF seam)
+# ─────────────────────────────────────────────────────────────────────────
+def dissolve_hairline_gaps(gdf, tolerance_m: float = 0.5):
+    """Merge polygon pairs whose boundary-to-boundary distance ≤ tolerance_m.
+
+    Targets the failure mode where a single physical installation is split
+    into two predictions across a TIF chunk seam, leaving a hairline gap.
+    Connected-components: polygons within tolerance of any other member of
+    a component are unioned. Tolerance should be < typical inter-
+    installation gap (≥ 3 m) to avoid merging neighbours; 0.3-0.5 m is
+    safe for the cat-1 case observed in JHB CBD 25 grid.
+
+    Numeric columns propagate as MAX of contributors (so confidence /
+    score is preserved). Geometry-derived columns (area_m2, elongation,
+    solidity) are recomputed via :func:`compute_geometric_properties` if
+    the input had them; otherwise left absent.
+    """
+    import geopandas as gpd
+    import pandas as pd
+    from collections import defaultdict
+    from shapely.ops import unary_union
+
+    n = len(gdf)
+    if n <= 1 or tolerance_m <= 0:
+        return gdf.copy()
+
+    sindex = gdf.sindex
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(x: int, y: int) -> None:
+        rx, ry = find(x), find(y)
+        if rx != ry:
+            parent[rx] = ry
+
+    geoms = list(gdf.geometry.values)
+    for i in range(n):
+        gi = geoms[i]
+        if gi is None or gi.is_empty:
+            continue
+        b = gi.bounds
+        expanded = (b[0] - tolerance_m, b[1] - tolerance_m,
+                    b[2] + tolerance_m, b[3] + tolerance_m)
+        for j in sindex.intersection(expanded):
+            if j <= i:
+                continue
+            gj = geoms[j]
+            if gj is None or gj.is_empty:
+                continue
+            try:
+                if gi.distance(gj) <= tolerance_m:
+                    union(i, j)
+            except Exception:
+                continue
+
+    groups: dict[int, list[int]] = defaultdict(list)
+    for i in range(n):
+        groups[find(i)].append(i)
+
+    rows = []
+    for members in groups.values():
+        if len(members) == 1:
+            rows.append(gdf.iloc[members[0]].copy())
+            continue
+        member_geoms = [geoms[m] for m in members if geoms[m] is not None and not geoms[m].is_empty]
+        merged = unary_union(member_geoms)
+        # Use the largest-area contributor's row as the base
+        biggest = max(members, key=lambda m: geoms[m].area if geoms[m] is not None else 0.0)
+        base = gdf.iloc[biggest].copy()
+        base["geometry"] = merged
+        # Propagate numeric maxes (preserve max confidence/score across the cluster)
+        for col in gdf.columns:
+            if col == "geometry":
+                continue
+            if pd.api.types.is_numeric_dtype(gdf[col]):
+                base[col] = max(gdf.iloc[m][col] for m in members
+                                if pd.notna(gdf.iloc[m][col]))
+        rows.append(base)
+
+    out = gpd.GeoDataFrame(rows, geometry="geometry", crs=gdf.crs).reset_index(drop=True)
+    # Recompute geometry-derived columns if present
+    geom_cols = {"area_m2", "elongation", "solidity"}
+    if geom_cols & set(out.columns):
+        out = compute_geometric_properties(out)
+    return out
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # Geometric properties — replaces geoai.add_geometric_properties
 # ─────────────────────────────────────────────────────────────────────────
 def compute_geometric_properties(gdf):
