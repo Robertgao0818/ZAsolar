@@ -648,5 +648,10 @@
     "timestamp": "2026-05-08T10:28:08Z",
     "source": "commit:2f97a71a",
     "summary": "fix(progress-tracker): break the catch-up commit infinite loop"
+  },
+  {
+    "timestamp": "2026-05-08T10:36:42Z",
+    "source": "commit:3cd74bdd",
+    "summary": "Revert \"feat(claude-config): auto-update git pod remote when SSH details change\""
   }
 ]
