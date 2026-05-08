@@ -23,6 +23,9 @@ regions:
     product: "final-ortho"
     bbox: [30.2893, -29.7104, 30.4532, -29.5190]
     coverage_path: "data/vexcel_coverage/pietermaritzburg_coverage.geojson"
+    admin_name: "Msunduzi Local Municipality"
+    admin_country: "South Africa"
+    admin_grid_prefix: "MSU"
 
   durban:
     city: "Durban"
@@ -36,6 +39,9 @@ regions:
     product: "quick-ortho"
     bbox: [30.7874, -30.1014, 31.1210, -29.6762]
     coverage_path: "data/vexcel_coverage/durban_coverage.geojson"
+    admin_name: "eThekwini Metropolitan Municipality"
+    admin_country: "South Africa"
+    admin_grid_prefix: "ETK"
 
   east_london:
     city: "East London"
@@ -49,6 +55,9 @@ regions:
     product: "final-ortho"
     bbox: [27.7545, -33.0914, 27.9855, -32.9239]
     coverage_path: "data/vexcel_coverage/east_london_coverage.geojson"
+    admin_name: "Buffalo City Metropolitan Municipality"
+    admin_country: "South Africa"
+    admin_grid_prefix: "BCM"
 
   gqeberha:
     city: "Port Elizabeth / Gqeberha"
@@ -62,6 +71,9 @@ regions:
     product: "final-ortho"
     bbox: [25.3213, -34.0273, 25.7039, -33.7064]
     coverage_path: "data/vexcel_coverage/gqeberha_coverage.geojson"
+    admin_name: "Nelson Mandela Bay Metropolitan Municipality"
+    admin_country: "South Africa"
+    admin_grid_prefix: "NMB"
 
   bloemfontein:
     city: "Bloemfontein"
@@ -75,6 +87,9 @@ regions:
     product: "final-ortho"
     bbox: [26.1184, -29.2509, 26.3320, -29.0534]
     coverage_path: "data/vexcel_coverage/bloemfontein_coverage.geojson"
+    admin_name: "Mangaung Metropolitan Municipality"
+    admin_country: "South Africa"
+    admin_grid_prefix: "MNG"
 
   pretoria:
     city: "Pretoria"
@@ -88,3 +103,22 @@ regions:
     product: "quick-ortho"
     bbox: [28.0819, -25.8830, 28.4539, -25.6216]
     coverage_path: "data/vexcel_coverage/pretoria_coverage.geojson"
+    admin_name: "City of Tshwane Metropolitan Municipality"
+    admin_country: "South Africa"
+    admin_grid_prefix: "TSH"
+
+  joburg:
+    city: "Johannesburg"
+    province: "Gauteng"
+    grid_prefix: "JNB"
+    collection: "za-gp-johannesburg-2024"
+    capture_start: "2024-02-17"
+    capture_end: "2024-04-19"
+    avg_gsd_m: 0.0703
+    coverage_area_km2: 363.6
+    product: "final-ortho"
+    bbox: [27.9250, -26.2917, 28.1580, -26.0832]
+    coverage_path: "data/vexcel_coverage/joburg_coverage.geojson"
+    admin_name: "City of Johannesburg Metropolitan Municipality"
+    admin_country: "South Africa"
+    admin_grid_prefix: "JHB"

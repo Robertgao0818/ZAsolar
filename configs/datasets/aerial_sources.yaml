@@ -1,0 +1,133 @@
+# Aerial / ortho imagery source registry for the 7-city full-admin
+# inference pipeline. Each `source` is a single fetchable layer; the
+# per-region plan (data/imagery_plans/<region>_plan.csv) wires grids to
+# a primary source plus optional fallback chain.
+#
+# Schema:
+#   sources:
+#     <key>:
+#       type: vexcel | arcgis_imageserver
+#       region: <region_key>             # joburg | durban | ...
+#       gsd_m: <native GSD in meters>
+#       bands: 3 | 4
+#       capture_date_range: "YYYY-MM-DD~YYYY-MM-DD"
+#       <type-specific fields>
+#
+# Type-specific:
+#   vexcel:
+#     collection: za-gp-johannesburg-2024
+#     product: final-ortho | quick-ortho
+#   arcgis_imageserver:
+#     url: https://.../ImageServer
+#     verify_ssl: true | false           # eThekwini cert is self-signed
+#     output_sr: 3857                    # EPSG to request output in
+
+chunk:
+  per_grid: [2, 2]        # 4 chunks per 1km grid (each 500m × 500m)
+  # chunk_px is computed per source as round(500m / native_gsd_m / 100) * 100
+  # to ensure output GSD ≥ native (server rejects upsampled requests).
+  arcgis_max_request_px: 4000   # ArcGIS exportImage maxImage 4100, leave margin
+  jpeg_quality: 95
+  geotiff_options:
+    TILED: "YES"
+    COMPRESS: "JPEG"
+    PHOTOMETRIC: "YCBCR"
+    BLOCKXSIZE: 512
+    BLOCKYSIZE: 512
+
+sources:
+  # --- Vexcel (7 cities, 2024-2026) --------------------------------------
+  vexcel_joburg_2024:
+    type: vexcel
+    region: joburg
+    collection: za-gp-johannesburg-2024
+    product: final-ortho
+    gsd_m: 0.0703
+    bands: 3
+    capture_date_range: "2024-02-17~2024-04-19"
+
+  vexcel_durban_2026:
+    type: vexcel
+    region: durban
+    collection: za-kzn-durban-2026
+    product: quick-ortho
+    gsd_m: 0.069
+    bands: 3
+    capture_date_range: "2025-12-17~2026-01-06"
+
+  vexcel_pretoria_2026:
+    type: vexcel
+    region: pretoria
+    collection: za-gp-pretoria-2026
+    product: quick-ortho
+    gsd_m: 0.072
+    bands: 3
+    capture_date_range: "2026-02-05~2026-02-08"
+
+  vexcel_bloemfontein_2026:
+    type: vexcel
+    region: bloemfontein
+    collection: za-fs-bloemfontein-2026
+    product: final-ortho
+    gsd_m: 0.074
+    bands: 3
+    capture_date_range: "2026-01-18~2026-01-18"
+
+  vexcel_east_london_2026:
+    type: vexcel
+    region: east_london
+    collection: za-ec-eastlondon-2026
+    product: final-ortho
+    gsd_m: 0.071
+    bands: 3
+    capture_date_range: "2026-01-07~2026-01-08"
+
+  vexcel_gqeberha_2026:
+    type: vexcel
+    region: gqeberha
+    collection: za-ec-portelizabeth-2026
+    product: final-ortho
+    gsd_m: 0.072
+    bands: 3
+    capture_date_range: "2026-01-11~2026-01-21"
+
+  vexcel_pietermaritzburg_2025:
+    type: vexcel
+    region: pietermaritzburg
+    collection: za-kzn-pietermaritzburg-2025
+    product: final-ortho
+    gsd_m: 0.069
+    bands: 3
+    capture_date_range: "2025-12-16~2025-12-16"
+
+  # --- ArcGIS ImageServer (Vexcel-外 fallback) ---------------------------
+  coj_aerial_2023:
+    type: arcgis_imageserver
+    region: joburg
+    url: https://ags.joburg.org.za/server/rest/services/AerialPhotography/2023/ImageServer
+    verify_ssl: true
+    output_sr: 3857
+    gsd_m: 0.15
+    bands: 3
+    capture_date_range: "2023"
+
+  ethekwini_2023:
+    type: arcgis_imageserver
+    region: durban
+    url: https://gis.durban.gov.za/server/rest/services/AerialPhotography/AerialPhotography2023/ImageServer
+    verify_ssl: false      # self-signed
+    output_sr: 3857
+    gsd_m: 0.10
+    bands: 3
+    capture_date_range: "2023"
+    extent_lon_max: 30.87  # heuristic: 2023 missing east of this lon (per metadata WG31 xmax=-13000)
+
+  ethekwini_2022:
+    type: arcgis_imageserver
+    region: durban
+    url: https://gis.durban.gov.za/server/rest/services/AerialPhotography/AerialPhotography2022/ImageServer
+    verify_ssl: false
+    output_sr: 3857
+    gsd_m: 0.10
+    bands: 3
+    capture_date_range: "2022"
