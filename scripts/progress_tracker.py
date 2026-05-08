@@ -56,7 +56,10 @@ def load_entries() -> list[ProgressEntry]:
 def save_entries(entries: list[ProgressEntry]) -> None:
     ENTRIES_PATH.parent.mkdir(parents=True, exist_ok=True)
     data = [{"timestamp": e.timestamp, "source": e.source, "summary": e.summary} for e in entries]
-    ENTRIES_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    new_text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    if ENTRIES_PATH.exists() and ENTRIES_PATH.read_text(encoding="utf-8") == new_text:
+        return
+    ENTRIES_PATH.write_text(new_text, encoding="utf-8")
 
 
 def get_last_commit_entry() -> ProgressEntry:
@@ -71,6 +74,26 @@ def get_last_commit_entry() -> ProgressEntry:
         source=f"commit:{commit_hash[:8]}",
         summary=summary.strip(),
     )
+
+
+# Commits that only touch progress-tracker artefacts are catch-up commits
+# created solely to clean the dirty state after the tracker re-fired.
+# Recording them re-dirties the same files and triggers another catch-up,
+# which is the infinite loop we are breaking.
+PROGRESS_TRACKER_ARTEFACTS = {
+    "ROADMAP.md",
+    "docs/progress_log/entries.json",
+}
+
+
+def commit_touches_only(commit_hash: str, allowed: set[str]) -> bool:
+    output = subprocess.check_output(
+        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit_hash],
+        cwd=ROOT,
+        text=True,
+    )
+    files = {line.strip() for line in output.splitlines() if line.strip()}
+    return bool(files) and files.issubset(allowed)
 
 
 def render_recent_updates(entries: list[ProgressEntry], limit: int = 8) -> list[str]:
@@ -102,18 +125,20 @@ def replace_or_insert_block(
 
 
 def update_roadmap(entries: list[ProgressEntry], next_focus: list[str]) -> None:
-    text = ROADMAP_PATH.read_text(encoding="utf-8")
+    original = ROADMAP_PATH.read_text(encoding="utf-8")
     body_lines = ["### Recently Completed", *render_recent_updates(entries), "", "### Next Up"]
     body_lines.extend(f"- {item}" for item in next_focus)
 
-    text = replace_or_insert_block(
-        text=text,
+    new_text = replace_or_insert_block(
+        text=original,
         start_marker=ROADMAP_START,
         end_marker=ROADMAP_END,
         block_title="## Execution Track",
         body_lines=body_lines,
     )
-    ROADMAP_PATH.write_text(text, encoding="utf-8")
+    if new_text == original:
+        return
+    ROADMAP_PATH.write_text(new_text, encoding="utf-8")
 
 
 def parse_args() -> argparse.Namespace:
@@ -137,8 +162,16 @@ def main() -> None:
     next_focus = args.next_focus if args.next_focus is not None else list(DEFAULT_NEXT_FOCUS)
 
     new_entry: ProgressEntry | None = None
+    skip_reason: str | None = None
     if args.from_last_commit:
-        new_entry = get_last_commit_entry()
+        candidate = get_last_commit_entry()
+        commit_hash = candidate.source.removeprefix("commit:")
+        if any(e.source == candidate.source for e in entries):
+            skip_reason = f"already recorded ({candidate.source})"
+        elif commit_touches_only(commit_hash, PROGRESS_TRACKER_ARTEFACTS):
+            skip_reason = f"self-referential progress-tracker catch-up commit ({candidate.source})"
+        else:
+            new_entry = candidate
     elif args.summary:
         new_entry = ProgressEntry(timestamp=utc_now_iso(), source=args.source.strip(), summary=args.summary.strip())
 
@@ -153,6 +186,8 @@ def main() -> None:
     save_entries(entries)
     update_roadmap(entries, next_focus)
 
+    if skip_reason is not None:
+        print(f"[SKIP] {skip_reason}")
     if new_entry is not None:
         print(f"[RECORDED] {new_entry.summary}")
     print(f"[ROADMAP] {ROADMAP_PATH}")
