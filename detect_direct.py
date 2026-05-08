@@ -84,6 +84,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "closer geoai.SolarPanelDetector parity")
     p.add_argument("--detector-score-threshold", type=float, default=0.05,
                    help="model.roi_heads.score_thresh — controls what enters the artifact")
+    p.add_argument("--nms-iou-threshold", type=float, default=0.5,
+                   help="model.roi_heads.nms_thresh (box NMS IoU). 0.99 = effectively "
+                        "disabled; useful for probing whether sibling sub-arrays are "
+                        "being suppressed by NMS rather than missing at proposal stage.")
     p.add_argument("--detections-per-img", type=int, default=None,
                    help="model.roi_heads.detections_per_img; default is 300 in "
                         "direct mode and torchvision/geoai default 100 in geoai mode")
@@ -271,7 +275,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"[WARN] checkpoint load reported missing={len(info.missing)} "
               f"unexpected={len(info.unexpected)}")
     model.roi_heads.score_thresh = float(args.detector_score_threshold)
-    model.roi_heads.nms_thresh = 0.5
+    model.roi_heads.nms_thresh = float(args.nms_iou_threshold)
     model.roi_heads.detections_per_img = int(args.detections_per_img)
     model.eval()
     model.to(device)
@@ -359,7 +363,7 @@ def run(args: argparse.Namespace) -> int:
         model_builder="core.models.build_solar_maskrcnn",
         detector_score_threshold=float(args.detector_score_threshold),
         detections_per_img=int(args.detections_per_img),
-        nms_thresh=0.5,
+        nms_thresh=float(args.nms_iou_threshold),
         mask_threshold_used=float(args.mask_threshold),
         raw_mask_storage=args.raw_mask_storage,
         chip_size=(args.chip_size, args.chip_size),

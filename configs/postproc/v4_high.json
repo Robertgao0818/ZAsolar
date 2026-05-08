@@ -1,0 +1,28 @@
+{
+  "confidence_threshold": 0.3,
+  "mask_threshold": 0.3,
+  "post_conf_threshold": 0.98,
+  "min_object_area": 5,
+  "max_elongation": 8.0,
+  "min_solidity": 0.0,
+  "shadow_rgb_thresh": 60,
+  "_meta": {
+    "tag": "v4_high",
+    "task": "V1.4 high-precision seed inventory for solar_backdating",
+    "detector": "V3-C targeted hard-negative Mask R-CNN",
+    "refinement": "SAM2.1 mask+box prompt on detector polygons",
+    "calibration_scope": "JHB CBD 25-grid Vexcel 2024 clean GT, 2026-05-05",
+    "notes": "High-confidence candidate policy. On the 25-grid clean-GT proxy, score-only filtering did not reach 0.95 prediction purity; conf>=0.98 and sam_score>=0.98 is the highest-purity non-degenerate tested seed policy, but final precision target is Channel 1 per-stratum precision >= 0.95.",
+    "inventory_policy": {
+      "tag": "v4_high",
+      "source_run": "v3c_sam_maskbox_vexcel_2024",
+      "filter": {
+        "detector_confidence_min": 0.98,
+        "sam_score_min": 0.98,
+        "refined_area_m2_min": 5.0,
+        "refined_area_m2_max": 20000.0,
+        "update_area_columns": true
+      }
+    }
+  }
+}
