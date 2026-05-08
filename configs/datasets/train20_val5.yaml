@@ -1,0 +1,92 @@
+spec_name: train20_val5
+created_at: "2026-05-07"
+purpose: |
+  Frozen mixed-region dataset for evaluating new training runs against the
+  cross-grid failure modes surfaced on G0816/G0817/G0925.
+  CT side = aerial_2025 (municipal WMS).
+  JHB side = vexcel_2024 (CBD Ch2 clean GT, Vexcel ortho 6.7 cm GSD).
+  Val grids include G0816/G0817/G0925 to keep the failure-mode anchors out of
+  training; CT val grids picked from V3-C-already-inferred set so we can
+  compare new runs against existing detections.
+
+splits:
+  val:
+    johannesburg:
+      imagery_layer: vexcel_2024
+      annotation_root: data/annotations_channel2_clean
+      annotation_pattern: "{grid_id}/{grid_id}_clean_gt.gpkg"
+      grids: [G0816, G0817, G0925]
+    cape_town:
+      imagery_layer: aerial_2025
+      annotation_root: data/annotations/Capetown
+      grids:
+        - {grid_id: G2030, file: G2030_SAM2_260403.gpkg}
+        - {grid_id: G1971, file: G1971_SAM2_260403.gpkg}
+
+  train:
+    johannesburg:
+      imagery_layer: vexcel_2024
+      annotation_root: data/annotations_channel2_clean
+      annotation_pattern: "{grid_id}/{grid_id}_clean_gt.gpkg"
+      grids:
+        - G0772
+        - G0773
+        - G0774
+        - G0775
+        - G0814
+        - G0815
+        - G0818
+        - G0853
+        - G0854
+        - G0855
+        - G0856
+        - G0857
+        - G0888
+        - G0889
+        - G0890
+        - G0892
+        - G0922
+        - G0923
+        - G0924
+        - G0926
+      dropped:
+        - {grid_id: G0776, reason: "10 polygons; skylight-FP-heavy per regions.yaml"}
+        - {grid_id: G0891, reason: "15 polygons; skylight-FP-heavy per regions.yaml"}
+    cape_town:
+      imagery_layer: aerial_2025
+      annotation_root: data/annotations/Capetown
+      grids:
+        - {grid_id: G1920, file: G1920_SAM2_260403.gpkg, note: "14 ≥200m², 6 ≥500m² (best large-panel)"}
+        - {grid_id: G2027, file: G2027_SAM2_260403.gpkg, note: "8 ≥200m²"}
+        - {grid_id: G1743, file: G1743_SAM2_260403.gpkg, note: "7 ≥200m², 5 ≥500m²"}
+        - {grid_id: G1411, file: G1411_SAM2_260322.gpkg, note: "7 ≥200m², 2 ≥500m²"}
+        - {grid_id: G1635, file: G1635_SAM2_260324.gpkg, note: "4 ≥200m²"}
+        - {grid_id: G1919, file: G1919_SAM2_260403.gpkg, note: "3 ≥200m², 2 ≥500m²"}
+        - {grid_id: G1800, file: G1800_SAM2_260403.gpkg, note: "2 ≥200m²"}
+        - {grid_id: G1976, file: G1976_SAM2_260403.gpkg, note: "2 ≥200m², 27% ≥100m²"}
+        - {grid_id: G1634, file: G1634_SAM2_260324.gpkg, note: "2 ≥200m², n=242"}
+        - {grid_id: G1972, file: G1972_SAM2_260403.gpkg, note: "2 ≥200m²"}
+        - {grid_id: G1975, file: G1975_SAM2_260403.gpkg, note: "2 ≥200m², 2 ≥500m²"}
+        - {grid_id: G1300, file: G1300_SAM2_260322.gpkg, note: "1 ≥200m²"}
+        - {grid_id: G1911, file: G1911_SAM2_260403.gpkg, note: "1 ≥200m²"}
+        - {grid_id: G1973, file: G1973_SAM2_260403.gpkg, note: "1 ≥200m²"}
+        - {grid_id: G2029, file: G2029_SAM2_260403.gpkg, note: "1 ≥200m², n=198"}
+        - {grid_id: G1806, file: G1806_SAM2_260403.gpkg, note: "1 ≥200m²"}
+        - {grid_id: G1862, file: G1862_SAM2_260403.gpkg, note: "1 ≥200m²"}
+        - {grid_id: G1572, file: G1572_SAM2_260322.gpkg, note: "1 ≥200m²"}
+        - {grid_id: G1238, file: G1238_SAM2_260320.gpkg, note: "n=242 residential (diversity)"}
+        - {grid_id: G1570, file: G1570_SAM2_260322.gpkg, note: "n=138 residential (diversity)"}
+
+selection_rationale: |
+  - 3 JHB val grids (G0816/G0817/G0925) are the cross-grid failure-mode anchors
+    flagged by project_g0925_failure_modes / feedback_recall_recovery_constraints
+    memories; they MUST be held out so a new training run's improvement on these
+    cannot be driven by the model memorising them.
+  - 2 CT val grids (G2030, G1971) chosen from the subset that already has V3-C
+    inference results (results/cape_town/v3c_targeted_hn_aerial_2025/) so the
+    new model's val outputs can be compared directly against the existing
+    V3-C predictions on the same grids.
+  - JHB train: drop G0776 + G0891 (10 + 15 polygons, both flagged "skylight FP
+    heavy"); the remaining 20 cover the bulk of the Ch2 clean GT corpus.
+  - CT train: 18 grids with ≥1 polygon ≥200 m² (avoiding pure suburban) +
+    2 residential grids (G1238/G1570) for distribution diversity.
