@@ -102,3 +102,21 @@ data/annotations_channel2_micro/
 
 # Claude Code scheduled-task runtime lock file
 .claude/scheduled_tasks.lock
+
+# Building footprint data (downstream's responsibility per project_adoption_rate_dimension)
+data/buildings/
+
+# Imagery vintage probe artifacts (large, regeneratable from scripts/imagery/)
+probes/
+
+# Pod transfer tarballs
+jhb_phaseA_*.tar.gz
+
+# Generated git activity report
+docs/git_activity_report.html
+
+# Experiment archives: keep README/MANIFEST, drop heavy artefacts
+docs/experiment-archive/**/*.gpkg
+docs/experiment-archive/**/*.kml
+docs/experiment-archive/**/*.parquet
+docs/experiment-archive/**/_build_summary.json
