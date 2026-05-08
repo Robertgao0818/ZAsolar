@@ -5,12 +5,12 @@
 ### Recently Completed
 - 2026-05-08: feat(claude-config): auto-update git pod remote when SSH details change
 - 2026-05-08: feat(annotations): expand_cut_polygons utility + joburg vexcel grid row
+- 2026-05-08: chore(progress): refresh ROADMAP and entries.json from today's commits
 - 2026-05-08: chore(docs): purge Li GT references and update week-folder paths
 - 2026-05-08: feat(imagery): nationwide admin-grid imagery acquisition scaffolding
 - 2026-05-08: feat(probes): postproc & recall recovery probes for V3-C ceiling analysis
 - 2026-05-08: docs(experiments): V1.4 validation running log + supporting probes
 - 2026-05-08: chore(li-gt): drop Li GT references from active analysis/validation code
-- 2026-05-08: docs(experiments): record train20_val5_hn V3-C continued retrain as negative
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
