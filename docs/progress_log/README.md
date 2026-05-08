@@ -1,5 +1,7 @@
 # Progress Log
 
+Week directories are named by their Wednesday start date and cover Wednesday through the following Tuesday, e.g. `week_2026-04-29/` covers 2026-04-29 → 2026-05-05.
+
 This file is updated by `scripts/progress_tracker.py` and the optional git `post-commit` hook.
 
 ## Current Focus

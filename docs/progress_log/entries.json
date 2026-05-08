@@ -340,6 +340,11 @@
     "summary": "feat(analysis): TP-lost gallery v2 mode with per-imagery thresholds"
   },
   {
+    "timestamp": "2026-04-29T11:50:00Z",
+    "source": "session",
+    "summary": "Daily log 2026-04-29: Vexcel task assets, RunPod Vexcel inference staging, geoai-free pipeline plan, CH1 review server + SAM2 fixes"
+  },
+  {
     "timestamp": "2026-04-29T12:11:42Z",
     "source": "commit:abe93114",
     "summary": "feat(inference): shared postproc + raw artifact + tile dataset modules"
@@ -495,6 +500,21 @@
     "summary": "test(temporal-phase0): Task H — pipeline mock integration smoke (subprocess-driven, no GEHI/Gemini)"
   },
   {
+    "timestamp": "2026-05-05T11:52:42Z",
+    "source": "commit:e06fbb3a",
+    "summary": "docs(progress): 2026-05-05 daily log + Phase-0 subrepo entry sync"
+  },
+  {
+    "timestamp": "2026-05-05T11:52:57Z",
+    "source": "commit:03c05cd5",
+    "summary": "docs(progress): hook auto-sync after Phase-0 daily log commit"
+  },
+  {
+    "timestamp": "2026-05-05T11:54:09Z",
+    "source": "session",
+    "summary": "Daily log 2026-05-05: solar_backdating Phase-0 historical imagery pipeline, 10-anchor Gemini smoke, ring marker + census-GT prior"
+  },
+  {
     "timestamp": "2026-05-05T12:30:00Z",
     "source": "subrepo:solar_backdating:3574e67",
     "summary": "fix(gehi): dedupe vintage rows by capture_date, not by version (74→74 vs 74→15; restored progressive walk-back)"
@@ -515,8 +535,53 @@
     "summary": "Phase-0 wiring 完整跑通：Task E/F/G review fix + Task H smoke + Task I 真跑迭代 (3 轮 10-anchor)，最终 4 high+4 medium+2 ambiguous"
   },
   {
-    "timestamp": "2026-05-05T11:52:42Z",
-    "source": "commit:e06fbb3a",
-    "summary": "docs(progress): 2026-05-05 daily log + Phase-0 subrepo entry sync"
+    "timestamp": "2026-05-06T11:31:30Z",
+    "source": "commit:76c6b342",
+    "summary": "Add adaptive mask shaping controls"
+  },
+  {
+    "timestamp": "2026-05-08T02:52:17Z",
+    "source": "commit:b5764b87",
+    "summary": "feat(analysis): finalizer pixel-or vs per-detection ablation suite"
+  },
+  {
+    "timestamp": "2026-05-08T03:58:45Z",
+    "source": "commit:73dec1a0",
+    "summary": "feat(validation): V1.4 four-channel checkpoint validation harness"
+  },
+  {
+    "timestamp": "2026-05-08T03:59:06Z",
+    "source": "commit:5d3292ba",
+    "summary": "docs(experiments): finalizer pixel-or vs per-detection decision doc"
+  },
+  {
+    "timestamp": "2026-05-08T04:09:13Z",
+    "source": "commit:e9f0b13d",
+    "summary": "chore(scripts): commit filter_sam_inventory.py (was untracked locally)"
+  },
+  {
+    "timestamp": "2026-05-08T04:11:23Z",
+    "source": "commit:e9479585",
+    "summary": "fix(validation): align ch3_jhb row schema with area_aggregate.summarize"
+  },
+  {
+    "timestamp": "2026-05-08T04:15:02Z",
+    "source": "commit:04b8a914",
+    "summary": "chore(scripts): commit grid_plausibility.py (was untracked locally)"
+  },
+  {
+    "timestamp": "2026-05-08T04:21:04Z",
+    "source": "commit:38a45729",
+    "summary": "fix(postproc): pin merge_mode=pixel-or in v4_canonical.json"
+  },
+  {
+    "timestamp": "2026-05-08T09:42:21Z",
+    "source": "commit:348d874a",
+    "summary": "feat(postproc): add dissolve_hairline_gaps + tiered mask_threshold configs"
+  },
+  {
+    "timestamp": "2026-05-08T09:44:28Z",
+    "source": "commit:c633b269",
+    "summary": "feat(model): optional 56×56 mask head resolution for cat-3 fix"
   }
 ]
