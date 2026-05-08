@@ -17,7 +17,7 @@ data/annotations/
 │   ├── solarpanel_g0001_g1190.gpkg  # Google Earth 全局批量
 │   └── all_annotations_cleaned.gpkg # 汇总快照
 ├── Joburg/            # Johannesburg
-│   ├── JHB0[1-6].gpkg               # Li 6-grid 手标 pilot (legacy)
+│   ├── JHB0[1-6].gpkg               # 6-grid 手标 pilot (legacy)
 │   └── G{07,08,09}xx_V4_260407.gpkg # CBD batch1 25 grids (V4 推理 → review → SAM 重切)
 ├── ANNOTATION_SPEC.md
 ├── PROGRESS.md
@@ -32,7 +32,7 @@ data/annotations/
 | `Capetown/G1238_SAM2_260320.gpkg` | SAM2.1 (GeoSAM/QGIS) 精细切割 | G1238 | 已完成（242 polygons） |
 | `Capetown/G*_SAM2_*.gpkg` | review GUI + SAM2 fill (batch 001-004) | 100+ grids | 见 PROGRESS.md |
 | `Capetown/solarpanel_g0001_g1190.gpkg` | Google Earth 网页端标注 → QGIS 转换 | G0001-G1190 | 已完成（已人工校准位置偏移） |
-| `Joburg/JHB0[1-6].gpkg` | Li 手标 (legacy) | 6 grids | 已完成（191 installations） |
+| `Joburg/JHB0[1-6].gpkg` | 手标 legacy pilot | 6 grids | 已完成（191 installations） |
 | `Joburg/G*_V4_260407.gpkg` | V4 推理 → review GUI → SAM 2.1 重切 | 25 CBD grids | 已完成（808 installations，含 146 个 SAM 重切） |
 
 ## 标注规范

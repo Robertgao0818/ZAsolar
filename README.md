@@ -106,8 +106,8 @@
 
 - COCO 导出脚本：[`export_coco_dataset.py`](export_coco_dataset.py)
 - V3-C 实验说明：[`docs/experiments/exp_003_hard_negatives.md`](docs/experiments/exp_003_hard_negatives.md)
-- V4.1 训练日志：[`docs/progress_log/week_2026-03-31/2026-04-05.md`](docs/progress_log/week_2026-03-31/2026-04-05.md)
-- 大板缺失审计：[`docs/progress_log/week_2026-04-07/2026-04-07.md`](docs/progress_log/week_2026-04-07/2026-04-07.md)
+- V4.1 训练日志：[`docs/progress_log/week_2026-04-01/2026-04-05.md`](docs/progress_log/week_2026-04-01/2026-04-05.md)
+- 大板缺失审计：[`docs/progress_log/week_2026-04-01/2026-04-07.md`](docs/progress_log/week_2026-04-01/2026-04-07.md)
 
 ### 2.5 验证流程是什么，以及目前最大的空白在哪里
 
@@ -201,8 +201,8 @@
 
 可追溯来源：
 
-- JHB CBD batch1 review 日志：[`docs/progress_log/week_2026-04-07/2026-04-07.md`](docs/progress_log/week_2026-04-07/2026-04-07.md)
-- 周报汇总：[`docs/progress_log/week_2026-04-07/weekly_summary_0401-0407.md`](docs/progress_log/week_2026-04-07/weekly_summary_0401-0407.md)
+- JHB CBD batch1 review 日志：[`docs/progress_log/week_2026-04-01/2026-04-07.md`](docs/progress_log/week_2026-04-01/2026-04-07.md)
+- 周报汇总：[`docs/progress_log/week_2026-04-01/weekly_summary_0401-0407.md`](docs/progress_log/week_2026-04-01/weekly_summary_0401-0407.md)
 
 ### 3.2 当前最重要的性能数字
 
@@ -220,13 +220,13 @@
 关于约翰内斯堡 CBD 的 **F1 = 74.8%** 这一行，需要补三句话：
 
 1. 这个数字的算法是“**reviewer 把多少个预测打上了 correct 或 edit 标签**”，分母是模型预测总数 + reviewer 放置的 FN markers，而不是先有一份独立 GT 多边形再做 IoU 匹配。这种算法对 precision 的衡量很直接，但对 recall 的衡量受 reviewer 主观漏放 FN marker 的程度影响。
-2. 仓库里**确实存在**另一份独立的 Joburg ground truth：李同学手工在 Google Earth 历史影像（**2024-02**, Vexcel/ArcGIS 来源）上画的标注。但本项目的瓦片来源是 **City of Johannesburg 2023 航拍**，两者之间存在大约一年的 vintage gap。在 G0772–G0857 的抽样比对中，按这份 Li GT 算出的 per-polygon F1 约为 0.08，而其中大量"漏检"位置在 2023 瓦片上**根本没有面板**——它们是 2024 年才装上的新光伏。换句话说，**不能直接拿 Li 的 Joburg GPKG 去给当前模型算 recall**，否则会把"影像比 GT 早一年"误读成"模型很差"。
+2. 早期曾存在另一份独立的 Joburg 历史影像 GT，但它与当前评估影像存在 vintage gap，已经归档为历史审计材料，不再作为当前模型 recall 或主验证口径的输入。
 3. CBD 25 grids 里 FP 极不均匀：G0922 precision 88%，但 G0776 / G0853 / G0891 大部分 FP 是**天窗（skylight）和屋顶设备架的阴影**，不是热水器。这是开普敦数据集里被泳池热水器遮盖、未被针对性挖掘的另一类系统性误检。
 
 可追溯来源：
 
 - 26-grid benchmark 注册表：[`results/benchmark/README.md`](results/benchmark/README.md)
-- Joburg CBD review + vintage gap：[`docs/progress_log/week_2026-04-07/2026-04-07.md`](docs/progress_log/week_2026-04-07/2026-04-07.md)
+- Joburg CBD review + vintage gap：[`docs/progress_log/week_2026-04-01/2026-04-07.md`](docs/progress_log/week_2026-04-01/2026-04-07.md)
 - Joburg 影像源说明：[`docs/joburg_batch1_plan.md`](docs/joburg_batch1_plan.md)
 
 ### 3.3 目前总共识别了多少个太阳能安装点
@@ -250,7 +250,7 @@
 | Cape Town · Batch 002b | 14 | 1,359 | 2026-03-23 至 2026-03-24 |
 | Cape Town · Batch 003 | 20 | 1,731 | 2026-03-25 至 2026-03-27 审查，2026-04-03 导出 |
 | Cape Town · Batch 004 | 31 | 2,339 | 2026-04-03 |
-| Johannesburg · Li 6-grid pilot | 6 | 191 | 初步试点 |
+| Johannesburg · 6-grid legacy pilot | 6 | 191 | 初步试点 |
 | Johannesburg · CBD batch1 (V4-reviewed) | 25 | 808 (含 146 SAM 重切) | 2026-04-07 |
 | **去重后 archive 总计** | **134** | **8,073** | 当前仓库快照 |
 
@@ -259,8 +259,8 @@
 可追溯来源：
 
 - benchmark 结果注册表：[`results/benchmark/README.md`](results/benchmark/README.md)
-- V4.1 benchmark 工作日志：[`docs/progress_log/week_2026-03-31/2026-04-05.md`](docs/progress_log/week_2026-03-31/2026-04-05.md)
-- 周报汇总：[`docs/progress_log/week_2026-04-07/weekly_summary_0401-0407.md`](docs/progress_log/week_2026-04-07/weekly_summary_0401-0407.md)
+- V4.1 benchmark 工作日志：[`docs/progress_log/week_2026-04-01/2026-04-05.md`](docs/progress_log/week_2026-04-01/2026-04-05.md)
+- 周报汇总：[`docs/progress_log/week_2026-04-01/weekly_summary_0401-0407.md`](docs/progress_log/week_2026-04-01/weekly_summary_0401-0407.md)
 - 标注规范：[`data/annotations/ANNOTATION_SPEC.md`](data/annotations/ANNOTATION_SPEC.md)
 
 ## 4. 与现有文献的比较

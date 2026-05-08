@@ -30,7 +30,7 @@
 
 ### 1. 找最近一份 outline 当格式参照
 
-例如 `docs/progress_log/week_2026-04-14/outline_0415-0421.md` 或 `outline_0409-0414.md`，对齐章节、表格写法、口吻。
+例如 `docs/progress_log/week_2026-04-15/outline_0415-0421.md` 或 `outline_0409-0414.md`，对齐章节、表格写法、口吻。
 
 ### 2. 收集日报
 

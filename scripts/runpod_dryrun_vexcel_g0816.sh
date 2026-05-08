@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RunPod dry-run: V3-C inference on Vexcel JHB G0816, evaluate vs Li GT.
+# RunPod dry-run: V3-C inference on Vexcel JHB G0816.
 # Run this on the pod (NOT locally).
 #
 # Tiles must already be present at $SOLAR_TILES_ROOT/G0816/G0816_{col}_{row}_geo.tif

@@ -235,8 +235,8 @@ scripts/annotations/sam_fn_review.py
 scripts/analysis/sam_recut_joburg.py
 scripts/imagery/download_jhb_tiles.py
 docs/joburg_batch1_plan.md        # 文档,扫过但迁移时一起更新
-docs/progress_log/week_2026-04-14/2026-04-14.md  # 历史日志,不改
-docs/progress_log/week_2026-04-07/2026-04-13.md  # 历史日志,不改
+docs/progress_log/week_2026-04-08/2026-04-14.md  # 历史日志,不改
+docs/progress_log/week_2026-04-08/2026-04-13.md  # 历史日志,不改
 configs/datasets/regions.yaml     # 本 plan 要改
 core/grid_utils.py                # 本 plan 要改
 .claude/rules/06-multi-city.md    # 规则文件,扫过确认

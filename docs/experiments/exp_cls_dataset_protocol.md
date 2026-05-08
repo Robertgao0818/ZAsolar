@@ -152,8 +152,8 @@ consumer (training, evaluation, reproducibility checks) reads.
 ## v2 protocol (2026-04-27, supersedes v1 above for new builds)
 
 V1 (`cls_pv_thermal_v1`) failed an OOD test on 462 JHB CBD GEID chips
-(see `eval_on_audit_set.py` and the audit results in
-`results/analysis/cls_audit_eval_20260427/`). Balanced accuracy dropped
+(see the audit results in `results/analysis/cls_audit_eval_20260427/`).
+Balanced accuracy dropped
 from 0.84-0.89 (CT val) to 0.57-0.68 (JHB CBD); at the cascade-safe
 operating point (PV recall ≥ 0.95) all three backbones killed only
 10-15% of non-PV. The fix is *protocol*, not just a dataset extension.
@@ -178,10 +178,7 @@ CBD non-PV mix (skylight 22% + corrugated_metal_roof 15% + road_marking
 | **`johannesburg:v3c_sam_mask_geid_2024_02`** (new) | 462 V3-C audited + 441 V4.2 propagated | 903 raw → 678 non-PV + 225 PV (after the 119+106 actually_pv class flip) |
 
 Class-flip rule: any chip with audit `human_label == "actually_pv_mislabeled"`
-is reclassified `pv` regardless of its detector role; the corresponding
-v3c-side polygon is also fed into Li GT supplementation
-(`data/annotations/Joburg_CBD_Li_supp_v1/`) so cluster_eval reruns
-agree with classifier training labels.
+is reclassified `pv` regardless of its detector role.
 
 ### Holdout policy (v2)
 

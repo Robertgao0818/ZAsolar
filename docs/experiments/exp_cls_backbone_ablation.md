@@ -138,9 +138,6 @@ Key v2 additions vs v1:
   to pv) drawn from the GEID 2024-02 chunked benchmark.
 - Subtype-stratified holdout (25-30%) on the new GEID bucket; CT v1
   buckets retain their existing splits.
-- Audit chips that became pv (actually_pv_mislabeled) also feed Li GT
-  supplementation (`Joburg_CBD_Li_supp_v1`) so cluster_eval and
-  classifier training agree on labels.
 
 ### v2 promotion rule (replaces v1's)
 
@@ -180,7 +177,6 @@ fallback for legacy callers.
 - `data/cls_pv_thermal_v2/` (gitignored)
 - `checkpoints/cls_pv_thermal_v2_{effb0,convnext_tiny,dinov2_vits14}/`
 - `configs/classifier/thresholds_v2.json`
-- `results/analysis/cls_audit_eval_v2_<run_id>/` — re-run of
-  `eval_on_audit_set.py` with v2 checkpoints; same 462 chips, so the
-  v1 → v2 shift on each backbone is directly readable.
+- `results/analysis/cls_audit_eval_v2_<run_id>/` — v2 checkpoint audit on
+  the same 462 chips, so the v1 → v2 shift on each backbone is directly readable.
 - This file appended with v2 numbers when training finishes.

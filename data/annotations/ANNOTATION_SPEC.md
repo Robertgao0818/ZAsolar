@@ -164,14 +164,14 @@ When integrating annotations from a new annotator or source, follow this procedu
 
 1. **Copy** source GPKGs to the appropriate `data/annotations/{CityName}/` directory
 2. **Rename** to project convention: `{GridID}_{source_tag}_{YYMMDD}.gpkg`
-   - Example: `G1842_Li_SAM_260412.gpkg`
+   - Example: `G1842_RA_SAM_260412.gpkg`
 3. **Register** in `configs/datasets/regions.yaml` under the correct region's `grids:` section
 4. **Add** manifest entries in `annotation_manifest.csv` with `label_source`, `semantic_confidence`, `quality_tier`
 5. **Run** `python scripts/validate_registry.py` to verify cross-references
 
 ### Example: RA annotations (QGIS + GeoSAM)
 
-Source: `Dropbox/RA_Solar/Li/*.gpkg` — human-initiated, SAM-assisted annotation in QGIS.
+Source: RA handoff GPKGs — human-initiated, SAM-assisted annotation in QGIS.
 
 | Field | Value | Reason |
 |-------|-------|--------|

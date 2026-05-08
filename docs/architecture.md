@@ -15,7 +15,7 @@ data/
     Capetown/                 — Cape Town 标注（{GridID}_SAM2_{YYMMDD}.gpkg），COCO export 主数据源
                                 包含 SAM2 cleaned, 早期 legacy（G1023/G1134 等）, all_annotations_cleaned.gpkg
     Joburg/                   — Johannesburg 标注
-                                JHB01-06.gpkg          — Li 手标 6-grid pilot (legacy)
+                                JHB01-06.gpkg          — 手标 6-grid pilot (legacy)
                                 G07xx-G09xx_V4_*.gpkg  — CBD batch1 25 grids (V4 推理 → review → SAM 重切, 2026-04-07)
     ANNOTATION_SPEC.md        — V1.3 标注规范：GT = installation footprint + Two-Axis Model (A1-A3 × H/R/S/G)
     PROGRESS.md               — 标注进度自动汇总（batch/grid/installation 统计）

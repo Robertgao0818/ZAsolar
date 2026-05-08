@@ -24,9 +24,6 @@ regions:
       task_grid: "data/task_grid.gpkg"
     grid_id_pattern: "G\\d{4}"
 
-    # CT annotation tasks are split along a north-south axis between two RAs,
-    # with two separate KML grid schemes. Same grid ID (e.g. G1842) refers to
-    # DIFFERENT physical cells in each scheme. Task_grid above is the Gao scheme.
     annotation_schemes:
       gao:
         task_grid: "data/task_grid.gpkg"
@@ -34,15 +31,7 @@ regions:
         grid_count: 2214
         grid_id_range: "G0001..G4401"
         annotations_dir: "data/annotations/Capetown"
-        notes: "Primary scheme — source of all aerial_2025 imagery and training data"
-      li:
-        task_kml: "Dropbox/RA_Solar/grid_data/cape_town_grid_Li.kml"
-        grid_count: 2215
-        grid_id_range: "G0029..G4429"
-        annotations_dir: "data/annotations/Capetown_Li"
-        notes: "Complementary RA scheme. 17 grids annotated 2026-03..2026-04
-          (1260 polygons). No imagery in aerial_2025 yet — annotations are
-          label-bank only until tiles are sourced for Li-KML cell bounds."
+        notes: "Primary scheme; source of all aerial_2025 imagery and training data."
 
     imagery_layers:
       aerial_2025:
@@ -194,7 +183,7 @@ regions:
         file_layout: "chunked"
         file_pattern: "{grid_id}/*.tif"
         crs: "EPSG:3857"
-        provenance: "Legacy Li manual GT pilot grids. Native raster CRS is Web Mercator (EPSG:3857) per rasterio inspection 2026-05-05."
+        provenance: "Legacy manual GT pilot grids. Native raster CRS is Web Mercator (EPSG:3857) per rasterio inspection 2026-05-05."
         coverage_grids: [JHB01, JHB02, JHB03, JHB04, JHB05, JHB06]
       vexcel_2024:
         path: "/home/gaosh/zasolar_data/tiles/johannesburg/vexcel_2024"
@@ -274,15 +263,38 @@ regions:
         inference_date: "2026-04-29"
         grid_count: 25
         notes: "V4.1 on same 25 CBD grids — paired comparison vs V3-C on Vexcel 2024 ortho."
+      v3c_sam_maskbox_vexcel_2024_v4_agg:
+        model_version: "exp003_C_targeted_hn+sam2_maskbox+v4_agg"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/johannesburg/v3c_sam_maskbox_vexcel_2024_v4_agg"
+        inference_date: "2026-05-05"
+        grid_count: 25
+        notes: |
+          V1.4 aggregate-inventory frozen run: V3-C on JHB CBD 25-grid
+          Vexcel 2024, refined with SAM2.1 mask+box prompts, then finalized
+          by configs/postproc/v4_agg.json. Primary candidate for grid-level
+          economic inventory calibration.
+      v3c_sam_maskbox_vexcel_2024_v4_high:
+        model_version: "exp003_C_targeted_hn+sam2_maskbox+v4_high"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/johannesburg/v3c_sam_maskbox_vexcel_2024_v4_high"
+        inference_date: "2026-05-05"
+        grid_count: 25
+        notes: |
+          V1.4 high-confidence seed run: V3-C on JHB CBD 25-grid Vexcel
+          2024, refined with SAM2.1 mask+box prompts, then finalized by
+          configs/postproc/v4_high.json. Intended input class for
+          solar_backdating anchors; Channel 1 per-stratum precision remains
+          the acceptance gate.
 
     grids:
-      # Legacy 6-grid pilot (Li manual, transfer test only)
-      JHB01: { annotation_source: "data/annotations/Joburg/JHB01.gpkg", annotation_count: 41, notes: "Legacy Li manual GT" }
-      JHB02: { annotation_source: "data/annotations/Joburg/JHB02.gpkg", annotation_count: 33, notes: "Legacy Li manual GT" }
-      JHB03: { annotation_source: "data/annotations/Joburg/JHB03.gpkg", annotation_count: 33, notes: "Legacy Li manual GT" }
-      JHB04: { annotation_source: "data/annotations/Joburg/JHB04.gpkg", annotation_count: 31, notes: "Legacy Li manual GT" }
-      JHB05: { annotation_source: "data/annotations/Joburg/JHB05.gpkg", annotation_count: 25, notes: "Legacy Li manual GT" }
-      JHB06: { annotation_source: "data/annotations/Joburg/JHB06.gpkg", annotation_count: 28, notes: "Legacy Li manual GT" }
+      # Legacy 6-grid pilot (manual transfer test only)
+      JHB01: { annotation_source: "data/annotations/Joburg/JHB01.gpkg", annotation_count: 41, notes: "Legacy manual GT" }
+      JHB02: { annotation_source: "data/annotations/Joburg/JHB02.gpkg", annotation_count: 33, notes: "Legacy manual GT" }
+      JHB03: { annotation_source: "data/annotations/Joburg/JHB03.gpkg", annotation_count: 33, notes: "Legacy manual GT" }
+      JHB04: { annotation_source: "data/annotations/Joburg/JHB04.gpkg", annotation_count: 31, notes: "Legacy manual GT" }
+      JHB05: { annotation_source: "data/annotations/Joburg/JHB05.gpkg", annotation_count: 25, notes: "Legacy manual GT" }
+      JHB06: { annotation_source: "data/annotations/Joburg/JHB06.gpkg", annotation_count: 28, notes: "Legacy manual GT" }
       # CBD batch1 (V4 inference + review + SAM 重切, 2026-04-07)
       G0772: { annotation_source: "data/annotations/Joburg/G0772_V4_260407.gpkg", annotation_count: 16, notes: "CBD batch1 V4-reviewed" }
       G0773: { annotation_source: "data/annotations/Joburg/G0773_V4_260407.gpkg", annotation_count: 11, notes: "CBD batch1 V4-reviewed" }

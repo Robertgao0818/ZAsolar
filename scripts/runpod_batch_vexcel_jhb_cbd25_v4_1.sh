@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RunPod batch: V4.1 inference on Vexcel JHB CBD 25 grids, eval vs Li GT.
+# RunPod batch: V4.1 inference on Vexcel JHB CBD 25 grids.
 # Tiles must be staged at $SOLAR_TILES_ROOT/{grid}/ (default /dev/shm/tiles).
 # PARALLEL=6 (RTX 4090, ~3-4GB VRAM/proc).
 # Output goes to results/johannesburg/v4_1_vexcel_2024/ (symlinked to /root).

@@ -13,4 +13,4 @@
 - 不修改任何文件，只读取统计
 - 不做 buffer 合并或聚类，直接统计 polygon 个数
 - Cape Town 标注全部位于 `data/annotations/Capetown/`，包含 `*_SAM2_*.gpkg`（SAM2 review 流） 和早期 legacy `G*.gpkg`
-- Joburg 标注位于 `data/annotations/Joburg/`，包含 `JHB0[1-6].gpkg` (Li 手标 legacy) 和 `G*_V4_*.gpkg` (CBD batch1 V4 review + SAM 重切)
+- Joburg 标注位于 `data/annotations/Joburg/`，包含 `JHB0[1-6].gpkg` (manual legacy) 和 `G*_V4_*.gpkg` (CBD batch1 V4 review + SAM 重切)

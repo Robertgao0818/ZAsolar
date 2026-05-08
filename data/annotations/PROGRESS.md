@@ -16,7 +16,7 @@ Last updated: 2026-04-08 (Joburg CBD batch1 promoted to canonical)
 | Cape Town | Batch 003 | 20 | 1729 | 2026-03-25 ~ 2026-03-27 |
 | Cape Town | Batch 004 | 31 | 2346 | 2026-04-03 |
 | Cape Town | **SAM FN fills** | — | **+177** | 2026-04-03 |
-| Johannesburg | JHB legacy (Li 手标) | 6 | 191 | 2026-03-14 |
+| Johannesburg | JHB legacy manual pilot | 6 | 191 | 2026-03-14 |
 | Johannesburg | **CBD batch1 V4-reviewed** | **25** | **808** (含 146 SAM 重切) | **2026-04-07** |
 
 ## Detail
@@ -187,7 +187,7 @@ Last updated: 2026-04-08 (Joburg CBD batch1 promoted to canonical)
 - G2037: 7 installations (2026-04-03)
 - G2038: 12 installations (2026-04-03)
 
-### JHB legacy (Li 手标 6-grid pilot)
+### JHB legacy manual 6-grid pilot
 
 - JHB01: 41 installations (-)
 - JHB02: 33 installations (-)
