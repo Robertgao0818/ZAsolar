@@ -371,6 +371,7 @@ def stage_ch3_jhb(
             if gt_m2 <= 0:
                 continue
             abs_err = pred_m2 - gt_m2
+            signed_rel = abs_err / gt_m2 if gt_m2 else float("nan")
             rows.append(
                 {
                     "region": "johannesburg",
@@ -385,11 +386,10 @@ def stage_ch3_jhb(
                     "n_gt": n_gt,
                     "gt_total_m2": round(gt_m2, 2),
                     "gt_max_poly_m2": round(gt_max, 2),
-                    "abs_err_m2": round(abs_err, 2),
-                    "rel_err": (
-                        abs_err / gt_m2 if gt_m2 else float("nan")
-                    ),
-                    "ratio_pred_gt": pred_m2 / gt_m2 if gt_m2 else float("nan"),
+                    "abs_error_m2": round(abs_err, 2),
+                    "signed_rel_error": signed_rel,
+                    "abs_rel_error": abs(signed_rel) if gt_m2 else float("nan"),
+                    "pred_gt_ratio": pred_m2 / gt_m2 if gt_m2 else float("nan"),
                 }
             )
 
