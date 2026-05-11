@@ -24,7 +24,9 @@ from pathlib import Path
 import math
 
 import geopandas as gpd
+import numpy as np
 import pyogrio
+from shapely.ops import unary_union
 
 from core.region_registry import (
     get_model_run,
@@ -92,6 +94,45 @@ def _sum_area_m2(
     if kept.empty:
         return 0, 0.0, 0.0, n_dropped
     return len(kept), float(kept.sum()), float(kept.max()), n_dropped
+
+
+def _read_polys_geom(
+    gpkg_path: Path, metric_crs: str, layer: str | None
+):
+    """Like _sum_area_m2 but also returns the unary_union geometry needed
+    for set-theoretic R/P/F1 / IoU. Required for per-detection outputs where
+    overlapping polygons would inflate naive sum (overlap factor ~1.6 on
+    train20_val5_hn per-det).
+
+    Returns: (n_kept, sum_area_m2, max_poly_m2, n_dropped, union_geom_or_None)
+    """
+    available = [row[0] for row in pyogrio.list_layers(gpkg_path)]
+    chosen: str | None = layer if layer and layer in available else None
+    if chosen is None and available:
+        chosen = available[0]
+    read_kwargs: dict[str, object] = {}
+    if chosen:
+        read_kwargs["layer"] = chosen
+    gdf = gpd.read_file(gpkg_path, **read_kwargs)
+    if gdf.empty:
+        return 0, 0.0, 0.0, 0, None
+    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid]
+    gdf = gdf[gdf.geometry.apply(_geometry_finite)]
+    if gdf.empty:
+        return 0, 0.0, 0.0, 0, None
+    if gdf.crs is None or str(gdf.crs) != metric_crs:
+        gdf = gdf.to_crs(metric_crs)
+    areas = gdf.geometry.area
+    keep_mask = areas <= _MAX_PLAUSIBLE_POLY_M2
+    n_dropped = int((~keep_mask).sum())
+    kept_mask = keep_mask & (areas > 0)
+    kept_geoms = [g for g, k in zip(gdf.geometry, kept_mask) if k]
+    if not kept_geoms:
+        return 0, 0.0, 0.0, n_dropped, None
+    sum_area = float(sum(g.area for g in kept_geoms))
+    max_area = float(max(g.area for g in kept_geoms))
+    u = unary_union(kept_geoms)
+    return len(kept_geoms), sum_area, max_area, n_dropped, u
 
 
 _GT_PRIORITY_SUFFIXES = ("_SAM2_", "_V4_", "_reviewed", "")
@@ -182,8 +223,10 @@ def evaluate_run(
             continue
         gt_path, gt_layer = gt_spec
         try:
-            n_pred, pred_m2, pred_max, pred_drop = _sum_area_m2(pred_path, metric_crs, layer=None)
-            n_gt, gt_m2, gt_max, gt_drop = _sum_area_m2(gt_path, metric_crs, layer=gt_layer)
+            n_pred, pred_sum_m2, pred_max, pred_drop, pred_u = _read_polys_geom(
+                pred_path, metric_crs, layer=None)
+            n_gt, gt_sum_m2, gt_max, gt_drop, gt_u = _read_polys_geom(
+                gt_path, metric_crs, layer=gt_layer)
         except Exception as exc:
             print(f"[warn] {region_key}/{run_id}/{grid_id}: {exc}")
             continue
@@ -191,9 +234,19 @@ def evaluate_run(
             print(f"[filter] {region_key}/{run_id}/{grid_id}: "
                   f"dropped {pred_drop} pred + {gt_drop} gt polygons "
                   f"(invalid or > {_MAX_PLAUSIBLE_POLY_M2:.0f} m²)")
-        if gt_m2 <= 0:
+        if gt_u is None or gt_u.area <= 0:
             continue
-        abs_err = pred_m2 - gt_m2
+        # Set-theoretic union areas (canonical for inventory / R/P/F1).
+        pred_union_m2 = float(pred_u.area) if pred_u is not None else 0.0
+        gt_union_m2 = float(gt_u.area)
+        inter_m2 = float(pred_u.intersection(gt_u).area) if pred_u is not None else 0.0
+        abs_err = pred_union_m2 - gt_union_m2
+        # Per-grid R/P/F1 (pixel set-theoretic on union geometries).
+        area_R = inter_m2 / gt_union_m2
+        area_P = inter_m2 / pred_union_m2 if pred_union_m2 > 0 else 0.0
+        area_F1 = (
+            2 * area_R * area_P / (area_R + area_P) if (area_R + area_P) > 0 else 0.0
+        )
         rows.append({
             "region": region_key,
             "model_run": run_id,
@@ -202,17 +255,28 @@ def evaluate_run(
             "grid_id": grid_id,
             "gt_source": gt_path.name,
             "n_pred": n_pred,
-            "pred_total_m2": round(pred_m2, 2),
+            # Union (canonical) and sum (overlap-blind, kept for diagnosis)
+            "pred_total_m2": round(pred_union_m2, 2),
+            "pred_sum_m2": round(pred_sum_m2, 2),
+            "pred_overlap_factor": round(pred_sum_m2 / pred_union_m2, 4)
+                if pred_union_m2 > 0 else None,
             "pred_max_poly_m2": round(pred_max, 2),
             "n_gt": n_gt,
-            "gt_total_m2": round(gt_m2, 2),
+            "gt_total_m2": round(gt_union_m2, 2),
+            "gt_sum_m2": round(gt_sum_m2, 2),
             "gt_max_poly_m2": round(gt_max, 2),
             "n_dropped_pred": pred_drop,
             "n_dropped_gt": gt_drop,
+            "inter_m2": round(inter_m2, 2),
+            # Tier 1a — classic detection
+            "area_R": round(area_R, 4),
+            "area_P": round(area_P, 4),
+            "area_F1": round(area_F1, 4),
+            # Tier 1b — level
             "abs_error_m2": round(abs_err, 2),
-            "signed_rel_error": round(abs_err / gt_m2, 4),
-            "abs_rel_error": round(abs(abs_err) / gt_m2, 4),
-            "pred_gt_ratio": round(pred_m2 / gt_m2, 4),
+            "signed_rel_error": round(abs_err / gt_union_m2, 4),
+            "abs_rel_error": round(abs(abs_err) / gt_union_m2, 4),
+            "pred_gt_ratio": round(pred_union_m2 / gt_union_m2, 4),
         })
     return rows
 
@@ -242,6 +306,20 @@ def _ols_regression(xs: list[float], ys: list[float]) -> dict:
     return {"slope": slope, "intercept": intercept, "r2": r2}
 
 
+def _bootstrap_ci(values, statfn, n_boot: int = 500, ci: float = 0.95,
+                  seed: int = 0) -> tuple[float, float]:
+    """Percentile bootstrap CI for a single statistic of a 1-D sample.
+    Returns (lo, hi). Returns (nan, nan) on n < 3."""
+    arr = np.asarray(values, dtype=float)
+    if len(arr) < 3:
+        return float("nan"), float("nan")
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, len(arr), size=(n_boot, len(arr)))
+    boot = np.array([statfn(arr[s]) for s in idx])
+    lo, hi = np.quantile(boot, [(1 - ci) / 2, 1 - (1 - ci) / 2])
+    return float(lo), float(hi)
+
+
 def summarize(rows: list[dict]) -> list[dict]:
     buckets: dict[tuple[str, str], list[dict]] = {}
     for r in rows:
@@ -250,21 +328,67 @@ def summarize(rows: list[dict]) -> list[dict]:
     out: list[dict] = []
     for (region, run), items in sorted(buckets.items()):
         n_grids = len(items)
-        pred_total = sum(r["pred_total_m2"] for r in items)
-        gt_total = sum(r["gt_total_m2"] for r in items)
+        Bs = np.array([r["gt_total_m2"] for r in items], float)
+        As = np.array([r["pred_total_m2"] for r in items], float)
+        Is = np.array([r["inter_m2"] for r in items], float)
+        ratios = As / np.where(Bs > 0, Bs, 1.0)
+        eps = As - Bs
+        pg_F1 = np.array([r["area_F1"] for r in items], float)
+
+        pred_total = float(As.sum())
+        gt_total = float(Bs.sum())
+        inter_total = float(Is.sum())
+
+        # ---- Tier 1a: classic detection ----
+        agg_R = inter_total / gt_total if gt_total > 0 else None
+        agg_P = inter_total / pred_total if pred_total > 0 else None
+        if agg_R is not None and agg_P is not None and (agg_R + agg_P) > 0:
+            agg_F1 = 2 * agg_R * agg_P / (agg_R + agg_P)
+        else:
+            agg_F1 = None
+        mean_pg_F1 = float(pg_F1.mean()) if len(pg_F1) else None
+        f1_lo, f1_hi = _bootstrap_ci(pg_F1, lambda v: float(v.mean()))
+
+        # ---- Tier 1b: legacy aggregate stats ----
         mae = statistics.fmean(abs(r["abs_error_m2"]) for r in items)
         mre = statistics.fmean(r["abs_rel_error"] for r in items)
         signed_mre = statistics.fmean(r["signed_rel_error"] for r in items)
         within_20 = sum(1 for r in items if 0.8 <= r["pred_gt_ratio"] <= 1.2) / n_grids
 
-        # DeepSolar-style regression: x = GT_total_m², y = Pred_total_m² per grid.
-        # Each grid is one data point; slope ≈ 1 + intercept ≈ 0 + high R² means
-        # the model tracks GT totals across grids (the most direct analog to
-        # DeepSolar tract-vs-EIA R²).
-        reg = _ols_regression(
-            [r["gt_total_m2"] for r in items],
-            [r["pred_total_m2"] for r in items],
-        )
+        # ---- Tier 1c: dispersion ----
+        mean_ratio = float(ratios.mean())
+        std_ratio = float(ratios.std(ddof=1)) if n_grids >= 2 else float("nan")
+        sigma_lo, sigma_hi = _bootstrap_ci(ratios, lambda v: float(v.std(ddof=1)))
+        # B-weighted dispersion — the user-validated paper-relevant metric.
+        if gt_total > 0:
+            w = Bs / gt_total
+            std_ratio_Bw = float(np.sqrt((w * (ratios - mean_ratio) ** 2).sum()))
+            cv_ratio_Bw = std_ratio_Bw / mean_ratio if mean_ratio != 0 else float("nan")
+        else:
+            std_ratio_Bw = float("nan"); cv_ratio_Bw = float("nan")
+        # Log-ratio: relative-error scale, robust to small-B blow-ups.
+        valid = (As > 0) & (Bs > 0)
+        if valid.sum() >= 2:
+            log_ratios = np.log(As[valid] / Bs[valid])
+            std_logratio = float(log_ratios.std(ddof=1))
+        else:
+            std_logratio = float("nan")
+
+        # ---- Tier 1d: absolute residuals ----
+        rmse = float(np.sqrt((eps ** 2).mean())) if n_grids else float("nan")
+        rmse_lo, rmse_hi = _bootstrap_ci(np.abs(eps),
+                                         lambda v: float(np.sqrt((v ** 2).mean())))
+
+        # ---- Tier 1e: regression diagnostic (DeepSolar-style) ----
+        reg = _ols_regression(Bs.tolist(), As.tolist())
+        # Through-origin variant — calibration-fixable with a single multiplier.
+        if (Bs ** 2).sum() > 0 and len(Bs) >= 2:
+            beta_o = float((Bs * As).sum() / (Bs ** 2).sum())
+            ss_res_o = float(((As - beta_o * Bs) ** 2).sum())
+            ss_tot_o = float(((As - As.mean()) ** 2).sum())
+            r2_o = 1.0 - ss_res_o / ss_tot_o if ss_tot_o > 0 else float("nan")
+        else:
+            beta_o, r2_o = float("nan"), float("nan")
 
         out.append({
             "region": region,
@@ -274,15 +398,38 @@ def summarize(rows: list[dict]) -> list[dict]:
             "n_grids": n_grids,
             "pred_total_m2": round(pred_total, 2),
             "gt_total_m2": round(gt_total, 2),
+            "inter_total_m2": round(inter_total, 2),
+            # Tier 1a — classic detection
+            "agg_area_R": round(agg_R, 4) if agg_R is not None else None,
+            "agg_area_P": round(agg_P, 4) if agg_P is not None else None,
+            "agg_area_F1": round(agg_F1, 4) if agg_F1 is not None else None,
+            "mean_per_grid_F1": round(mean_pg_F1, 4) if mean_pg_F1 is not None else None,
+            "f1_pg_CI95_lo": round(f1_lo, 4),
+            "f1_pg_CI95_hi": round(f1_hi, 4),
+            # Tier 1b — level + legacy
             "bulk_pred_gt_ratio": round(pred_total / gt_total, 4) if gt_total else None,
             "bulk_signed_rel_error": round((pred_total - gt_total) / gt_total, 4) if gt_total else None,
             "mae_m2_per_grid": round(mae, 2),
             "mre_per_grid": round(mre, 4),
             "signed_mre_per_grid": round(signed_mre, 4),
             "frac_grids_within_pm20pct": round(within_20, 3),
+            # Tier 1c — dispersion (paper-relevant primary)
+            "std_ratio": round(std_ratio, 4),
+            "std_ratio_CI95_lo": round(sigma_lo, 4),
+            "std_ratio_CI95_hi": round(sigma_hi, 4),
+            "std_ratio_Bw": round(std_ratio_Bw, 4),
+            "cv_ratio_Bw": round(cv_ratio_Bw, 4),
+            "std_logratio": round(std_logratio, 4),
+            # Tier 1d — absolute residuals (inventory error)
+            "rmse_m2": round(rmse, 2),
+            "rmse_CI95_lo": round(rmse_lo, 2),
+            "rmse_CI95_hi": round(rmse_hi, 2),
+            # Tier 1e — calibration diagnostic
             "ols_slope": round(reg["slope"], 4) if reg["slope"] is not None else None,
             "ols_intercept_m2": round(reg["intercept"], 2) if reg["intercept"] is not None else None,
             "ols_r2": round(reg["r2"], 4) if reg["r2"] is not None else None,
+            "thru0_slope": round(beta_o, 4),
+            "thru0_r2": round(r2_o, 4),
         })
     return out
 
@@ -345,10 +492,12 @@ def main() -> None:
     print(f"=== Wrote {len(summary)} per-run rows   -> {out_dir}/per_run_summary.csv")
     print()
     if summary:
+        # Deploy-decision view: F1 (sanity), σ_Bw + RMSE (paper-relevant primary),
+        # bulk (level diagnostic). OLS R² stays as calibration-fixable indicator.
         header = (
             f"{'region':<14} {'model_run':<38} {'n':>3} "
-            f"{'pred/gt':>8} {'signed':>8} {'MRE':>7} {'±20%':>6} "
-            f"{'R²':>6} {'slope':>6} {'intcpt_m²':>10}"
+            f"{'F1':>6} {'pgF1':>6} {'bulk':>6} "
+            f"{'σ_Bw':>6} {'log-σ':>6} {'RMSE':>8} {'thru0_β':>8} {'R²':>6}"
         )
         print(header)
         print("-" * len(header))
@@ -360,13 +509,14 @@ def main() -> None:
                 return fmt.format(v)
             print(
                 f"{s['region']:<14} {s['model_run']:<38} {s['n_grids']:>3} "
-                f"{f(s['bulk_pred_gt_ratio'], 8, 3)} "
-                f"{f(s['bulk_signed_rel_error'], 8, 3, sign=True)} "
-                f"{f(s['mre_per_grid'], 7, 3)} "
-                f"{f(s['frac_grids_within_pm20pct'], 6, 2)} "
-                f"{f(s['ols_r2'], 6, 3)} "
-                f"{f(s['ols_slope'], 6, 3)} "
-                f"{f(s['ols_intercept_m2'], 10, 1)}"
+                f"{f(s['agg_area_F1'], 6, 3)} "
+                f"{f(s['mean_per_grid_F1'], 6, 3)} "
+                f"{f(s['bulk_pred_gt_ratio'], 6, 3)} "
+                f"{f(s['std_ratio_Bw'], 6, 3)} "
+                f"{f(s['std_logratio'], 6, 3)} "
+                f"{f(s['rmse_m2'], 8, 1)} "
+                f"{f(s['thru0_slope'], 8, 3)} "
+                f"{f(s['ols_r2'], 6, 3)}"
             )
 
 
