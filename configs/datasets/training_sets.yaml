@@ -177,6 +177,79 @@ training_sets:
       that 13.6% isn't oversaturating. Train both variants serially;
       ~6 GPU-hours overhead. Select by val-10 F1.
 
+  clean_baseline_hs:
+    id: "clean_baseline_hs"
+    description: >
+      Clean H/S-only baseline — no reviewed-prediction supervision in the
+      training corpus. First training set assembled under the
+      2026-05-09 supervision-layering plan to break the V3-C halo cycle.
+    region_scope: [cape_town, johannesburg]
+    source_family: [human_manual_qgis_geosam, sam_added_browser]
+    annotation_source_policy: >
+      CT 260320 (3 grids G1189/G1190/G1238, 475 polygons, QGIS+GeoSAM
+      manual labels predating the review GUI; user-confirmed reliable) +
+      JHB raw sam_added pre-dissolve (25 grids G0772..G0926, 1699
+      polygons, RA-drawn FN supplements via sam_fn_review.py browser
+      tool, sourced from
+      results/johannesburg/v3c_vexcel_2024_ch1_sample/<grid>/review/<grid>_sam_added.gpkg).
+      Reviewed predictions (R-type) explicitly EXCLUDED — this is the
+      cleanest H/S-only corpus available given that the browser real-time
+      SAM point-prompt feature only landed 2026-04-13 (post-CT 260403).
+    tier_policy: >
+      All polygons treated as A1-equivalent supervision. Per the 2-axis
+      model the JHB sam_added polygons are A1/H by provenance (RA-drawn,
+      installation-spec aware), CT 260320 is A1/H (QGIS+GeoSAM manual).
+    audit_policy: null
+    easy_negative_ratio: TBD
+    hn_policy: >
+      Optional merge from coco_v4_3_hn HN chips (tile-anchored, no
+      polygon supervision; safe to mix with clean positives).
+    output_dir: "/home/gaosh/zasolar_data/coco/coco_clean_hs_ct260320_jhb_sam_added_20260510"
+    init_weights:
+      pilot_A: "checkpoints/exp003_C_targeted_hn/best_model.pth"
+      pilot_G: "/home/gaosh/.cache/huggingface/hub/models--giswqs--geoai/snapshots/089548329c81f128fa12576663e7abdedb5cfa0e/solar_panel_detection.pth"
+    val_strategy: >
+      5 JHB grids held out from training (specific grids per build script
+      --val-grids). Channel 3 area_F1 evaluation surface shrinks from 25
+      to 5 grids; accepted tradeoff for clean holdout.
+    builder_script: "scripts/training/build_clean_baseline.py"
+    notes: >
+      Pilot design: A vs G head-to-head on the same data package.
+        Pilot A: --pretrained <V3-C> --reinit-mask-head
+                 (preserve V3-C backbone/RPN/box prior, wipe halo'd mask
+                  predictor; tests whether non-mask V3-C prior is worth
+                  keeping)
+        Pilot G: --pretrained <geoai stock>
+                 (clean solar prior end-to-end, no halo legacy; tests
+                  whether geoai's smaller-but-clean pretrain suffices)
+      5 epochs each on RTX 5090, same LR / augmentation / eval cadence.
+      Decision criterion: 5-grid val area_F1 + chip F1@85 + bulk_ratio.
+      If close (<2pp) prefer G for cleaner experimental semantics.
+
+      Known control variable: CT aerial_2025 ground-anisotropic pixels
+      (~7.14 × 9.06 cm at 33°S, EPSG:4326 native) vs JHB Vexcel
+      isotropic 6.7 cm. NOT corrected this round — same domain mix
+      v3c/v4_2/v4_3 trained on, so it does not confound the clean-vs-
+      contaminated supervision comparison. Backlog item if pilot
+      under-performs.
+
+      Lit support for this design (2026-05-10 research dive):
+        - Zhao et al. "Reset It and Forget It" (zapping last layer
+          gives +9.4pp Omniglot, large gains Mini-ImageNet) — supports
+          Pilot A's targeted reinit
+        - Benchmarking Label Noise in Instance Segmentation 2024 —
+          spatial mask noise drops mAP >10pp, classification-noise
+          remedies do not transfer; supports concentrating intervention
+          on mask supervision
+        - Gerstgrasser 2024 COLM "model collapse" — accumulation
+          principle says drift bias lives in weights; only escape is
+          mixing real data with clean state. Both A and G satisfy
+          this in different ways.
+        - He 2019 ICCV "Rethinking ImageNet Pre-training" — from-
+          scratch matches pretrained given enough iterations; cited
+          loosely (small-data caveat applies here, hence not pursuing
+          full reinit / torchvision COCO start).
+
   unified_reviewall_20260511:
     id: "unified_reviewall_20260511"
     description: >
