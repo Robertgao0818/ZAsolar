@@ -176,3 +176,104 @@ training_sets:
       Guardrail variant: 10% HN (subsample to ~810 chips) to sanity-check
       that 13.6% isn't oversaturating. Train both variants serially;
       ~6 GPU-hours overhead. Select by val-10 F1.
+
+  unified_reviewall_20260511:
+    id: "unified_reviewall_20260511"
+    description: >
+      Unified review-resources COCO — CT aerial_2025 Batch003/004/002b/EarlySAM2
+      (excluding cape_town_independent_26 26-grid benchmark holdout) +
+      JHB Vexcel 2024 25-grid CBD (20 train + 5 val). First training set with
+      per-instance mask_trusted gating to break the V3-C halo cycle on the
+      mask head while preserving box + cls supervision from all sources.
+    region_scope: [cape_town, johannesburg]
+    source_family:
+      - human_manual_sam_assisted    # CT batch001/002/002b/EarlySAM2 grids
+      - reviewed_prediction          # CT Batch003/004 + JHB V3C-reviewed accepted
+      - sam_added_true_fn            # CT Batch003/004 non-interactive FN catches
+      - sam_added_browser            # JHB Vexcel interactive browser SAM FN draws
+    annotation_source_policy: >
+      CT side: discover_annotations(regions=[cape_town]) − cape_town_independent_26
+      (G1240, G1243-G1245, G1293-G1300, G1349, G1354, G1410, G1411, G1466,
+      G1467, G1516, G1520-G1524, G1569-G1572).  Legacy weak-supervision grids
+      (schema_type=legacy_ct) skipped.  Per-row label_source mapped from the
+      GeoPackage `source` column: NaN→reviewed_prediction, sam_fn_marker→
+      sam_added_true_fn, sam2→human_manual_sam_assisted, batch001/002/002b
+      (no source column) → human_manual_sam_assisted.
+
+      JHB side: per-grid combine of
+      results/johannesburg/v3c_vexcel_2024_ch1_sample/<grid>/review/
+        - <grid>_reviewed.gpkg filtered to review_status=="correct"
+            → label_source=reviewed_prediction (untrusted, V3-C halo source)
+        - <grid>_sam_added.gpkg all rows
+            → label_source=sam_added_browser (trusted, interactive browser
+              SAM point-prompt, post-2026-04-13).
+      25 grids G0772..G0926; 20 in train, 5 held out for val (whole-grid val,
+      no tile leakage).
+    tier_policy: >
+      All tiers (T1+T2). Tier filtering is orthogonal — the trusted/untrusted
+      split for mask supervision is driven by label_source, not quality_tier.
+    audit_policy: null
+    easy_negative_ratio: 0.15
+    hn_policy: >
+      HN chips are NOT bundled by build_unified_reviewall.py in this round.
+      Existing v4_3_hn pool (866 chips: CT 452 + CBD 185 + Sandton 229) is
+      the candidate carry-over; new V3C-delete chips from CT Batch003/004
+      (~1,916) and JHB Vexcel 25 (503) can be added later via separate
+      export_targeted_hn.py invocations or a merge step.
+    output_dir: "/workspace/coco/unified_reviewall_20260511"
+    val_strategy: >
+      JHB val = 5 whole grids: G0772 (moderate density), G0816 (mixed CBD +
+      micro-review reference), G0817 (dense PV roof failure-mode anchor),
+      G0888 (sparse residential), G0925 (multi-array installation outlier).
+      Coverage spans the 5 known failure modes (dense / mid / sparse /
+      micro / outlier) so val area_F1 + Ch2 recall reflect breadth.
+      CT side has no whole-grid val held out from training — val signal on
+      CT comes from the 26-grid cape_town_independent_26 benchmark suite
+      run separately after training (it's A path's degradation detector
+      per the plan; G path's CT performance is reference-only).
+    init_weights:
+      A_path: "checkpoints/exp003_C_targeted_hn/best_model.pth"   # V3-C warm
+      G_path: "~/zasolar_data/models/giswqs_solar_panel_detection.pth"  # opengeoai fresh
+    epoch_budget:
+      A_path: { stage1: 3, stage2: 12, total_max: 15 }
+      G_path: { stage1: 5, stage2: 20, total_max: 25 }
+    builder_script: "scripts/training/build_unified_reviewall.py"
+    untrusted_trusted_ratio:
+      bound: "untrusted <= 4 × trusted (Gerstgrasser 2024 COLM accumulation principle)"
+      ct_trusted_estimate: 1834
+      ct_untrusted_estimate: 4317
+      jhb_trusted_train_estimate: 1407
+      jhb_untrusted_train_estimate: 1764
+      combined_train_estimate: { trusted: 3495, untrusted: 5580, ratio: 1.60 }
+    notes: >
+      Plan source: docs/plans/review-aerial-2023-jhb-opengeoai-v3c-parallel-biscuit.md
+      (approved 2026-05-11).
+
+      Key levers ON this round:
+        - per-instance mask_trusted gating (train.py --per-instance-mask-trusted)
+        - per-source boundary band weighting (train.py --per-source-mask-weight,
+          inner layer that still applies to trusted instances)
+        - Stage 1 freeze-mask-head warm-up (--freeze-mask-head)
+        - Differential LR (backbone ×0.1, RPN/box ×1.0, mask ×1.0)
+        - Untrusted ≤ 4 × Trusted assertion in builder
+        - Per-source box reg loss logging + 25% gap threshold signal (next-round
+          box_trusted decision)
+        - Uneven eval schedule + best-so-far + patience=3 OR-stop on
+          area_f1/ch2_recall (proxy: chip-level f1_85/ap50 in-loop; grid-level
+          area_F1 + bulk_ratio gate is a post-hoc selector)
+
+      Levers DEFERRED to next round (per 2026-05-09 supervision-layering plan
+      工程纪律 — one lever per training round):
+        - 25-40% H batch composition sampler
+        - Area-adaptive boundary ignore band
+        - Selective relabelling pipeline
+
+      Pass criteria (JHB Vexcel val-5):
+        Ch3 area_F1 ≥ 0.78, Ch2 recall@IoU≥0.5 ≥ 0.55,
+        bulk_ratio ∈ [0.85, 1.15], polygon@IoU≥0.5 F1 within 2pp of 0.80.
+
+      A vs G decision (JHB Vexcel val-5 only):
+        gap < 2pp → choose G (cleaner experimental semantics, no V3-C halo legacy).
+        A leads ≥2pp → keep A (V3-C prior is worth preserving).
+        G leads ≥2pp → next round starts from G.
+        A retreats on cape_town_independent_26 (< 0.78) → A fail, G default.
