@@ -286,6 +286,20 @@ regions:
           configs/postproc/v4_high.json. Intended input class for
           solar_backdating anchors; Channel 1 per-stratum precision remains
           the acceptance gate.
+      jhb_phaseA_vexcel_2024:
+        model_version: "jhb_phaseA_20260508_0953"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/johannesburg/jhb_phaseA_vexcel_2024"
+        inference_date: "2026-05-08"
+        grid_count: 3
+        notes: |
+          JHB Phase A boundary-aware retrain (warm-started from V3-C). Trained
+          on 20 JHB CBD Vexcel grids with clean_gt + per-source mask supervision
+          (SAM_supp/V3C_TP+SAM_supp → mask_weight=1.0 + ignore band; V3C-only
+          → mask_weight=0.0 to break halo feedback loop). Best ckpt = epoch 7
+          (chip val_F1@85=0.6102). Eval on G0816/G0817/G0925 head-to-head vs
+          v3c_vexcel_2024 raw — pass criteria: bulk_ratio ≤ 1.10, Ch2 recall@0.3
+          ≥ 0.443, area_F1 ≥ V3-C+SAM(mask+box) baseline.
 
     grids:
       # Legacy 6-grid pilot (manual transfer test only)
