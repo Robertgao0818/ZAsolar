@@ -38,6 +38,40 @@ BASE_DIR = Path(__file__).parent
 
 
 # ════════════════════════════════════════════════════════════════════════
+# mask_trusted mapping (per 2026-05-11 unified_reviewall plan)
+# ════════════════════════════════════════════════════════════════════════
+# Per-instance gate on whether mask BCE supervises this annotation.
+# True  → mask head learns from this polygon's boundary (full BCE).
+# False → mask head skips this polygon entirely; box + cls loss still apply.
+#
+# Distinction (per ANNOTATION_SPEC.md "SAM-as-tool vs SAM-derived"):
+# - Interactive SAM (per-instance human point/refine) → trusted boundary
+# - Non-interactive batch SAM cut from FN markers → boundary follows model
+#   proposal, untrusted (Batch 003/004 sam_added_true_fn was this flow)
+# - V3-C reviewed predictions → boundary carries halo bias, untrusted
+_MASK_TRUSTED = {
+    # Annotator-initiated + per-instance interactive SAM or freehand → True
+    "human_manual":              True,
+    "human_manual_sam_assisted": True,
+    "human_manual_qgis_geosam":  True,
+    "sam_added_browser":         True,   # browser SAM point-prompt (post-2026-04-13)
+    # Model-initiated / non-interactive batch SAM / legacy weak → False
+    "reviewed_prediction":       False,
+    "sam_refined_review":        False,
+    "sam_added_true_fn":         False,  # Batch 003/004 FN marker → bulk SAM cut, no per-instance refine
+    "legacy_weak_supervision":   False,
+}
+
+
+def mask_trusted_for(label_source: str | None) -> bool:
+    """Map label_source → mask_trusted bool. Unknown sources default True
+    (conservative — preserves mask supervision for new label types)."""
+    if label_source is None:
+        return True
+    return _MASK_TRUSTED.get(str(label_source), True)
+
+
+# ════════════════════════════════════════════════════════════════════════
 # Annotation loading (registry-based, multi-region)
 # ════════════════════════════════════════════════════════════════════════
 
@@ -282,8 +316,10 @@ def scan_chips_from_tile(
                 })
 
                 # COCO annotations
+                has_label_source = "label_source" in annotations.columns
                 for aidx, shifted_geom in chip_annots:
                     polys = [shifted_geom] if shifted_geom.geom_type == "Polygon" else list(shifted_geom.geoms)
+                    label_source = annotations.loc[aidx, "label_source"] if has_label_source else None
                     for poly in polys:
                         if poly.is_empty or poly.area < 4:
                             continue
@@ -291,7 +327,7 @@ def scan_chips_from_tile(
                         if not seg:
                             continue
                         bx, by, bx2, by2 = poly.bounds
-                        coco_annots.append({
+                        ann = {
                             "id": ann_id,
                             "image_id": img_id,
                             "category_id": 1,
@@ -301,7 +337,11 @@ def scan_chips_from_tile(
                             "area": round(poly.area, 2),
                             "iscrowd": 0,
                             "source_annotation_idx": int(aidx),
-                        })
+                        }
+                        if label_source is not None:
+                            ann["label_source"] = str(label_source)
+                        ann["mask_trusted"] = mask_trusted_for(label_source)
+                        coco_annots.append(ann)
                         ann_id += 1
 
                 img_id += 1
