@@ -194,6 +194,81 @@ def is_installed() -> bool:
 
 
 # ════════════════════════════════════════════════════════════════════════
+# Post-transform supervision stash (with aux spatial resize)
+# ════════════════════════════════════════════════════════════════════════
+def _resize_aux_to_mask(aux: torch.Tensor, new_h: int, new_w: int,
+                        mode: str) -> torch.Tensor:
+    """Resize a per-instance spatial tensor (N, H, W) to (N, new_h, new_w).
+
+    ``mode='bilinear'`` for soft float weights (mask_pixel_weights),
+    ``mode='nearest'`` for binary masks (ignore_masks).
+    """
+    if aux.numel() == 0:
+        return aux
+    if aux.dim() == 2:
+        aux = aux.unsqueeze(0)
+    if aux.shape[-2] == new_h and aux.shape[-1] == new_w:
+        return aux
+    x = aux.float().unsqueeze(0)  # (1, N, H, W)
+    kwargs: dict = {"size": (new_h, new_w), "mode": mode}
+    if mode == "bilinear":
+        kwargs["align_corners"] = False
+    out = F.interpolate(x, **kwargs)
+    return out[0].to(aux.dtype)
+
+
+def install_transform_aux_resize(model) -> None:
+    """Wrap ``model.transform.forward`` so that per-image auxiliary spatial
+    fields (``mask_pixel_weights``, ``ignore_masks``) are resized in sync
+    with ``target['masks']`` after the standard ``GeneralizedRCNNTransform``,
+    then stash the supervision state for the patched mask loss.
+
+    Why this exists: torchvision's transform resizes images and
+    ``target['masks']`` from chip resolution (e.g. 400) to its internal
+    spatial range (default min_size=800). Custom dict keys are passed
+    through untouched. If we stashed pre-transform, the patched mask loss
+    would then call ROIAlign with post-transform proposals (in 800-space)
+    against pre-transform weight maps (in 400-space) → samples at 2× the
+    correct coordinates → spatial mismatch. This wrapper runs after the
+    standard transform, sees the post-transform mask shape, and resizes
+    auxiliary weights to match before stashing.
+
+    Idempotent.
+    """
+    transform = model.transform
+    if getattr(transform, "_aux_resize_installed", False):
+        return
+    base_forward = transform.forward
+
+    def patched_forward(images, targets=None):
+        image_list, targets_out = base_forward(images, targets)
+        if targets_out is not None and transform.training:
+            for tgt in targets_out:
+                if "masks" not in tgt:
+                    continue
+                new_h, new_w = tgt["masks"].shape[-2], tgt["masks"].shape[-1]
+                pw = tgt.get("mask_pixel_weights")
+                if pw is not None:
+                    tgt["mask_pixel_weights"] = _resize_aux_to_mask(
+                        pw, new_h, new_w, "bilinear",
+                    )
+                ig = tgt.get("ignore_masks")
+                if ig is not None:
+                    tgt["ignore_masks"] = _resize_aux_to_mask(
+                        ig, new_h, new_w, "nearest",
+                    )
+            stash_batch_supervision(targets_out)
+        return image_list, targets_out
+
+    transform.forward = patched_forward
+    transform._aux_resize_installed = True
+
+
+def is_transform_aux_resize_installed(model) -> bool:
+    return getattr(model.transform, "_aux_resize_installed", False)
+
+
+# ════════════════════════════════════════════════════════════════════════
 # Per-source box regression loss tracking
 # (Signal collection for next-round box_trusted decision — does NOT alter
 #  gradients. The patched fastrcnn_loss returns the same scalar; it only

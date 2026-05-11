@@ -1001,10 +1001,11 @@ def main():
             boundary_band_iters=args.boundary_band_iters,
             per_instance_mask_trusted=args.per_instance_mask_trusted,
         )
-        if args.per_source_mask_weight or args.per_instance_mask_trusted:
-            from core.training.boundary_aware_mask import (
-                install_patch, stash_batch_supervision,
-            )
+        _install_aux_resize = (
+            args.per_source_mask_weight or args.per_instance_mask_trusted
+        )
+        if _install_aux_resize:
+            from core.training.boundary_aware_mask import install_patch
             install_patch()
             modes = []
             if args.per_source_mask_weight:
@@ -1013,13 +1014,6 @@ def main():
                 modes.append("per-instance-mask-trusted")
             print(f"[PATCH] boundary-aware maskrcnn_loss installed "
                   f"({'+'.join(modes)})")
-            _stash_fn = stash_batch_supervision
-
-            def _pre_forward_hook(module, args_in):
-                if module.training and len(args_in) >= 2 and args_in[1] is not None:
-                    _stash_fn(args_in[1])
-        else:
-            _pre_forward_hook = None
     print(f"[DATA] Train: {len(train_ds)} images, Val: {len(val_ds)} images")
 
     loader_kwargs = dict(
@@ -1042,31 +1036,36 @@ def main():
         reinit_box_predictor(model)
     model.to(device)
 
-    if _pre_forward_hook is not None:
-        model.register_forward_pre_hook(_pre_forward_hook)
-        print("[HOOK] forward_pre_hook registered for boundary-aware supervision")
+    # Boundary-aware supervision: wrap model.transform so per-image aux fields
+    # (mask_pixel_weights, ignore_masks) are resized to match torchvision's
+    # post-transform mask shape before stashing — fixes the spatial mismatch
+    # between pre-transform 400-space weights and post-transform 800-space
+    # proposals used by patched mask loss.
+    if _install_aux_resize:
+        from core.training.boundary_aware_mask import install_transform_aux_resize
+        install_transform_aux_resize(model)
+        print("[HOOK] model.transform wrapped for post-transform aux resize + stash")
 
     # ── Per-source box reg loss: install fastrcnn patch + wrap RoI sampler ──
     if args.log_per_source_box_reg_loss:
         from core.training.boundary_aware_mask import (
             install_patch as _install_mask_patch,
             install_fastrcnn_patch,
+            install_transform_aux_resize as _install_transform_box,
             wrap_select_training_samples,
-            stash_batch_supervision as _stash_for_box,
         )
         _install_mask_patch()    # idempotent; ensures stash hook also runs
         install_fastrcnn_patch()
         wrap_select_training_samples(model)
+        # Reuse the same transform wrapper for box-loss bucketing. The wrapper
+        # also handles non-mask cases gracefully (no-op when aux fields absent),
+        # so it's safe even when neither per_source_mask_weight nor
+        # per_instance_mask_trusted is set.
+        if not _install_aux_resize:
+            _install_transform_box(model)
+            print("[HOOK] model.transform wrapped (box-loss bucketing path)")
         print("[PATCH] fastrcnn_loss patched + select_training_samples wrapped "
               "(per-source box reg loss bucketing ON)")
-        # Make sure forward_pre_hook stashes label_sources too (even if user did
-        # not set --per-source-mask-weight / --per-instance-mask-trusted).
-        if _pre_forward_hook is None:
-            def _box_only_pre_forward(module, args_in):
-                if module.training and len(args_in) >= 2 and args_in[1] is not None:
-                    _stash_for_box(args_in[1])
-            model.register_forward_pre_hook(_box_only_pre_forward)
-            print("[HOOK] forward_pre_hook registered for box-loss bucketing")
 
     # Trusted source classification mirrors _LABEL_SOURCE_TO_MASK_TRUSTED.
     _TRUSTED_SRC = {k for k, v in _LABEL_SOURCE_TO_MASK_TRUSTED.items() if v}
