@@ -366,9 +366,10 @@ def build(args: argparse.Namespace) -> dict:
 
         # Negative ratio balancing (only on train; val keeps full empties)
         if split_name == "train" and args.neg_ratio >= 0:
-            all_images = balance_chips(all_images, args.neg_ratio, seed=args.seed)
-            kept_ids = {img["id"] for img in all_images}
-            all_annots = [a for a in all_annots if a["image_id"] in kept_ids]
+            all_images, all_annots, all_prov = balance_chips(
+                all_images, all_annots, all_prov,
+                seed=args.seed, neg_ratio=args.neg_ratio,
+            )
             n_pos = sum(1 for img in all_images if img["positive"])
             n_neg = len(all_images) - n_pos
             print(f"[BALANCE] train post-balance: {len(all_images)} chips "
