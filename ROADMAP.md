@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-05-08: Revert "feat(claude-config): auto-update git pod remote when SSH details change"
-- 2026-05-08: fix(progress-tracker): break the catch-up commit infinite loop
-- 2026-05-08: feat(claude-config): auto-update git pod remote when SSH details change
-- 2026-05-08: feat(annotations): expand_cut_polygons utility + joburg vexcel grid row
-- 2026-05-08: chore(progress): refresh ROADMAP and entries.json from today's commits
-- 2026-05-08: chore(docs): purge Li GT references and update week-folder paths
-- 2026-05-08: feat(imagery): nationwide admin-grid imagery acquisition scaffolding
-- 2026-05-08: feat(probes): postproc & recall recovery probes for V3-C ceiling analysis
+- 2026-05-11: docs(progress): week 2026-05-06 daily logs (05-08 update + 05-09 + 05-10 + 05-11)
+- 2026-05-11: docs(experiments): mark Option B (sub-array → installation blob merge) REJECTED
+- 2026-05-11: feat(analysis): area_aggregate_eval Tier 1 metric system (full suite + dispersion + thru-0 β)
+- 2026-05-11: feat(analysis): train20 pixel-or vs per-detection audit + failure-weight comparison HTMLs
+- 2026-05-11: feat(analysis): per-hex dispersion + SSEG kW calibration + SAM halo polygon audit
+- 2026-05-11: docs(plans+literature): supervision-layering + admin-data-poor validation plans, HN-ratio + supervision lit notes
+- 2026-05-11: feat(training): label_source tagging + drop merge_sub_arrays_to_installations
+- 2026-05-11: feat(scripts): build_clean_baseline_h_s.py + register clean_baseline_hs training set
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.

@@ -653,5 +653,95 @@
     "timestamp": "2026-05-08T10:36:42Z",
     "source": "commit:3cd74bdd",
     "summary": "Revert \"feat(claude-config): auto-update git pod remote when SSH details change\""
+  },
+  {
+    "timestamp": "2026-05-11T11:30:17Z",
+    "source": "commit:6f744f31",
+    "summary": "feat(boundary-mask): per-instance mask gate + label_sources stash + fastrcnn box reg bucketing"
+  },
+  {
+    "timestamp": "2026-05-11T11:30:26Z",
+    "source": "commit:79814722",
+    "summary": "feat(export): write mask_trusted per COCO annotation, derived from label_source"
+  },
+  {
+    "timestamp": "2026-05-11T11:31:04Z",
+    "source": "commit:b98687e1",
+    "summary": "feat(train): unified_reviewall pipeline — mask_trusted dataset + freeze-mask + diff LR + box-reg log + eval schedule + early stop"
+  },
+  {
+    "timestamp": "2026-05-11T11:31:19Z",
+    "source": "commit:d377257c",
+    "summary": "feat(scripts): build_unified_reviewall.py — CT batch + JHB Vexcel builder for 2026-05-11 run"
+  },
+  {
+    "timestamp": "2026-05-11T11:32:38Z",
+    "source": "commit:eb6facf3",
+    "summary": "chore(datasets): register unified_reviewall_20260511 training set"
+  },
+  {
+    "timestamp": "2026-05-11T11:32:57Z",
+    "source": "commit:2cc1b652",
+    "summary": "fix(builder): correct balance_chips signature in build_unified_reviewall"
+  },
+  {
+    "timestamp": "2026-05-11T11:33:34Z",
+    "source": "commit:08ad6ee8",
+    "summary": "fix(export): strict mask_trusted_for + omit field on missing label_source"
+  },
+  {
+    "timestamp": "2026-05-11T11:34:29Z",
+    "source": "commit:f785fea5",
+    "summary": "fix(boundary-mask): wrap model.transform to resize aux fields post-transform"
+  },
+  {
+    "timestamp": "2026-05-11T11:34:59Z",
+    "source": "commit:12988d08",
+    "summary": "chore(regions): register Vexcel 2024 JHB model_runs (V4.1, V3-C+SAM v4_agg/v4_high, jhb_phaseA)"
+  },
+  {
+    "timestamp": "2026-05-11T11:35:07Z",
+    "source": "commit:4052cd38",
+    "summary": "chore(rules): add 08-runpod-large-files for >100MB transfer protocol"
+  },
+  {
+    "timestamp": "2026-05-11T11:36:07Z",
+    "source": "commit:67c07c81",
+    "summary": "feat(scripts): build_clean_baseline_h_s.py + register clean_baseline_hs training set"
+  },
+  {
+    "timestamp": "2026-05-11T11:36:20Z",
+    "source": "commit:2ee239f6",
+    "summary": "feat(training): label_source tagging + drop merge_sub_arrays_to_installations"
+  },
+  {
+    "timestamp": "2026-05-11T11:36:41Z",
+    "source": "commit:bcaa4964",
+    "summary": "docs(plans+literature): supervision-layering + admin-data-poor validation plans, HN-ratio + supervision lit notes"
+  },
+  {
+    "timestamp": "2026-05-11T11:36:58Z",
+    "source": "commit:20f3e7c2",
+    "summary": "feat(analysis): per-hex dispersion + SSEG kW calibration + SAM halo polygon audit"
+  },
+  {
+    "timestamp": "2026-05-11T11:37:12Z",
+    "source": "commit:72103515",
+    "summary": "feat(analysis): train20 pixel-or vs per-detection audit + failure-weight comparison HTMLs"
+  },
+  {
+    "timestamp": "2026-05-11T11:37:43Z",
+    "source": "commit:1916d371",
+    "summary": "feat(analysis): area_aggregate_eval Tier 1 metric system (full suite + dispersion + thru-0 β)"
+  },
+  {
+    "timestamp": "2026-05-11T11:38:00Z",
+    "source": "commit:17212021",
+    "summary": "docs(experiments): mark Option B (sub-array → installation blob merge) REJECTED"
+  },
+  {
+    "timestamp": "2026-05-11T11:40:10Z",
+    "source": "commit:dd80dbed",
+    "summary": "docs(progress): week 2026-05-06 daily logs (05-08 update + 05-09 + 05-10 + 05-11)"
   }
 ]
