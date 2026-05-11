@@ -125,12 +125,20 @@ Use only `V3C_TP + Li_marked` (410 / 2083 = 20% of clean GT). Trains the model o
 Pros: minimal infrastructure work — `export_train20_val5.py` filters by source column on load.
 Cons: 76% reduction in training signal; effectively trains the model on what V3-C already detects, so the lift over V3-C will be marginal at best. Likely a no-op fine-tune.
 
-### Option B — spatial-merge clean GT to installation-level before training
+### ~~Option B — spatial-merge clean GT to installation-level before training~~ (REJECTED 2026-05-10)
 
-Run a `merge_sub_arrays_to_installations.py` step that dissolves overlapping / adjacent SAM_supp + V3C_TP polygons within ~3-5 m buffer per cluster. Output is one polygon per "installation cluster"; 1673 sub-arrays might collapse to ~300-500 installations. Train against this merged GT.
+Originally proposed: run a `merge_sub_arrays_to_installations.py` step that dissolves overlapping / adjacent SAM_supp + V3C_TP polygons within ~3-5 m buffer per cluster, train against the merged GT.
 
-Pros: keeps all the recall signal SAM_supp added but at the right granularity for a detector; aligns with V1.3 installation-level semantics (memory `project_two_axis_model.md`).
-Cons: requires the merge logic to be tuned (buffer distance, dissolve threshold); GT size shrinks but does not disappear. **Recommended path.**
+**Rejected.** Reasons:
+
+1. SAM tool ceiling on large connected PV (`feedback_sam_tool_ceiling.md`): merged installation polygons inherit the halo / roof-swallow of the worst SAM-supp component, then pixel-BCE学进 mask head — same failure mode as `train20_val5_hn` but compounded by union envelope.
+2. Two-Axis Model contract (`project_two_axis_model.md` + `feedback_volume_loss_avoid.md`): only A1 = T1 qualifies as gold mask supervision. A buffer-3m connected-component union of A2 SAM-supp + A2 reviewed_prediction is **not** A1 — buffer dissolve does not upgrade semantic conformance, it just hides the boundary noise inside a larger blob.
+3. Phase A (`project_jhb_phaseA_failed.md`) already showed that fixing halo at training time via loss/postproc can't beat V3-C raw when GT边界 noisy. Pre-training spatial-merge concentrates the noise instead of removing it.
+4. Literature record (`docs/literature/2026-05-09-training-supervision-literature-record.md` §3.7) explicitly rejects pre-training sub-array → installation-blob synthesis as a wrong direction.
+
+The right path is supervision layering — see `docs/plans/2026-05-09-training-supervision-layering.md` (freeze-mask-head, source-aware loss weighting, accumulation principle, area-adaptive boundary ignore band, selective relabelling). `merge_sub_arrays_to_installations.py` was deleted on 2026-05-10 to prevent future agents from landing this option.
+
+**Allowed exception**: GT-side spatial-merge of sibling polygons that are clearly the same installation split into adjacent fragments (`feedback_fragmented_label_semantics.md` `split_within_gt`). That is a cleanup of a single GT cluster, not a pre-training upgrade of all sub-arrays to installation blobs.
 
 ### Option C — per-source loss weighting at training time
 
@@ -143,7 +151,7 @@ Cons: complex implementation and tuning; train.py loss path is not currently sou
 
 ## Followups
 
-- (B) implementation: write `scripts/training/build_train20_val5_v2_installation_level.py` that merges sub-arrays into installations and produces a new `coco_train20_val5_v2/` dataset. Train spec at `configs/datasets/train20_val5_v2.yaml`.
+- ~~(B) implementation: write `scripts/training/build_train20_val5_v2_installation_level.py` ...~~ — withdrawn 2026-05-10 alongside Option B rejection. The replacement plan is the supervision-layering action list in `docs/plans/2026-05-09-training-supervision-layering.md` (freeze-mask-head + source-aware loss weighting + accumulation + ignore band + selective relabelling).
 - Add a `quality_tier` column to clean_gt build pipeline (`scripts/validation/build_clean_gt_jhb_cbd25.py`) so source-filter / merge logic can target T1/T2 distinctly per memory `project_two_axis_model.md`.
 - This experiment's negative-result lesson — "evaluation GT and training GT are not the same artifact" — should land in `docs/validation_strategy.md` as a **note on training-target design** to avoid the next contributor re-running this same trap.
 - Re-run `exp_finalizer_pixel_or_vs_per_detection.md` ablation on the next viable checkpoint; current conclusions are bound to V3-C output statistics.
