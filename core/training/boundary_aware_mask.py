@@ -7,6 +7,11 @@ variant that supports:
   2. Per-instance mask weight: scales (or zeros out) the BCE for entire
      instances. ``mask_weight=0`` means an instance is dropped from mask
      supervision entirely (still contributes to box + cls).
+  3. Per-pixel soft mask weight: float multiplier (0..1) applied to BCE
+     pixel-wise. Used for boundary-band per-source weighting (e.g.,
+     reviewed-prediction GT gets weight=0 on the boundary band, weight=1
+     on the foreground/background interior, so its halo bias does not
+     supervise mask edges).
 
 Mechanism: torchvision's RoIHeads.forward looks up the loss function via
 ``roi_heads.maskrcnn_loss`` at call time, so replacing the module-level
@@ -37,18 +42,27 @@ from torchvision.models.detection import roi_heads as _rh
 from torchvision.ops import roi_align
 
 
-_BATCH_STATE: dict = {"ignore_masks": None, "mask_weights": None}
+_BATCH_STATE: dict = {
+    "ignore_masks": None,
+    "mask_weights": None,
+    "mask_pixel_weights": None,
+    "label_sources": None,
+}
 
 
 def stash_batch_supervision(targets: list[dict]) -> None:
     """Stash per-image supervision tensors. Call before model(images, targets)."""
     _BATCH_STATE["ignore_masks"] = [t.get("ignore_masks") for t in targets]
     _BATCH_STATE["mask_weights"] = [t.get("mask_weights") for t in targets]
+    _BATCH_STATE["mask_pixel_weights"] = [t.get("mask_pixel_weights") for t in targets]
+    _BATCH_STATE["label_sources"] = [t.get("label_sources", []) for t in targets]
 
 
 def clear_batch_supervision() -> None:
     _BATCH_STATE["ignore_masks"] = None
     _BATCH_STATE["mask_weights"] = None
+    _BATCH_STATE["mask_pixel_weights"] = None
+    _BATCH_STATE["label_sources"] = None
 
 
 def _project_masks_on_boxes(
@@ -113,6 +127,22 @@ def patched_maskrcnn_loss(
     else:
         ig_targets = None
 
+    pix_weights_per_img = _BATCH_STATE.get("mask_pixel_weights")
+    has_pix_weights = (
+        pix_weights_per_img is not None
+        and any(pw is not None for pw in pix_weights_per_img)
+    )
+    if has_pix_weights:
+        pix_w_targets = []
+        for pw, p, i in zip(pix_weights_per_img, proposals, mask_matched_idxs):
+            if pw is None or len(pw) == 0:
+                pix_w_targets.append(torch.ones(len(p), M, M, device=p.device))
+            else:
+                pix_w_targets.append(_project_masks_on_boxes(pw, p, i, M))
+        pix_w_targets = torch.cat(pix_w_targets, dim=0) if pix_w_targets else None
+    else:
+        pix_w_targets = None
+
     labels = torch.cat(labels, dim=0)
     mask_targets = torch.cat(mask_targets, dim=0)
 
@@ -130,6 +160,10 @@ def patched_maskrcnn_loss(
         valid_pixel = (ig_targets <= 0.5).to(bce_per_pixel.dtype)
     else:
         valid_pixel = torch.ones_like(bce_per_pixel)
+
+    if pix_w_targets is not None:
+        soft_w = pix_w_targets.clamp(0.0, 1.0).to(bce_per_pixel.dtype)
+        valid_pixel = valid_pixel * soft_w
 
     if per_prop_w is not None:
         w_pp = per_prop_w[:, None, None].to(bce_per_pixel.dtype)
@@ -157,3 +191,147 @@ def restore_original() -> None:
 
 def is_installed() -> bool:
     return _rh.maskrcnn_loss is patched_maskrcnn_loss
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Per-source box regression loss tracking
+# (Signal collection for next-round box_trusted decision — does NOT alter
+#  gradients. The patched fastrcnn_loss returns the same scalar; it only
+#  records per-source averages into a module-level dict per call.)
+# ════════════════════════════════════════════════════════════════════════
+_BOX_LOSS_BUCKETS: dict[str, list[float]] = {}
+_LAST_MATCHED_IDXS: list[torch.Tensor] | None = None
+_LAST_LABEL_SOURCES: list[list[str]] | None = None
+
+
+def reset_box_loss_buckets() -> None:
+    """Call at start of each epoch."""
+    _BOX_LOSS_BUCKETS.clear()
+
+
+def box_loss_bucket_means() -> dict[str, float]:
+    """Return mean box reg loss per source bucket (or empty if no data)."""
+    out = {}
+    for src, vals in _BOX_LOSS_BUCKETS.items():
+        if vals:
+            out[src] = float(sum(vals) / len(vals))
+    return out
+
+
+def stash_matched_info(matched_idxs: list[torch.Tensor], label_sources: list[list[str]]) -> None:
+    """Stash per-image matched_idxs + per-image GT label_sources just before
+    fastrcnn_loss runs.  matched_idxs[i] is the per-proposal → GT-index tensor
+    for image i (after select_training_samples sampling)."""
+    global _LAST_MATCHED_IDXS, _LAST_LABEL_SOURCES
+    _LAST_MATCHED_IDXS = matched_idxs
+    _LAST_LABEL_SOURCES = label_sources
+
+
+def _clear_matched_info() -> None:
+    global _LAST_MATCHED_IDXS, _LAST_LABEL_SOURCES
+    _LAST_MATCHED_IDXS = None
+    _LAST_LABEL_SOURCES = None
+
+
+def patched_fastrcnn_loss(
+    class_logits: torch.Tensor,
+    box_regression: torch.Tensor,
+    labels: list[torch.Tensor],
+    regression_targets: list[torch.Tensor],
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """torchvision's fastrcnn_loss + per-source box reg loss bucketing.
+
+    Returns identical scalars to torchvision (no gradient impact).  Side
+    effect: if matched info has been stashed, per-source means accumulate
+    into _BOX_LOSS_BUCKETS for end-of-epoch readout.
+    """
+    labels_cat = torch.cat(labels, dim=0)
+    regression_targets_cat = torch.cat(regression_targets, dim=0)
+
+    classification_loss = F.cross_entropy(class_logits, labels_cat)
+
+    sampled_pos_inds_subset = torch.where(labels_cat > 0)[0]
+    labels_pos = labels_cat[sampled_pos_inds_subset]
+    N, num_classes = class_logits.shape
+    box_regression_r = box_regression.reshape(N, box_regression.size(-1) // 4, 4)
+    pred_pos = box_regression_r[sampled_pos_inds_subset, labels_pos]
+    tgt_pos = regression_targets_cat[sampled_pos_inds_subset]
+
+    # per-element loss for bucketing; sum over coords per proposal
+    bx_per_elem = F.smooth_l1_loss(pred_pos, tgt_pos, beta=1 / 9, reduction="none")
+    bx_per_prop = bx_per_elem.sum(dim=1)  # (n_pos,)
+
+    # canonical aggregate (matches torchvision behavior exactly)
+    box_loss = bx_per_prop.sum() / labels_cat.numel()
+
+    # ── side-effect: bucket per-source if matched info available ────────
+    if _LAST_MATCHED_IDXS is not None and _LAST_LABEL_SOURCES is not None:
+        try:
+            # Flatten matched_idxs across images, parallel to labels_cat order.
+            # labels comes per-image in the same order; same for matched_idxs.
+            flat_matched = torch.cat(_LAST_MATCHED_IDXS, dim=0)
+            # Build per-proposal source label aligned with labels_cat
+            sources_flat: list[str] = []
+            img_lens = [m.shape[0] for m in _LAST_MATCHED_IDXS]
+            cursor = 0
+            for img_i, n_prop in enumerate(img_lens):
+                ls_img = _LAST_LABEL_SOURCES[img_i] if img_i < len(_LAST_LABEL_SOURCES) else []
+                mi = _LAST_MATCHED_IDXS[img_i].tolist()
+                for prop_i in range(n_prop):
+                    gt_i = mi[prop_i]
+                    if 0 <= gt_i < len(ls_img):
+                        sources_flat.append(ls_img[gt_i])
+                    else:
+                        sources_flat.append("")
+                cursor += n_prop
+
+            if len(sources_flat) == labels_cat.shape[0]:
+                # restrict to positive proposals only (same as box reg)
+                pos_idx_list = sampled_pos_inds_subset.tolist()
+                pos_losses = bx_per_prop.detach().cpu().tolist()
+                for k, pi in enumerate(pos_idx_list):
+                    src = sources_flat[pi] or "UNKNOWN"
+                    _BOX_LOSS_BUCKETS.setdefault(src, []).append(pos_losses[k])
+        except Exception as e:  # don't break training over a bucketing bug
+            print(f"[WARN] per-source box loss bucketing skipped: {e}")
+
+    return classification_loss, box_loss
+
+
+_ORIGINAL_FASTRCNN_LOSS = _rh.fastrcnn_loss
+
+
+def install_fastrcnn_patch() -> None:
+    _rh.fastrcnn_loss = patched_fastrcnn_loss
+
+
+def restore_fastrcnn() -> None:
+    _rh.fastrcnn_loss = _ORIGINAL_FASTRCNN_LOSS
+
+
+def is_fastrcnn_patched() -> bool:
+    return _rh.fastrcnn_loss is patched_fastrcnn_loss
+
+
+def wrap_select_training_samples(model) -> None:
+    """Monkey-patch model.roi_heads.select_training_samples to stash
+    matched_idxs (per-image, per-sampled-proposal → GT index) into module
+    state for downstream per-source box-loss bucketing.
+
+    Idempotent: re-wrapping returns without action.
+    """
+    rh_obj = model.roi_heads
+    if getattr(rh_obj, "_select_training_samples_wrapped", False):
+        return
+    original = rh_obj.select_training_samples
+
+    def wrapper(proposals, targets):
+        result = original(proposals, targets)
+        # result = (proposals, matched_idxs, labels, regression_targets)
+        _, matched_idxs, _, _ = result
+        label_sources = _BATCH_STATE.get("label_sources") or []
+        stash_matched_info(matched_idxs, label_sources)
+        return result
+
+    rh_obj.select_training_samples = wrapper
+    rh_obj._select_training_samples_wrapped = True
