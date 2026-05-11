@@ -64,11 +64,26 @@ _MASK_TRUSTED = {
 
 
 def mask_trusted_for(label_source: str | None) -> bool:
-    """Map label_source → mask_trusted bool. Unknown sources default True
-    (conservative — preserves mask supervision for new label types)."""
+    """Map label_source → mask_trusted bool.
+
+    None → ValueError: callers must guard with `if label_source is not None`.
+    Unknown source → ValueError: forces explicit mapping for new label types
+    (prevents silent default that could incorrectly mark model-predicted
+    boundaries as trusted)."""
     if label_source is None:
-        return True
-    return _MASK_TRUSTED.get(str(label_source), True)
+        raise ValueError(
+            "mask_trusted_for(None) is not allowed; caller must guard with "
+            "'if label_source is not None' to skip writing mask_trusted on "
+            "legacy data missing the label_source column."
+        )
+    key = str(label_source)
+    if key not in _MASK_TRUSTED:
+        raise ValueError(
+            f"unknown label_source {key!r}; add to _MASK_TRUSTED in "
+            f"export_coco_dataset.py with an explicit trusted/untrusted "
+            f"classification."
+        )
+    return _MASK_TRUSTED[key]
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -340,7 +355,11 @@ def scan_chips_from_tile(
                         }
                         if label_source is not None:
                             ann["label_source"] = str(label_source)
-                        ann["mask_trusted"] = mask_trusted_for(label_source)
+                            ann["mask_trusted"] = mask_trusted_for(label_source)
+                        # Legacy path (no label_source column): omit mask_trusted
+                        # entirely. Consumers fall back to their own default
+                        # (CocoSolarDataset._resolve_mask_trusted treats absence
+                        # as True for backwards compatibility).
                         coco_annots.append(ann)
                         ann_id += 1
 

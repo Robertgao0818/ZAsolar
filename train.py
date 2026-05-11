@@ -100,15 +100,22 @@ def _boundary_pixel_weights(mask_np, label_source, band_iters=2):
 def _resolve_mask_trusted(ann: dict) -> bool:
     """Return mask_trusted for one COCO annotation.
 
-    Priority: explicit ann["mask_trusted"] (written by export_coco_dataset)
-    → fallback to mapping from label_source → final fallback True (preserve
-    supervision for unknown sources)."""
+    Priority:
+    1. explicit ann["mask_trusted"] (written by export_coco_dataset when
+       label_source is known) → use as-is.
+    2. ann["label_source"] in the trusted-source map → use mapped value.
+    3. ann has label_source but value is unknown → False (conservative:
+       unknown provenance is treated as untrusted to avoid silently feeding
+       potentially halo-biased data into mask BCE).
+    4. ann has neither field (legacy export) → True (backwards compat: old
+       COCO files predate the trusted-source machinery and should keep their
+       prior full-supervision behavior)."""
     if "mask_trusted" in ann:
         return bool(ann["mask_trusted"])
     ls = ann.get("label_source")
     if ls is None:
         return True
-    return _LABEL_SOURCE_TO_MASK_TRUSTED.get(str(ls), True)
+    return _LABEL_SOURCE_TO_MASK_TRUSTED.get(str(ls), False)
 
 
 class CocoSolarDataset(torch.utils.data.Dataset):
