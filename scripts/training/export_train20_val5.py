@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import geopandas as gpd
+import pandas as pd
 import rasterio
 import yaml
 from shapely.geometry import box as shapely_box
@@ -104,11 +105,74 @@ def load_spec_grids(spec):
                 yield split_name, region_key, grid_id, path, imagery_layer
 
 
-def load_annotations_for_grid(path: Path, tile_crs) -> gpd.GeoDataFrame:
+# JHB clean_gt 'source' column → label_source enum (consumed by
+# train.py --per-source-mask-weight). Strict rule: any V3-C-tainted
+# polygon gets boundary weight 0; only pure-human gets 1.
+_JHB_SOURCE_TO_LABEL_SOURCE = {
+    "V3C_TP":           "reviewed_prediction",   # pure V3-C accepted
+    "SAM_supp+V3C_TP":  "sam_refined_review",    # V3-C dissolved with SAM supplement
+    "Li_marked":        "human_manual",          # human-drawn (no V3-C)
+}
+
+# CT 'source' column → label_source enum. CRITICAL: only the very first
+# CT batch (G1189/G1190/G1238, drawn by hand in QGIS+GeoSAM before the
+# Pred Review GUI existed) is true H-tier supervision. EVERY other CT
+# file — regardless of the `source` column value or the date suffix —
+# was produced by V3-C inference + human review (with optional SAM-based
+# FN补标), so the polygons are V3-C-derived and must get boundary weight 0
+# under the strict rule.
+_CT_MANUAL_GRIDS = frozenset({"G1189", "G1190", "G1238"})
+
+def _ct_source_to_label_source(value) -> str:
+    """Map CT 'source' column values for non-manual grids (V3-C-derived path)."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return "reviewed_prediction"        # Pred Correct = V3-C accepted via review GUI
+    if value == "sam2":
+        return "reviewed_prediction"        # SAM2 polygon prompted by model candidate, then reviewed
+    if value in ("sam_fn_review", "sam_fn_marker"):
+        return "legacy_weak_supervision"    # pre-2026-04-13 SAM补标 tools, unreliable
+    raise ValueError(f"unknown CT 'source' value {value!r} — extend _ct_source_to_label_source")
+
+
+def attach_label_source(g: gpd.GeoDataFrame, region_key: str, src_path: Path,
+                        grid_id: str) -> gpd.GeoDataFrame:
+    """Tag each polygon with label_source for downstream per-source mask loss weighting."""
+    g = g.copy()
+    if region_key == "johannesburg":
+        if "source" not in g.columns:
+            raise ValueError(
+                f"JHB annotation file missing 'source' column for label_source mapping: {src_path}"
+            )
+        unknown = set(g["source"].dropna().unique()) - set(_JHB_SOURCE_TO_LABEL_SOURCE)
+        if unknown:
+            raise ValueError(
+                f"JHB clean_gt {src_path} has unmapped 'source' values: {sorted(unknown)}. "
+                f"Update _JHB_SOURCE_TO_LABEL_SOURCE."
+            )
+        g["label_source"] = g["source"].map(_JHB_SOURCE_TO_LABEL_SOURCE)
+    elif region_key == "cape_town":
+        if grid_id in _CT_MANUAL_GRIDS:
+            # Original QGIS+GeoSAM manual batch (predates Pred Review GUI).
+            g["label_source"] = "human_manual_sam_assisted"
+        elif "source" not in g.columns:
+            # Early single-mask schema (e.g. G1635: method='single', no source col).
+            # Per the rule that only G1189/G1190/G1238 are true manual, every other
+            # CT file is V3-C-derived → reviewed_prediction (boundary weight 0).
+            g["label_source"] = "reviewed_prediction"
+        else:
+            g["label_source"] = g["source"].map(_ct_source_to_label_source)
+    else:
+        raise ValueError(f"unknown region_key {region_key!r} for label_source mapping")
+    return g
+
+
+def load_annotations_for_grid(path: Path, tile_crs, region_key: str,
+                              grid_id: str) -> gpd.GeoDataFrame:
     g = gpd.read_file(path)
     if g.crs is None:
         g = g.set_crs("EPSG:4326")
-    return g.to_crs(tile_crs)
+    g = g.to_crs(tile_crs)
+    return attach_label_source(g, region_key, path, grid_id)
 
 
 def get_tiles(grid_id: str, region_key: str, imagery_layer: str) -> list[Path]:
@@ -161,7 +225,7 @@ def main():
         with rasterio.open(tiles[0]) as src:
             tile_crs = src.crs
 
-        annots = load_annotations_for_grid(ann_path, tile_crs)
+        annots = load_annotations_for_grid(ann_path, tile_crs, region_key, grid_id)
         tile_to_annots = assign_annotations_to_tiles_intersecting(annots, tiles)
 
         n_pos = sum(len(v) for v in tile_to_annots.values())
