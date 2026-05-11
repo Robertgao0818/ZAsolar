@@ -155,6 +155,31 @@ Currently training: `train20_val5_hn_20260508_v3c` (V3-C continued on JHB CBD 20
 
 ---
 
+## 2026-05-10 cross-model addendum (clean_pilot_A vs V3-C, same 5 grids)
+
+The "V3-C–specific" prediction above was confirmed by Pilot A's deployment validation (`coco_clean_hs_ct260320_jhb_sam_added_20260510`, +5 epochs warm-start from V3-C). Same `raw_detections.pkl` re-finalized under both merge modes on G0853 / G0855 / G0922 / G0816 / G0925:
+
+| Run | merge mode | mean area_F1 (5 grids) | bulk_ratio (5 grids agg) |
+| --- | --- | ---: | ---: |
+| Pilot A | `pixel-or` | 0.652 | **1.79** |
+| Pilot A | `per-detection` | **0.710** | 1.19 |
+| V3-C raw | `pixel-or` | **0.788** | 1.04 |
+| V3-C raw | `per-detection` | 0.723 | 0.81 |
+
+Take-aways:
+
+1. **The same model can win or lose by 6pp F1 / 0.6 bulk_ratio depending on merge mode.** Pilot A under `pixel-or` looks catastrophic (1.79 over-prediction), under `per-detection` lands at 1.19 — closer to calibrated than V3-C in the same mode.
+2. **V3-C's 1.04 bulk_ratio under `pixel-or` is two bugs cancelling**: V3-C is intrinsically detection-sparse (`per-detection` bulk = 0.81 confirms under-prediction), and `pixel-or` envelopes happen to inflate to GT total area. Switch the model and the cancellation breaks.
+3. **Under matched merge mode, Pilot A and V3-C are within 1.3pp F1** (per-detection: 0.710 vs 0.723). The ~14pp gap reported in the original 5-grid eval was a postproc-artifact, not a model failure.
+4. **Validation harness must run BOTH merge modes** for every new checkpoint. Picking one and reporting cross-model deltas without controlling merge mode produces wrong directional conclusions (today's case: pixel-or said "Pilot A is structurally broken", per-detection said "Pilot A is comparable to V3-C").
+5. **`v4_agg.json` (`ref_sam_maskbox`) production status is now in question** beyond V3-C. The `pixel-or → SAM tighten` chain may stop working when the upstream model has different detection density. Re-validate `v4_agg` on Pilot A / future checkpoints before promoting to inventory.
+
+Practical: extend `scripts/analysis/validate_checkpoint.py` to emit per-grid area_F1 / bulk_ratio under both `--merge-mode pixel-or` and `--merge-mode per-detection`, and to pick the per-grid best as a reported "best-of" (vs the single-mode default). Until then, single-mode area_F1 numbers should be read with merge-mode caveat in mind.
+
+Source data: `/workspace/logs_clean_pilots/5grid_eval/area_metrics_{clean_pilot_A_v3c_reinit,clean_pilot_A_v3c_reinit_perdet,v3c_raw_5grid_compare,v3c_raw_5grid_compare_perdet}.csv`. bulk_r decomposition (pure_FP / halo / duplicates) in `bulk_decomposition.csv` same dir.
+
+---
+
 ## Followups (not blocking)
 
 - Wire `v4_poly_diag.json` into the validation harness (today's harness emits Ch2 + Ch3 from `v4_agg.json` only; polygon-diagnostic remains a manual rerun).
