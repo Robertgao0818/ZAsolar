@@ -137,8 +137,8 @@ BENCHMARK_PARALLEL=6 python3 scripts/analysis/run_benchmark.py --models v3c v4_1
 
 ```python
 # 在 Colab notebook 中
-!git clone https://github.com/Robertgao0818/SA_Solar.git /content/SA_Solar
-%cd /content/SA_Solar
+!git clone https://github.com/Robertgao0818/ZAsolar.git /content/ZAsolar
+%cd /content/ZAsolar
 !bash scripts/colab_setup.sh
 
 from scripts.colab_config import setup_colab
