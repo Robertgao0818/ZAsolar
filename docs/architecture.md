@@ -1,10 +1,21 @@
-# Architecture — Cape Town Solar Panel Detection
+# Architecture — South Africa Rooftop Solar Detection
 
-> **V1.4 (2026-04-22)**: Success metric reframes from per-polygon F1 to aggregate installation inventory at grid level, suited for economic analysis. Sub-repo split landed 2026-05-05: install-date back-dating moved to **`solar_backdating`** at `/home/gaosh/projects/solar_backdating/` (plugin of this repo via shared venv + PYTHONPATH; old `geid_bbox` GEID free-detection prototype archived under `/home/gaosh/projects/_archive/geid_bbox_legacy_2026-05-05/`). Validation framework: four channels (stratified precision, exhaustive recall, plausibility, opportunistic external) with task grid as primary aggregation unit. See [`validation_strategy.md`](validation_strategy.md) for the full spec.
+> **V1.4 (2026-04-22)**: Success metric is grid-aggregate installation
+> inventory, with per-polygon F1 retained as a diagnostic. Validation runs four
+> channels (stratified precision, exhaustive recall, plausibility, opportunistic
+> external) with the task grid as the primary aggregation unit — see
+> [`validation_strategy.md`](validation_strategy.md).
 >
-> Main-repo copies of `scripts/temporal/`, `scripts/validation/{probe_geid_vintages,parse_geid_probe_results,run_geid_vintage_probe}.*`, and `tests/temporal/` are frozen with deprecation headers; scheduled for removal after 2026-05-31. Bug fixes go to `solar_backdating` first. The GEHistoricalImagery provider replacement plan and wrappers live in `solar_backdating` (`docs/gehi_temporal_replacement_plan.md`, `scripts/temporal/gehi_*.py`); do not add new temporal provider code to this frozen copy.
+> **Sibling subrepo `solar_backdating`** (`/home/gaosh/projects/solar_backdating/`,
+> remote `Robertgao0818/solar_backdating`) handles install-date back-dating via
+> GEHistoricalImagery. It runs as a plugin of this repo, sharing `.venv` and
+> importing `core.region_registry`, `core.annotation_loader`, `core.grid_utils`.
+> All temporal / install-date code lives there; nothing in this repo.
 >
-> **V1.3 (2026-04-03)**: Task definition updated from installation-level footprint segmentation to reviewed prediction footprint segmentation. `installation` evaluation profile name preserved; GT annotations still follow installation-level rules. Some sections below may reference historical V1.2 conventions.
+> **V1.3 (2026-04-03)**: Task definition is reviewed-prediction-footprint
+> segmentation. Ground truth follows installation-level rules; the `installation`
+> evaluation profile in `detect_and_evaluate.py` performs pred-side many-to-one
+> merge matching.
 
 ## Directory Structure
 
@@ -75,7 +86,6 @@ scripts/
     download_tiles.py          — WMS 瓦片下载 + 地理配准
     grid_preview_batch.py      — 低分辨率 grid 预览批量生成
     review_grid_previews.py    — 浏览器交互式 grid 预览审查
-    build_vrt_g1238.py         — G1238 VRT 拼接（legacy helper）
   annotations/
     bootstrap_manifest.py      — 从 GPKG 生成初始 annotation manifest
     prepare_jhb_grids.py       — JHB grid 准备
@@ -97,6 +107,7 @@ docs/
   architecture.md              — 本文件（目录结构、路径映射）
   workflows.md                 — 工作流命令序列
   governance/repo-rules.md     — 仓库规则（Git 大文件保护、目录治理）
+  runbook/                     — 操作 SOP（RunPod 会话启动 checklist 等）
   experiment-archive/          — 实验日志归档
   session_history/             — 会话历史文档归档（agent / user 讨论记录）
 ```
