@@ -12,18 +12,8 @@ tiles_satellite_2025/
 *.gpkg
 *.geojson
 
-# BUT keep curated annotations (split by region) and reviewed results
-!data/annotations/Capetown/*.gpkg
-!data/annotations/Joburg/*.gpkg
-!results/*/review/*_reviewed.gpkg
-
-# 检测结果（可重新生成）
-results/*
-!results/*/
-results/*/!review
-results/*/**
-!results/*/review/
-!results/*/review/*_reviewed.gpkg
+# 检测结果（可重新生成；review 工件走 Dropbox/外存，不入仓）
+results/
 
 # 模型权重（太大，不同步）
 checkpoints/
@@ -45,11 +35,18 @@ tile_manifest.csv
 johnberg/
 results_joburg/
 
-# Claude Code plugin
+# Claude Code plugin / agent harness (local-only, not part of public repo)
 AGENTS.md
+CLAUDE.md
+.agents/
+.claude/
 
-# 个人文档
+# 个人文档 / 研究 journal
 progress.tex
+docs/progress_log/
+
+# 外部论文 / PDF
+*.pdf
 
 # Credentials / env files
 .env
@@ -77,20 +74,26 @@ logs/
 .DS_Store
 Thumbs.db
 
-# Claude Code config (local-only parts)
-.claude/settings.local.json
-.claude/projects/
+# Other agent harness local state
 .codex
 .hermes/
 
 # Local cache (OSM buildings, tile masks, etc.)
 cache/
 
-# Cross-review harness runtime files
-.agents/harness/active/
-
 # Misc data files
 data/sseg_registration_geo.csv
+
+# Annotations clean GT (派生产物，由 build script 重生)
+data/annotations_channel2_clean/
+
+# Vexcel eval sampling intermediates (final benchmark uses jhb_cbd25_*.csv only)
+data/vexcel_eval_samples/vexcel_eval_grids_*.csv
+
+# Experiment-derived figures and per-grid tables (regeneratable from run-evaluation)
+docs/experiments/**/*.png
+docs/experiments/**/per_*.csv
+docs/experiments/**/summary.csv
 
 # Generated visual diagnostics / local imagery comparisons
 mosaics/
