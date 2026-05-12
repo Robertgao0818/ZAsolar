@@ -158,16 +158,28 @@ def _ct_source_to_label_source(src):
     if src is None or (isinstance(src, float) and pd.isna(src)):
         return "reviewed_prediction"     # V3-C accepted; halo-prone → untrusted
     s = str(src).lower().strip()
-    if s == "sam_fn_marker":
-        return "sam_added_true_fn"       # non-interactive batch SAM cut → untrusted
+    # CT FN-补切 family: all non-interactive batch SAM cut (pre-browser-tool
+    # 2026-04-13). marker = clicked marker that triggers a SAM cut at the
+    # marker location; review = sam_fn_review.py CLI batch tool. Both produce
+    # boundary noise without per-instance human refine → untrusted.
+    if s in ("sam_fn_marker", "sam_fn_review"):
+        return "sam_added_true_fn"
     if s == "sam2":
         return "human_manual_sam_assisted"
     if s == "reviewed_prediction":
         return "reviewed_prediction"
     if s == "human_manual_sam_assisted":
         return "human_manual_sam_assisted"
-    # Anything else (e.g. provenance markers we don't recognize) → conservatively trusted.
-    return "human_manual_sam_assisted"
+    # Unknown provenance marker → fail fast. Conservative default to
+    # human_manual_sam_assisted (trusted) was wrong: it silently marked
+    # halo-prone batch-SAM outputs as trusted, defeating the mask_trusted
+    # gate. Add new sources here explicitly with their correct
+    # trusted/untrusted classification.
+    raise ValueError(
+        f"unknown CT 'source' value {s!r}; map it explicitly above with "
+        f"a trusted/untrusted classification (see export_coco_dataset."
+        f"_MASK_TRUSTED for the enum)"
+    )
 
 
 _CT_ENTRIES_CACHE = None
