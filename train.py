@@ -964,8 +964,9 @@ def main():
     print(f"[MODEL] Using pretrained weights: {pretrained_path}")
 
     # ── Datasets ──────────────────────────────────────────────────────
+    _install_aux_resize = False  # set in either branch below
     if args.jhb_phaseA_spec:
-        from core.training.boundary_aware_mask import install_patch, stash_batch_supervision
+        from core.training.boundary_aware_mask import install_patch
         from core.training.jhb_phaseA_dataset import JHBRawPartsDataset, load_spec
         from core.training.jhb_phaseA_transforms import (
             BoundaryAwareTrainTransforms,
@@ -982,12 +983,10 @@ def main():
         val_ds = JHBRawPartsDataset(
             spec, "val", transforms=_PhaseAValTransforms()
         )
-        # Stash supervision tensors before each forward (only when training).
-        _stash_fn = stash_batch_supervision
-
-        def _pre_forward_hook(module, args_in):
-            if module.training and len(args_in) >= 2 and args_in[1] is not None:
-                _stash_fn(args_in[1])
+        # PhaseA emits per-image ignore_masks / mask_weights / mask_pixel_weights
+        # and needs the same post-transform aux resize + stash as the COCO path.
+        # Setting this flag drives install_transform_aux_resize(model) below.
+        _install_aux_resize = True
     else:
         train_ds = CocoSolarDataset(
             coco_dir / "train.json", coco_dir, transforms=TrainTransforms(args.chip_size),
