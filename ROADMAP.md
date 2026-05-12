@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-05-11: docs(progress): week 2026-05-06 daily logs (05-08 update + 05-09 + 05-10 + 05-11)
-- 2026-05-11: docs(experiments): mark Option B (sub-array → installation blob merge) REJECTED
-- 2026-05-11: feat(analysis): area_aggregate_eval Tier 1 metric system (full suite + dispersion + thru-0 β)
-- 2026-05-11: feat(analysis): train20 pixel-or vs per-detection audit + failure-weight comparison HTMLs
-- 2026-05-11: feat(analysis): per-hex dispersion + SSEG kW calibration + SAM halo polygon audit
-- 2026-05-11: docs(plans+literature): supervision-layering + admin-data-poor validation plans, HN-ratio + supervision lit notes
-- 2026-05-11: feat(training): label_source tagging + drop merge_sub_arrays_to_installations
-- 2026-05-11: feat(scripts): build_clean_baseline_h_s.py + register clean_baseline_hs training set
+- 2026-05-12: chore(repo): delete Colab integration + rewrite workflows.md
+- 2026-05-12: docs: update clone URL to ZAsolar after repo rename
+- 2026-05-12: docs(readme): drop premature citation block
+- 2026-05-12: docs(repo): rewrite README in EN + ZH, refresh architecture.md, drop more dead scripts
+- 2026-05-12: chore(repo): aggressive cleanup of dead experiment scripts
+- 2026-05-12: chore(repo): drop oversized/derived/local-only artifacts from tracking
+- 2026-05-12: docs(plans): unified_reviewall runpod handoff for separate training window
+- 2026-05-12: fix(builder): CT sam_fn_review → sam_added_true_fn (untrusted) + raise on unknown source
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.

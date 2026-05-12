@@ -41,9 +41,10 @@ CLAUDE.md
 .agents/
 .claude/
 
-# 个人文档 / 研究 journal
+# 个人文档 / 研究 journal / 内部 SOP
 progress.tex
 docs/progress_log/
+docs/runbook/
 
 # 外部论文 / PDF
 *.pdf
