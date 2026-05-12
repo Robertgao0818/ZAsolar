@@ -106,13 +106,6 @@ It runs as a plugin of this repo — shares the `.venv` and imports
 `core.region_registry`, `core.annotation_loader`, `core.grid_utils`. Any new
 temporal / GEHistoricalImagery / install-date code goes there, not here.
 
-## Citation
-
-Paper in preparation. Please cite as:
-
-> Tao Yu Chen et al. (2026). *Grid-aggregate rooftop photovoltaic detection
-> for South African cities.* [Manuscript in preparation].
-
 ## License
 
 Code: MIT.
