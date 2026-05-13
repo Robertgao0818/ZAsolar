@@ -44,11 +44,13 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, box
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from core.grid_utils import (
     get_grid_spec,
+    get_metric_crs,
     get_tile_bounds,
     normalize_grid_id,
     normalize_region,
     resolve_tiles_dir,
 )
+from core import region_registry
 
 # ── SAM 2.1 integration (lazy loaded) ──
 # Try local ext4 path first (resilient to /mnt/c drvfs hangs); fall back to
@@ -254,30 +256,49 @@ def utc_now_iso() -> str:
 class DetectionReviewStore:
     """Manages prediction review state for one or more grids."""
 
-    def __init__(self, grid_ids: list[str], pred_paths: list[Path], tiles_dirs: list[Path],
-                 region: str | None = None):
+    def __init__(self, grid_ids: list[str], pred_paths: list[Path | None], tiles_dirs: list[Path],
+                 region: str | None = None, *, exhaustive: bool = False,
+                 review_root: Path | None = None):
         self.grid_ids = grid_ids
         self._region = region
+        self.exhaustive = exhaustive
         # Map grid_id → tiles_dir for tile image lookup
         self._tiles_dirs: dict[str, Path] = {gid: td for gid, td in zip(grid_ids, tiles_dirs)}
         # Map grid_id → review_dir for per-grid persistence
         self._review_dirs: dict[str, Path] = {}
         self._decisions_paths: dict[str, Path] = {}
+        self._empty_tiles_paths: dict[str, Path] = {}
         self._tile_meta_cache: dict[str, dict[str, object]] = {}
         self._grid_tile_boxes_cache: dict[str, list[tuple[str, object]]] = {}
 
         # Load and merge predictions from all grids
         frames = []
         for gid, pp in zip(grid_ids, pred_paths):
-            review_dir = pp.parent / "review"
+            # In exhaustive mode (no predictions), park review dir under
+            # review_root/<grid_id>/review so output is reproducible per-grid.
+            if pp is not None:
+                review_dir = pp.parent / "review"
+            else:
+                root = review_root if review_root is not None else Path("results")
+                review_dir = root / gid / "review"
             review_dir.mkdir(parents=True, exist_ok=True)
             self._review_dirs[gid] = review_dir
             self._decisions_paths[gid] = review_dir / "detection_review_decisions.csv"
+            self._empty_tiles_paths[gid] = review_dir / "empty_tiles.csv"
 
-            gdf = gpd.read_file(str(pp))
-            if gdf.crs and gdf.crs.to_epsg() != 4326:
-                gdf = gdf.to_crs(epsg=4326)
-            gdf["_source_grid"] = gid
+            if pp is not None and pp.exists():
+                gdf = gpd.read_file(str(pp))
+                if gdf.crs and gdf.crs.to_epsg() != 4326:
+                    gdf = gdf.to_crs(epsg=4326)
+                gdf["_source_grid"] = gid
+            else:
+                # Empty stub — exhaustive mode starts with no predictions.
+                gdf = gpd.GeoDataFrame(
+                    {"_source_grid": pd.Series([], dtype=str),
+                     "confidence": pd.Series([], dtype=float)},
+                    geometry=gpd.GeoSeries([], crs="EPSG:4326"),
+                    crs="EPSG:4326",
+                )
 
             # Append previously SAM-accepted polygons (per-grid sidecar) so the
             # merged indices stay aligned with the local pred_ids in decisions.csv.
@@ -295,7 +316,7 @@ class DetectionReviewStore:
             print(f"  Loaded {len(gdf)} predictions from {gid}")
             frames.append(gdf)
 
-        self.pred_gdf = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True))
+        self.pred_gdf = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), crs="EPSG:4326")
         print(f"  Total: {len(self.pred_gdf)} predictions across {len(grid_ids)} grid(s)")
 
         # Build tile → predictions index (using each prediction's source grid)
@@ -316,6 +337,7 @@ class DetectionReviewStore:
             if seeded:
                 print(f"  Seeded {seeded} decisions from review_status column")
         self.fn_markers = self._load_fn_markers()
+        self.empty_tiles = self._load_empty_tiles()
 
         self.tile_images: dict[str, bytes] = {}
 
@@ -528,7 +550,9 @@ class DetectionReviewStore:
                     })
 
     def get_tile_list(self, include_empty: bool = False) -> list[dict]:
-        """Return tiles sorted by tile key. If include_empty, also list tiles with no predictions."""
+        """Return tiles sorted by tile key. If include_empty (or exhaustive mode),
+        also list tiles with no predictions."""
+        include_empty = include_empty or self.exhaustive
         tiles = []
         seen = set()
         for tile_key in sorted(self.tile_preds.keys()):
@@ -544,6 +568,7 @@ class DetectionReviewStore:
                 "n_predictions": n_total,
                 "n_reviewed": n_reviewed,
                 "n_fn": n_fn,
+                "empty_marked": tile_key in self.empty_tiles,
             })
             seen.add(tile_key)
 
@@ -560,6 +585,7 @@ class DetectionReviewStore:
                             "n_predictions": 0,
                             "n_reviewed": 0,
                             "n_fn": n_fn,
+                            "empty_marked": tile_key in self.empty_tiles,
                         })
             tiles.sort(key=lambda t: t["tile_key"])
         return tiles
@@ -653,6 +679,40 @@ class DetectionReviewStore:
     def get_fn_markers(self, tile_key: str) -> list[dict]:
         return [m for m in self.fn_markers if m["tile_key"] == tile_key]
 
+    # ── Empty-tile marks (exhaustive-annotation mode) ──
+    def _load_empty_tiles(self) -> set[str]:
+        marks: set[str] = set()
+        for gid in self.grid_ids:
+            p = self._empty_tiles_paths[gid]
+            if not p.exists():
+                continue
+            with p.open("r", newline="", encoding="utf-8") as fh:
+                for row in csv.DictReader(fh):
+                    marks.add(row["tile_key"])
+        return marks
+
+    def _save_empty_tiles(self) -> None:
+        per_grid: dict[str, list[str]] = {gid: [] for gid in self.grid_ids}
+        for tk in self.empty_tiles:
+            gid = self._grid_id_for_tile(tk)
+            if gid in per_grid:
+                per_grid[gid].append(tk)
+        for gid in self.grid_ids:
+            p = self._empty_tiles_paths[gid]
+            with p.open("w", newline="", encoding="utf-8") as fh:
+                writer = csv.DictWriter(fh, fieldnames=["tile_key", "updated_at"])
+                writer.writeheader()
+                ts = utc_now_iso()
+                for tk in sorted(per_grid[gid]):
+                    writer.writerow({"tile_key": tk, "updated_at": ts})
+
+    def set_tile_empty(self, tile_key: str, empty: bool) -> None:
+        if empty:
+            self.empty_tiles.add(tile_key)
+        else:
+            self.empty_tiles.discard(tile_key)
+        self._save_empty_tiles()
+
     def _resolve_tile_path(self, tile_key: str) -> Path | None:
         """Find the tile file path from the appropriate grid's tiles dir."""
         gid = self._grid_id_for_tile(tile_key)
@@ -719,11 +779,13 @@ class DetectionReviewStore:
     def accept_sam_polygon(self, tile_key: str, geo_polygon: Polygon) -> int:
         """Add a SAM-segmented polygon as a new correct prediction.  Returns new pred_id."""
         gid = self._grid_id_for_tile(tile_key)
-        # Compute area in metric CRS
+        # Compute area in metric CRS (region-aware UTM zone lookup)
         import pyproj
         from shapely.ops import transform as shp_transform
-        spec = self._specs[gid]
-        metric_crs = str(spec.crs_metric) if hasattr(spec, "crs_metric") else "EPSG:32734"
+        try:
+            metric_crs = get_metric_crs(gid, region=self._region)
+        except Exception:
+            metric_crs = "EPSG:32734"
         try:
             tfm = pyproj.Transformer.from_crs("EPSG:4326", metric_crs, always_xy=True)
             metric_poly = shp_transform(tfm.transform, geo_polygon)
@@ -1013,6 +1075,7 @@ def build_html() -> str:
     <div class="controls">
       <button class="btn-correct" id="allCorrectBtn">All Correct <span class="kbd">Q</span></button>
       <button id="markerBtn" style="border-color:#f59e0b;color:#b45309;">Mark FN <span class="kbd">M</span></button>
+      <button id="emptyBtn" style="display:none;border-color:#64748b;color:#475569;">Mark Empty <span class="kbd">X</span></button>
       <button id="exportBtn">Export GPKG</button>
     </div>
     <div class="controls">
@@ -1094,6 +1157,7 @@ let polys=[], selectedIdx=-1;
 let baseImage=null, markers=[];
 let markerMode=false;
 let samAvailable=false;
+let exhaustive=false;
 let samPolygon=null;   // {coords:[[x,y],...], score, area_m2}
 let samPoints={pos:[], neg:[]};  // pixel coords for display
 const canvas = document.getElementById("tileCanvas");
@@ -1193,13 +1257,26 @@ function applyFilter() {
   loadCurrentTile();
 }
 
+function tileDone(t) {
+  if (exhaustive) {
+    // A tile is done if user explicitly marked empty OR placed >=1 SAM polygon.
+    return !!t.empty_marked || (t.n_predictions > 0 && t.n_reviewed === t.n_predictions);
+  }
+  return t.n_predictions > 0 && t.n_reviewed === t.n_predictions;
+}
+
 function updateSummary() {
-  const total=tiles.length, done=tiles.filter(t=>t.n_reviewed===t.n_predictions).length;
-  const tp=tiles.reduce((s,t)=>s+t.n_predictions,0);
-  const tr=tiles.reduce((s,t)=>s+t.n_reviewed,0);
+  const total=tiles.length, done=tiles.filter(tileDone).length;
   const pos=visible.length?currentIdx+1:0;
-  document.getElementById("summary").textContent=
-    `Tile ${pos}/${visible.length} | ${done}/${total} tiles done | ${tr}/${tp} preds reviewed`;
+  if (exhaustive) {
+    document.getElementById("summary").textContent=
+      `Tile ${pos}/${visible.length} | ${done}/${total} tiles done`;
+  } else {
+    const tp=tiles.reduce((s,t)=>s+t.n_predictions,0);
+    const tr=tiles.reduce((s,t)=>s+t.n_reviewed,0);
+    document.getElementById("summary").textContent=
+      `Tile ${pos}/${visible.length} | ${done}/${total} tiles done | ${tr}/${tp} preds reviewed`;
+  }
 }
 
 async function loadCurrentTile() {
@@ -1244,6 +1321,36 @@ function updateTileStats(tile) {
   document.getElementById("nReviewed").textContent=tile.n_reviewed;
   document.getElementById("progressFill").style.width=
     tile.n_predictions?`${(tile.n_reviewed/tile.n_predictions*100).toFixed(0)}%`:"0%";
+  updateEmptyBtn(tile);
+}
+
+function updateEmptyBtn(tile) {
+  const btn = document.getElementById("emptyBtn");
+  if (!exhaustive) { btn.style.display="none"; return; }
+  btn.style.display = "";
+  if (tile && tile.empty_marked) {
+    btn.innerHTML='Empty ✓ <span class="kbd">X</span>';
+    btn.style.background="#e0f2fe"; btn.style.color="#0369a1"; btn.style.borderColor="#0369a1";
+  } else {
+    btn.innerHTML='Mark Empty <span class="kbd">X</span>';
+    btn.style.background="#fff"; btn.style.color="#475569"; btn.style.borderColor="#64748b";
+  }
+}
+
+async function toggleTileEmpty() {
+  const tile = visible[currentIdx];
+  if (!tile) return;
+  const next = !tile.empty_marked;
+  await fetch("/api/mark_empty", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({tile_key:tile.tile_key, empty:next})
+  });
+  tile.empty_marked = next;
+  // Mirror back into tiles[] (visible is a filtered alias of tiles[])
+  const ref = tiles.find(t => t.tile_key === tile.tile_key);
+  if (ref) ref.empty_marked = next;
+  updateEmptyBtn(tile);
+  updateSummary();
 }
 
 function drawCanvas() {
@@ -1654,6 +1761,7 @@ document.getElementById("selDeleteBtn").addEventListener("click",()=>setSelected
 document.getElementById("selEditBtn").addEventListener("click",()=>setSelectedStatus("edit"));
 document.getElementById("selClearBtn").addEventListener("click",()=>setSelectedStatus(""));
 document.getElementById("markerBtn").addEventListener("click",()=>{markerMode=!markerMode; updateMarkerBtn(); drawCanvas();});
+document.getElementById("emptyBtn").addEventListener("click", toggleTileEmpty);
 
 // Keyboard
 document.addEventListener("keydown", e => {
@@ -1678,13 +1786,22 @@ document.addEventListener("keydown", e => {
     case "e": case "E": setSelectedStatus("edit"); e.preventDefault(); break;
     case "c":           setSelectedStatus(""); e.preventDefault(); break;
     case "q": case "Q": markAllTile("correct"); e.preventDefault(); break;
+    case "x": case "X":
+      if (exhaustive) { toggleTileEmpty(); e.preventDefault(); }
+      break;
     case "m": case "M":
       markerMode=!markerMode;
       if(!markerMode) clearSamState();
       updateMarkerBtn(); drawCanvas(); e.preventDefault(); break;
     case "Escape":
       if(samPolygon) { clearSamState(); }
-      else { selectedIdx=-1; markerMode=false; updateMarkerBtn(); resetView(); renderPredList(); }
+      else {
+        selectedIdx=-1;
+        // In exhaustive mode FN/SAM is the working mode — don't drop the user
+        // out of it on Esc, just clear any in-progress segment.
+        if (!exhaustive) markerMode=false;
+        updateMarkerBtn(); resetView(); renderPredList();
+      }
       e.preventDefault(); break;
     case "Enter":
       if(markerMode && samPolygon && samPolygon.coords) {
@@ -1739,13 +1856,25 @@ document.addEventListener("keyup", e => {
 // Handle window resize
 window.addEventListener("resize", () => { resizeCanvas(); });
 
-// Check SAM availability + load tiles
-fetch("/api/sam_status").then(r=>r.json()).then(d=>{
-  samAvailable=d.available;
+// Boot: fetch app state (mode + SAM availability) before first tile load so the
+// filter default and FN-mode default match the run mode.
+fetch("/api/state").then(r=>r.json()).then(d=>{
+  exhaustive = !!d.exhaustive;
+  samAvailable = !!d.sam_available;
+  if (exhaustive) {
+    document.getElementById("gridTitle").textContent = "Exhaustive Annotation";
+    // Default to "All + empty tiles" so we see every tile, not just ones with predictions
+    const fs = document.getElementById("filterSelect");
+    fs.value = "all_incl_empty";
+    // SAM/FN mode default-on in exhaustive
+    markerMode = true;
+    // Show the Mark-Empty button
+    document.getElementById("emptyBtn").style.display = "";
+  }
   updateMarkerBtn();
-  console.log("SAM available:", samAvailable);
-}).catch(()=>{});
-loadTiles(false);
+  console.log("State:", {exhaustive, samAvailable});
+  loadTiles(exhaustive);
+}).catch(err => { console.error("State fetch failed:", err); loadTiles(false); });
 </script>
 </body>
 </html>"""
@@ -1815,6 +1944,15 @@ class ReviewHandler(BaseHTTPRequestHandler):
             avail = _sam_available if _sam_available is not None else False
             self._json_response({"available": avail})
 
+        elif path == "/api/state":
+            avail = _sam_available if _sam_available is not None else False
+            self._json_response({
+                "exhaustive": bool(getattr(self.store, "exhaustive", False)),
+                "sam_available": avail,
+                "grids": list(self.store.grid_ids),
+                "region": self.store._region,
+            })
+
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -1876,8 +2014,10 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     import pyproj
                     from shapely.ops import transform as shp_transform
                     gid = self.store._grid_id_for_tile(tile_key)
-                    spec = self.store._specs[gid]
-                    mcrs = str(spec.crs_metric) if hasattr(spec, "crs_metric") else "EPSG:32734"
+                    try:
+                        mcrs = get_metric_crs(gid, region=self.store._region)
+                    except Exception:
+                        mcrs = "EPSG:32734"
                     try:
                         tfm = pyproj.Transformer.from_crs("EPSG:4326", mcrs, always_xy=True)
                         area_m2 = shp_transform(tfm.transform, geo_poly).area
@@ -1919,6 +2059,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
             _sam_reset_crop()
             self._json_response({"ok": True})
 
+        elif path == "/api/mark_empty":
+            data = json.loads(self._read_body())
+            self.store.set_tile_empty(data["tile_key"], bool(data.get("empty", True)))
+            self._json_response({"ok": True})
+
         else:
             self.send_error(HTTPStatus.NOT_FOUND)
 
@@ -1958,6 +2103,13 @@ def main():
                        help="Region hint for grid spec lookup (e.g. 'jhb' for Johannesburg)")
     parser.add_argument("--imagery-layer", default=None,
                        help="Imagery layer id (e.g. 'vexcel_2024') — overrides region default for tile resolution")
+    parser.add_argument("--exhaustive", action="store_true",
+                       help="Exhaustive-annotation mode: no predictions required, all tiles listed, "
+                            "FN/SAM mode default-on, progress tracked as tiles done / total. "
+                            "Region is auto-inferred from grid_id prefix.")
+    parser.add_argument("--review-root", type=Path, default=None,
+                       help="Where to park <grid_id>/review/ in exhaustive mode "
+                            "(default: ./results)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args()
@@ -2023,7 +2175,7 @@ def main():
         sys.exit(1)
 
     # Resolve predictions and tiles for each grid
-    all_grid_ids, all_pred_paths, all_tiles_dirs = [], [], []
+    all_grid_ids, all_pred_paths, all_tiles_dirs, all_grid_regions = [], [], [], []
     for gid in grid_ids:
         if args.predictions_dir is not None:
             pred_path = args.predictions_dir / gid / "predictions_metric.gpkg"
@@ -2034,13 +2186,24 @@ def main():
             pred_path = args.predictions
         else:
             pred_path = _find_predictions(gid, base_dir, region=region)
-        if pred_path is None:
+        if pred_path is None and not args.exhaustive:
             print(f"[WARN] Predictions not found for {gid}, skipping")
             continue
+
         grid_region = region
-        if grid_region is None and "results_joburg" in str(pred_path):
+        if grid_region is None and pred_path and "results_joburg" in str(pred_path):
             grid_region = "jhb"
             print(f"[INFO] Auto-detected region=jhb for {gid} from prediction path")
+        # In exhaustive mode (no predictions), infer region from grid_id prefix.
+        if grid_region is None:
+            hits = region_registry.lookup_regions(gid)
+            if len(hits) == 1:
+                grid_region = hits[0]
+                print(f"[INFO] Auto-inferred region={grid_region} for {gid} from grid_id pattern")
+            elif len(hits) > 1:
+                print(f"[ERROR] {gid} matches multiple regions {hits}; pass --region explicitly")
+                sys.exit(1)
+
         tiles_dir = resolve_tiles_dir(gid, region=grid_region, imagery_layer=args.imagery_layer)
         if not tiles_dir.exists():
             print(f"[WARN] Tiles not found for {gid}: {tiles_dir}, skipping")
@@ -2048,28 +2211,40 @@ def main():
         all_grid_ids.append(gid)
         all_pred_paths.append(pred_path)
         all_tiles_dirs.append(tiles_dir)
+        all_grid_regions.append(grid_region)
 
     effective_region = region
     if effective_region is None and all_pred_paths:
-        has_jhb = any("results_joburg" in str(path) for path in all_pred_paths)
-        has_ct = any("results_joburg" not in str(path) for path in all_pred_paths)
+        has_jhb = any(p and "results_joburg" in str(p) for p in all_pred_paths)
+        has_ct = any(p and "results_joburg" not in str(p) for p in all_pred_paths)
         if has_jhb and not has_ct:
             effective_region = "jhb"
         elif has_ct and not has_jhb:
             effective_region = "ct"
+    # In exhaustive mode prefer the per-grid auto-inferred region (canonical key).
+    if effective_region is None and all_grid_regions:
+        unique = {r for r in all_grid_regions if r}
+        if len(unique) == 1:
+            effective_region = unique.pop()
     if not all_grid_ids:
         print("[ERROR] No valid grids found")
         sys.exit(1)
 
     if effective_region:
         print(f"[INIT] Region: {effective_region}")
+    if args.exhaustive:
+        print("[INIT] Exhaustive-annotation mode (no predictions required)")
     print(f"[INIT] Grids: {', '.join(all_grid_ids)} ({len(all_grid_ids)} total)")
     for gid, pp in zip(all_grid_ids, all_pred_paths):
-        print(f"  {gid}: {pp}")
+        print(f"  {gid}: {pp if pp else '(no predictions — exhaustive mode)'}")
 
-    store = DetectionReviewStore(all_grid_ids, all_pred_paths, all_tiles_dirs, region=effective_region)
+    store = DetectionReviewStore(
+        all_grid_ids, all_pred_paths, all_tiles_dirs,
+        region=effective_region, exhaustive=args.exhaustive,
+        review_root=args.review_root,
+    )
     tile_list = store.get_tile_list()
-    print(f"[INIT] {len(tile_list)} tiles with predictions")
+    print(f"[INIT] {len(tile_list)} tiles{' (exhaustive: all tiles listed)' if args.exhaustive else ' with predictions'}")
 
     ReviewHandler.store = store
 

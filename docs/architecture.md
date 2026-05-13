@@ -108,6 +108,7 @@ docs/
   workflows.md                 — 工作流命令序列
   governance/repo-rules.md     — 仓库规则（Git 大文件保护、目录治理）
   runbook/                     — 操作 SOP（RunPod 会话启动 checklist 等）
+  handoffs/                    — 外部协作者交付文档（如 Li Review GUI setup）
   experiment-archive/          — 实验日志归档
   session_history/             — 会话历史文档归档（agent / user 讨论记录）
 ```
