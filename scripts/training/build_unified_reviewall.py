@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,55 @@ from export_coco_dataset import (  # noqa: E402
     mask_trusted_for,
     _MASK_TRUSTED,
 )
+
+
+def _pixel_area_m2(tile_path: Path, cache: dict[str, float]) -> float:
+    """Approximate pixel area in m² for any CRS.
+
+    Branches:
+    - Geographic CRS (lon/lat): convert deg² → m² via lat-band approximation
+      centred on the tile.
+    - EPSG:3857 (Web Mercator): linear units are Web Mercator metres, which
+      are stretched by 1/cos(φ) relative to ground metres. Ground area =
+      WM_area × cos²(φ_centre).
+    - Other projected CRS: assume linear unit ≈ ground metre.
+
+    Cached by tile_path to avoid re-opening.
+
+    R0.5 extension for solar_zerov2 W1.a closure — consumed by the
+    scale_jitter content-conditional bucket router via chips_metadata.json.
+    """
+    key = str(tile_path)
+    if key in cache:
+        return cache[key]
+    with rasterio.open(tile_path) as src:
+        t = src.transform
+        crs = src.crs
+        px_x = abs(t.a)
+        px_y = abs(t.e)
+        center_lat = None
+        if crs is None:
+            area = px_x * px_y
+        elif crs.is_geographic:
+            center_lat = (src.bounds.top + src.bounds.bottom) / 2.0
+            m_per_deg_lat = 111_320.0
+            m_per_deg_lon = 111_320.0 * math.cos(math.radians(center_lat))
+            area = (px_x * m_per_deg_lon) * (px_y * m_per_deg_lat)
+        elif crs.to_epsg() == 3857:
+            # Web Mercator scale factor = 1/cos(φ); need lon/lat of centre.
+            from pyproj import Transformer
+            xform = Transformer.from_crs(crs, "EPSG:4326", always_xy=True)
+            cx = (src.bounds.left + src.bounds.right) / 2.0
+            cy = (src.bounds.top + src.bounds.bottom) / 2.0
+            _, center_lat = xform.transform(cx, cy)
+            cos_phi = math.cos(math.radians(center_lat))
+            area = (px_x * cos_phi) * (px_y * cos_phi)
+        elif crs.is_projected:
+            area = px_x * px_y
+        else:
+            area = px_x * px_y
+    cache[key] = area
+    return area
 
 # ─── cape_town_independent_26 holdout (configs/benchmarks/post_train.yaml) ───
 CT_INDEP_26 = {
@@ -336,6 +386,11 @@ def build(args: argparse.Namespace) -> dict:
         return {"summary": str(summary_csv), "dry_run": True}
 
     # ── Chip scan + COCO build ───────────────────────────────────────
+    # R0.5 (solar_zerov2 Codex v2 W1.a) — collect per-chip metadata for
+    # the scale_jitter content-conditional bucket router. See
+    # solar_zerov2/core/manifest_validator.py for the schema check.
+    pixel_area_cache: dict[str, float] = {}
+    chips_metadata: dict[str, dict] = {}
     for split_name in ("train", "val"):
         all_images = []
         all_annots = []
@@ -387,6 +442,31 @@ def build(args: argparse.Namespace) -> dict:
             print(f"[BALANCE] train post-balance: {len(all_images)} chips "
                   f"({n_pos} positive, {n_neg} negative)")
 
+        # R0.5 — per-chip metadata for scale_jitter bucket router.
+        # Done BEFORE write_selected_chips because _chip_annots is in
+        # chip-local pixel coords and we need the source tile's pixel
+        # area to convert to m². write_selected_chips() does not mutate
+        # the image dicts but we keep the order safe.
+        for img in all_images:
+            tile_path = Path(img["_tile_path"])
+            px_area_m2 = _pixel_area_m2(tile_path, pixel_area_cache)
+            chip_annots = img.get("_chip_annots", [])
+            if chip_annots:
+                max_area_m2 = max(
+                    float(geom.area) * px_area_m2 for _, geom in chip_annots
+                )
+                n_polys = len(chip_annots)
+            else:
+                max_area_m2 = None
+                n_polys = 0
+            chips_metadata[img["file_name"]] = {
+                "max_polygon_area_m2": (
+                    round(max_area_m2, 3) if max_area_m2 is not None else None
+                ),
+                "n_polygons": n_polys,
+                "split": split_name,
+            }
+
         write_selected_chips(all_images, out_dir, args.chip_size)
         coco_json = build_coco_json(
             all_images, all_annots, split=split_name,
@@ -423,7 +503,20 @@ def build(args: argparse.Namespace) -> dict:
     }, indent=2) + "\n")
     print(f"[MANIFEST] {manifest_path}")
 
-    return {"output_dir": str(out_dir), "manifest": str(manifest_path)}
+    # ── Chips metadata (R0.5 — solar_zerov2 W1.a) ────────────────────
+    chips_meta_path = out_dir / "chips_metadata.json"
+    chips_meta_path.write_text(json.dumps({
+        "schema_version": 1,
+        "schema_source": "solar_zerov2/core/manifest_validator.py",
+        "chips": chips_metadata,
+    }, indent=2) + "\n")
+    print(f"[CHIPS_META] {chips_meta_path} ({len(chips_metadata)} chips)")
+
+    return {
+        "output_dir": str(out_dir),
+        "manifest": str(manifest_path),
+        "chips_metadata": str(chips_meta_path),
+    }
 
 
 def main():
