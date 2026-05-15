@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-05-12: chore: roll ROADMAP, gitignore docs/runbook/
-- 2026-05-12: chore(repo): delete Colab integration + rewrite workflows.md
-- 2026-05-12: docs: update clone URL to ZAsolar after repo rename
-- 2026-05-12: docs(readme): drop premature citation block
-- 2026-05-12: docs(repo): rewrite README in EN + ZH, refresh architecture.md, drop more dead scripts
-- 2026-05-12: chore(repo): aggressive cleanup of dead experiment scripts
-- 2026-05-12: chore(repo): drop oversized/derived/local-only artifacts from tracking
-- 2026-05-12: docs(plans): unified_reviewall runpod handoff for separate training window
+- 2026-05-15: feat(training): project-level hard-negative pool bootstrap
+- 2026-05-15: feat(jhb-vexcel): 3-model CBD25 comparison + 382-grid production run
+- 2026-05-15: feat(infra): SAM mask+box refinement + 3-phase pod template
+- 2026-05-14: feat(scripts): runpod_flatten_tiles_for_build.sh — scripted /dev/shm flatten
+- 2026-05-14: feat(training): emit chips_metadata.json with per-chip max_polygon_area_m2
+- 2026-05-14: chore(runpod): rewrite init to skip torch reinstall, persist pip cache
+- 2026-05-13: feat(review-gui): exhaustive-annotation mode + Li handoff doc
+- 2026-05-13: chore(repo): remove GEID temporal scaffolding (subrepo owns GEHI now)
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
