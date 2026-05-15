@@ -32,13 +32,15 @@ pip install --break-system-packages \
     opencv-python-headless pycocotools \
     scikit-learn scipy matplotlib seaborn \
     timm huggingface_hub \
+    "transformers>=4.45" \
     2>&1 | tail -5
 
 # 2. 验证关键 import + GPU
 echo "[2/3] Verifying imports..."
 python3 -c "
-import torch, geopandas, rasterio, rasterstats, shapely, cv2, pycocotools, timm
+import torch, geopandas, rasterio, rasterstats, shapely, cv2, pycocotools, timm, transformers
 print(f'  torch={torch.__version__}, CUDA={torch.cuda.is_available()}')
+print(f'  transformers={transformers.__version__}')
 if torch.cuda.is_available():
     cap = torch.cuda.get_device_capability(0)
     print(f'  GPU={torch.cuda.get_device_name(0)} sm_{cap[0]}{cap[1]}')

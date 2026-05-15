@@ -9,7 +9,7 @@ comparing the new model to the existing V3-C baseline runs.
 Stages (each idempotent, controllable via --only / --skip):
 
   1. detect_jhb     detect_direct.py + finalize.py --postproc-config v4_canonical
-  2. sam_jhb        sam_refine_v4_2_maskprompt.py --prompt-mode mask_box
+  2. sam_jhb        sam_refine_maskbox.py --prompt-mode mask_box
   3. filter_jhb     filter_sam_inventory.py --config v4_agg.json
   4. detect_ct      detect_direct.py + finalize.py
   5. ch2_jhb        compute_ch2_recall.py on raw + sam_v4agg
@@ -253,7 +253,9 @@ def stage_sam_jhb(
     rc = run_cmd(
         [
             sys.executable,
-            "scripts/analysis/sam_refine_v4_2_maskprompt.py",
+            "scripts/analysis/sam_refine_maskbox.py",
+            "--region",
+            "jhb",
             "--src-results-root",
             paths.jhb_raw,
             "--tiles-root",

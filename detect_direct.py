@@ -5,13 +5,18 @@ Produces a raw detection artifact (`raw_detections.pkl`) consumed by
 ``finalize.py``. See `/home/gaosh/.claude/plans/opengeoai-detector-sam-...md`
 (plan v1.4) for design.
 
-Stage 1 of the three-stage direct pipeline:
+Stage 1 of the production direct pipeline:
 
     detect_direct.py  →  raw_detections.pkl
                             │
-              (Phase 1.5)   ▼  optional sam_refine
-                            │
                        finalize.py  →  predictions_metric.gpkg
+                            │
+              (optional)    ▼  scripts/analysis/sam_refine_maskbox.py
+                            │
+                       predictions_metric.gpkg  (SAM-refined)
+
+The full pipeline is orchestrated by ``scripts/runpod_detect_direct_template.sh``
+(Phase A: detect+finalize parallel; Phase B: SAM refine serial; Phase C: eval).
 
 Knob-rich; saturation-friendly. Custom DataLoader + collate so torchvision's
 ``list[Tensor]`` input works; per-worker rasterio handles for GDAL fork-safety.
