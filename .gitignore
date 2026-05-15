@@ -27,6 +27,9 @@ data/cls_pv_nonpv_v*/
 data/geid_temporal
 data/geid_temporal/
 
+# Negative pool: manifest + taxonomy + README tracked; preview symlinks local-only
+data/negative_pool/previews/
+
 # 建筑轮廓数据（可重新生成）
 buildings.gpkg
 tile_manifest.csv

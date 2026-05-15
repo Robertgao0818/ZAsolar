@@ -1,0 +1,248 @@
+# Negative pool archetype taxonomy
+#
+# Controlled vocabulary for the `archetype` column in manifest.csv. Each entry
+# is one lookalike FP class the detector has demonstrably confused for PV.
+#
+# Per-archetype schema (read every field — fuzziness during prior reviews came
+# from missing distinguishing_features / easily_confused_with):
+#
+#   description            : the visual cue the detector latches onto
+#   distinguishing_features: positive checklist — what MUST be visible to qualify
+#   easily_confused_with   : map sibling-archetype → disambiguation rule
+#   canonical_examples     : 3 chip_ids from manifest.csv spanning intra-class
+#                            variance (open data/negative_pool/previews/<arch>/<id>.png)
+#   references             : literature / in-repo failure-mode anchors
+#
+# Adding a new archetype requires:
+#   1. ≥30 chips already cataloged (otherwise stays in `other_unknown`)
+#   2. All five fields above filled
+#   3. Literature citation or in-repo failure-mode doc if the archetype was
+#      surfaced by external work
+#
+# Confidence axis (mirrors data/annotations/ANNOTATION_SPEC.md Two-Axis Model):
+#   A1 — human-verified, exemplifies the archetype unambiguously
+#   A2 — likely fits the archetype but border case (drag-and-drop from
+#        classifier batch labeling without per-chip review)
+#   A3 — weak/noisy, flagged for re-review
+
+version: 2
+last_updated: 2026-05-13
+
+archetypes:
+
+  skylight_roof_window:
+    description: >
+      Glass or polycarbonate skylight set into a roof. The detector latches
+      onto the dark reflective rectangle and the grid frame that subdivides
+      large skylight panels into smaller cells (mimics panel sub-modules).
+    distinguishing_features:
+      - Lies flush with the roof surface (no tilt frame visible from above)
+      - Edges align with roof joists / framing, not free-standing on a rack
+      - Inside often shows uniform mid-tone reflection rather than the directional anti-reflective sheen of c-Si PV
+      - Often paired with a parapet or skylight curb shadow on the sun side
+    easily_confused_with:
+      corrugated_metal_roof: skylight is smooth/flat; corrugated has visible parallel ridges across the same rectangle.
+      hvac_rooftop_equipment: skylight is recessed/flush; HVAC unit sits proud of the roof and casts a tall shadow.
+      actually_pv_mislabeled_EXCLUDED: if you see a tilted rack frame or busbar lines crossing the rectangle, it is PV — route to GT correction, not negative pool.
+    canonical_examples:
+      - johannesburg_G0772_v3c_p0022
+      - johannesburg_G0853_v4_2_p0006
+      - johannesburg_G0926_v4_2_p0058
+    references:
+      - HyperionSolarNet (Parhar et al. 2022, arxiv 2201.02107) §2.3 lists skylights as the #1 named lookalike in their early-iteration FP pool.
+      - project_train20_lookalike_fp_visual (2026-05-10 review) — #1 unique FP archetype on JHB CBD Vexcel 2024.
+
+  corrugated_metal_roof:
+    description: >
+      Ridged metal roof sheeting — galvanized (silver/gray), painted (blue,
+      green, red, white), or coated. The FP cue is the RIDGE TEXTURE: regular
+      parallel ridges produce a striped pattern that the detector reads as
+      panel rows. Roof surface is intact / not heavily oxidized. SCALE-AGNOSTIC
+      — this class applies whether the roof is a warehouse, an industrial
+      hangar, an informal-settlement housing unit, an agricultural shed, or a
+      residential outbuilding, as long as the ridge texture is the trigger.
+    distinguishing_features:
+      - Ridges run in one consistent direction across the roof plane and are clearly readable (not blurred or oxidized away)
+      - Color is uniform / homogeneous along each sheet (no rust-mottling, no patchy dark zones — those go to rusty_corrugated_iron)
+      - Ridge spacing is regular (typically 50–250 mm; readable at GSD ≤10 cm)
+      - Building scale is NOT a discriminator — small informal-settlement shacks with clean iron belong here, not in rusty_corrugated_iron
+    easily_confused_with:
+      rusty_corrugated_iron: same substrate; oxidation state is the dividing line. Uniform color + crisp ridges → corrugated_metal_roof; mottled/streaked + organic-edged dark patches → rusty_corrugated_iron.
+      solar_thermal_water_heater: evacuated-tube heaters also show parallel lines but are short (1–3 m), mounted on a frame with a tank/manifold, not extending across the roof.
+    canonical_examples:
+      - johannesburg_G0772_v3c_p0014
+      - johannesburg_G0854_v3c_p0019
+      - johannesburg_G0926_v4_2_p0056
+    references:
+      - HyperionSolarNet (Parhar et al. 2022) lists both `metal_roof` and `metal_roof_informal` as distinct early-FP categories — we collapse them since the underlying cue (ridge texture) is identical; scale lives as a sampling-coverage requirement, not a class boundary.
+      - feedback_water_heater_fp — related dark-roof FPs in CT aerial.
+    sampling_coverage_note: |
+      Clean ridged metal at informal-settlement scale (small dense shacks)
+      is currently UNDER-SAMPLED in this pool — JHB CBD Vexcel mostly
+      shows commercial-scale variants. The CT/JHB township sampling pass
+      that feeds rusty_corrugated_iron MUST also harvest clean-iron chips
+      from the same grids and file them here.
+
+  rusty_corrugated_iron:
+    description: >
+      Oxidized / weathered corrugated iron roof — red, brown, orange, or
+      patchy black-brown staining over the ridges. Common on agricultural
+      sheds, township housing, abandoned industrial buildings. The detector
+      latches onto the dark rectangular patches of stained metal against
+      the brighter surrounding surface (very similar to the dark-rectangle
+      cue used for PV detection at low confidence).
+    distinguishing_features:
+      - Visible color mottling — not single-color
+      - Patchy dark areas don't align cleanly with panel-sized rectangles; they follow the rust pattern (organic edges)
+      - Often missing tiles / visible rust holes / sagging ridges
+      - Frequently on small (≤50 m²) standalone structures, not warehouse-scale rooftops
+    easily_confused_with:
+      corrugated_metal_roof: same substrate, different oxidation state. Uniform-color → corrugated_metal_roof; mottled → rusty_corrugated_iron.
+      roof_shadow_dark_fixture: rust patches have brown/orange hue; shadows are gray-black and follow a 3D shadow geometry.
+    canonical_examples: []  # EMPTY — needs CT/JHB informal-settlement sampling pass
+    references:
+      - HyperionSolarNet lists `rust_corrugated` as a distinct early-FP category.
+      - SolarDK (Khomiakov et al. 2022) — κ 0.21 → 0.67 on DE→DK cross-region fine-tune; cross-region housing-stock diversity is the highest-leverage breadth gap.
+      - docs/literature/2026-05-10-hn-ratio-and-negative-pool-literature.md §4.
+    status: |
+      RESERVED / empty pool. Needs a dedicated sampling pass over:
+        - CT: Khayelitsha, Gugulethu, Mitchell's Plain, Philippi
+        - JHB: Soweto, Alex, Diepsloot, Orange Farm
+      Sampling protocol: V3-C low-confidence (post_conf 0.3–0.7) FPs on
+      ≥10 grids per city, human-verify each chip, file here with confidence
+      A1 if rust-mottling is the dominant cue. CLEAN-IRON chips from the
+      same grids (no oxidation, ridges crisp) MUST be split off into
+      corrugated_metal_roof — same sampling pass, two destination archetypes
+      based on oxidation state.
+
+  solar_thermal_water_heater:
+    description: >
+      Roof-mounted solar HOT-WATER collector (NOT photovoltaic). Two
+      sub-types share this archetype: (a) flat-plate collector — black
+      flat absorber under glass, looks visually near-identical to a small
+      c-Si PV module; (b) evacuated-tube collector — array of parallel
+      glass tubes (5–30) lying side-by-side, with a horizontal manifold
+      and tank. Both have a tilt frame and bright metal mounting hardware.
+    distinguishing_features:
+      - Always paired with a cylindrical / rectangular water tank (200–500 L, ~1–1.5 m), usually directly above or next to the collector
+      - Flat-plate variant is small (1–4 m² per panel, 1–3 panels max per installation); PV arrays are usually larger
+      - Evacuated-tube variant shows discrete parallel cylinders, not flat planar surface
+      - Often on residential pitched roofs, not commercial flat roofs
+    easily_confused_with:
+      actually_pv_mislabeled_EXCLUDED: flat-plate without a visible tank is genuinely indistinguishable from PV at aerial scale — when uncertain, prefer routing to GT correction, NOT this class.
+      corrugated_metal_roof: evacuated-tube ridges are short (≤3 m) and bounded; roof corrugation extends the full roof span.
+    canonical_examples:
+      - johannesburg_G0773_v3c_p0025
+      - johannesburg_G0923_v3c_p0014
+      - johannesburg_G0926_v4_2_p0010
+    references:
+      - project_v4_hn_strategy — 77 % of CT small-area FP are flat-plate solar thermal.
+      - project_water_heater_classifier — binary PV-vs-thermal classifier plan.
+      - project_pv_thermal_literature — SA-context literature search.
+
+  hvac_rooftop_equipment:
+    description: >
+      Mechanical rooftop equipment — air-conditioning condenser units,
+      chiller plant, exhaust fans, kitchen extraction hoods, lift-machine
+      housing. Top surface is typically metallic gray or painted dark;
+      from aerial reads as a dark rectangle on a brighter roof.
+    distinguishing_features:
+      - Sits proud of the roof — casts a tall self-shadow on the sun-opposite side (skylight is flush, no tall shadow)
+      - Often paired with conduit, ductwork, or condensate piping
+      - Roof beneath is typically commercial flat (concrete, bitumen) not residential pitched
+      - Frequently clustered (multiple units of similar size near each other)
+    easily_confused_with:
+      skylight_roof_window: skylight is flush; HVAC is raised. Check the cast shadow geometry.
+      roof_shadow_dark_fixture: dark patch with no equipment visible is a shadow; dark patch with a discrete 3D object on top is HVAC.
+    canonical_examples:
+      - johannesburg_G0772_v3c_p0001
+      - johannesburg_G0855_v4_2_p0027
+      - johannesburg_G0925_v4_2_p0012
+    references: []
+
+  ground_road_marking:
+    description: >
+      Painted or tarred markings on parking lots, roads, sports courts,
+      driveways. Dark rectangles with high contrast against bright tarmac
+      or pavement. The detector latches onto sharp-edged dark rectangles.
+    distinguishing_features:
+      - Lies on a HORIZONTAL ground surface, not a roof
+      - Surrounding context is pavement, tar, asphalt, or sports-court coloring — not roofing material
+      - Often part of a regular pattern (parking bays, court lines, road arrows)
+      - No tilt frame, no mounting hardware, no roof structure beneath
+    easily_confused_with:
+      pergola_carport_shadow: shadow falls on ground but has a visible casting structure nearby; road marking has no overhead structure.
+      roof_shadow_dark_fixture: this class is on the ground; that class is on a roof. Check for a visible roof outline around the patch.
+    canonical_examples:
+      - johannesburg_G0772_v3c_p0000
+      - johannesburg_G0815_v4_2_p0031
+      - johannesburg_G0926_v4_2_p0004
+    references: []
+
+  pergola_carport_shadow:
+    description: >
+      Cast SHADOW from a wood, steel, or fabric pergola / carport /
+      shadecloth structure onto the ground or roof below. The shadow
+      reads as a dark rectangle bounded by the structure's perimeter,
+      often with slat-shadow striping that mimics panel rows.
+    distinguishing_features:
+      - The dark region is the SHADOW, not the structure itself — usually visible structure casting it is offset by the sun angle
+      - Striping pattern matches the pergola slat spacing
+      - Edges are softer than a hard-painted line but harder than natural shadow (because the slat geometry is sharp)
+      - Sun direction is consistent with other shadows in the same chip
+    easily_confused_with:
+      ground_road_marking: marking has hard-painted high-contrast edges; shadow edges have penumbra softness.
+      roof_shadow_dark_fixture: pergola shadow is from a free-standing structure on the ground; roof shadow is from a fixture attached to the roof itself.
+    canonical_examples:
+      - johannesburg_G0775_v3c_p0007
+      - johannesburg_G0889_v3c_p0000
+      - johannesburg_G0926_v4_2_p0017
+    references: []
+
+  roof_shadow_dark_fixture:
+    description: >
+      Generic "dark patch on a roof" — shadows cast by parapets, dormers,
+      satellite dishes, water tanks (non-solar), chimneys, or other small
+      roof fixtures. Catch-all for dark roof features that don't fit a
+      more specific archetype.
+    distinguishing_features:
+      - Lies on a roof (not ground — that would be ground_road_marking or pergola_carport_shadow)
+      - No visible solar/thermal hardware (no tilt frame, no tank, no tube array)
+      - No corrugation / ridge texture (that would be corrugated_metal_roof or rusty_corrugated_iron)
+      - Soft-edged shadow OR small dark fixture (water tank, satellite dish) ≤2 m across
+    easily_confused_with:
+      hvac_rooftop_equipment: HVAC is a discrete raised box with a consistent rectangular outline; this class is shadows or small miscellaneous fixtures.
+      other_unknown: if you can identify the casting fixture, prefer this class; only escalate to other_unknown when even the cause is ambiguous.
+    canonical_examples:
+      - johannesburg_G0772_v3c_p0012
+      - johannesburg_G0856_v3c_p0027
+      - johannesburg_G0922_v4_2_p0151
+    references: []
+
+  other_unknown:
+    description: >
+      Cataloged FP that does not yet fit a named archetype. Triage bucket —
+      entries here are candidates for promoting to a new named archetype
+      once ≥30 examples cluster on a shared visual cue. Should never grow
+      unbounded; periodically re-review for emerging archetypes.
+    distinguishing_features:
+      - Used ONLY when none of the named archetypes fits
+      - Reviewer is uncertain or the FP cause is ambiguous
+    easily_confused_with:
+      any_named_archetype: prefer the named class whenever the cue is identifiable; reserve other_unknown for genuine ambiguity.
+    canonical_examples:
+      - johannesburg_G0772_v3c_p0048
+      - johannesburg_G0889_v3c_p0049
+      - johannesburg_G0926_v4_2_p0007
+    references: []
+
+# Excluded labels (do not enter negative pool)
+excluded:
+  actually_pv_mislabeled:
+    reason: >
+      Detector found a real PV installation that GT missed. These are
+      ground-truth gaps, NOT lookalike negatives. Route them to the
+      annotation correction queue, not the negative pool. The
+      cls_pv_thermal_v2 classifier dataset includes these (flipped to
+      `pv` class) for classifier training; the detector negative pool
+      excludes them.
