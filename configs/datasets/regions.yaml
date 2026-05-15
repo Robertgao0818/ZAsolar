@@ -75,6 +75,18 @@ regions:
         inference_date: "2026-04-08"
         grid_count: 2
         notes: "G1189/G1190 cross-region experiment — user marked as discardable"
+      unified_reviewall_A_aerial_2025:
+        model_version: "exp_unified_reviewall_A_20260513"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/exp_unified_reviewall_A_aerial_2025"
+        inference_date: "2026-05-13"
+        grid_count: 26
+        notes: |
+          A 路 V3-C warm-start (unified_reviewall_20260511) on CT
+          independent_26 holdout (G1240/G1243/.../G1572) — degradation check
+          per handoff §5.3 for A vs G decision. Imagery_layer aerial_2025
+          (V3-C training imagery). Eval against existing SAM2 GT auto-
+          discovered from data/annotations/Capetown/.
       # Deferred: checkpoints_cleaned (24 grids) and NaN-config (~77 grids)
       # remain under legacy results/ for PR8 triage.
 
@@ -122,8 +134,8 @@ regions:
       tiles_root: "/home/gaosh/zasolar_data/tiles/johannesburg"
       results_root: "results/johannesburg"
       annotations_dir: "data/annotations/Joburg"
-      task_grid: "data/jhb_task_grid.gpkg"
-    grid_id_pattern: "(JHB\\d{2}|G\\d{4})"
+      task_grid: "data/jhb_task_grid_unified.gpkg"  # 106 legacy (JHB01-06 + 100 G*) + 382 JNB Vexcel 1km cells
+    grid_id_pattern: "(JHB\\d{2}|G\\d{4}|JNB\\d{4})"
 
     # WARNING: Grid IDs (G\d{4}) can overlap with cape_town. E.g. G1189, G1190,
     # G1293, G1513, G1570, G1630 are VALID in both regions but cover different
@@ -202,6 +214,23 @@ regions:
     default_imagery_layer: "aerial_2023"
 
     model_runs:
+      unified_reviewall_A_perdet_sam_maskbox_vexcel_2024_full382:
+        model_version: "exp_unified_reviewall_A+sam2_maskbox"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/johannesburg/unified_reviewall_A_perdet_sam_maskbox_vexcel_2024_full382_sam_maskbox"
+        inference_date: "2026-05-15"
+        grid_count: 382
+        notes: |
+          Full 382-grid JHB Vexcel 2024 production inventory run via
+          unified_reviewall_A + finalize.py --merge-mode per-detection +
+          v4_canonical postproc + SAM2.1 mask+box. Production model
+          selected 2026-05-14 after halo audit on JHB CBD 25-grid Tier-1:
+          unified_A per-det+SAM @ polygon-conf c=0.925 has -33 % halo and
+          oversize_ratio p95 4.28 (train20 7.29, V3-C+SAM not measured) vs
+          train20 per-det+SAM. Polygon-conf c=0.925 is applied at
+          consumption time on predictions_metric.gpkg, NOT baked into the
+          pipeline — low-conf polygons retained for Channel 1/2 sweeps.
+          See docs/experiments/2026-05-14-jhb-cbd25-3model-sam.md.
       v3c_geid_2024_02:
         model_version: "exp003_C_targeted_hn"
         imagery_layer: "geid_2024_02"
@@ -300,6 +329,33 @@ regions:
           (chip val_F1@85=0.6102). Eval on G0816/G0817/G0925 head-to-head vs
           v3c_vexcel_2024 raw — pass criteria: bulk_ratio ≤ 1.10, Ch2 recall@0.3
           ≥ 0.443, area_F1 ≥ V3-C+SAM(mask+box) baseline.
+      unified_reviewall_A_vexcel:
+        model_version: "exp_unified_reviewall_A_20260513"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/johannesburg/exp_unified_reviewall_A_vexcel"
+        inference_date: "2026-05-13"
+        grid_count: 5
+        notes: |
+          unified_reviewall_20260511 路线 A (V3-C warm-start). Trained 2026-05-13
+          on CT batch003/004/002b/EarlySAM2 68 grids + JHB Vexcel 2024 20 train
+          grids with per-instance mask_trusted gate + per-source mask weight +
+          diff LR (backbone 0.1×). Early-stopped Stage2 ep5 (global 8). Best
+          ckpt = Stage1 ep2, chip val_F1@85=0.4329 / val_AP50=0.3677. Eval on
+          JHB Vexcel val-5 (G0772/G0816/G0817/G0888/G0925) head-to-head vs G
+          route (opengeoai fresh).
+      unified_reviewall_G_vexcel:
+        model_version: "exp_unified_reviewall_G_20260513"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/johannesburg/exp_unified_reviewall_G_vexcel"
+        inference_date: "2026-05-13"
+        grid_count: 5
+        notes: |
+          unified_reviewall_20260511 路线 G (opengeoai fresh-start). Same training
+          recipe as unified_reviewall_A_vexcel but pretrained from
+          giswqs/geoai solar_panel_detection.pth (no V3-C prior). Early-stopped
+          Stage2 ep5 (global 10). Best ckpt = Stage2 ep3, chip val_F1@85=0.4361
+          / val_AP50=0.3846. Per handoff §5.3 with chip-level deltas < 2pp, G
+          is selected on tie-breaker (cleaner experimental semantics).
 
     grids:
       # Legacy 6-grid pilot (manual transfer test only)

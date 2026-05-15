@@ -1,0 +1,65 @@
+# Six model_run entries to splice into configs/datasets/regions.yaml under
+# regions.johannesburg.model_runs (alongside v3c_vexcel_2024,
+# v3c_sam_maskbox_vexcel_2024_v4_agg, jhb_phaseA_vexcel_2024 etc).
+#
+# Apply with: scripts/_3model_jhb_cbd25_regions_patch_apply.py
+# (or just paste manually — these are stable text blocks, indented 6 spaces
+#  to land inside the model_runs: dict.)
+#
+# Produced 2026-05-14 for the 3-model JHB CBD 25-grid Tier-1 comparison.
+
+      v3c_vexcel_2024_direct:
+        model_version: "exp003_C_targeted_hn"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/analysis/direct_maskrcnn_v1/johannesburg/v3c_vexcel_2024_direct"
+        inference_date: "2026-05-14"
+        grid_count: 25
+        notes: |
+          V3-C via detect_direct.py + finalize.py (merge-mode=pixel-or,
+          v4_canonical postproc) on JHB CBD 25-grid Vexcel 2024. Paired
+          with _sam_maskbox variant; baseline against train20_val5_hn
+          and unified_reviewall_A in the 2026-05-14 Tier-1 comparison.
+      v3c_vexcel_2024_direct_sam_maskbox:
+        model_version: "exp003_C_targeted_hn+sam2_maskbox"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/analysis/direct_maskrcnn_v1/johannesburg/v3c_vexcel_2024_direct_sam_maskbox"
+        inference_date: "2026-05-14"
+        grid_count: 25
+        notes: |
+          SAM2.1 mask+box refinement of v3c_vexcel_2024_direct.
+      train20_val5_vexcel_2024_direct:
+        model_version: "train20_val5_hn_20260508_v3c"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/analysis/direct_maskrcnn_v1/johannesburg/train20_val5_vexcel_2024_direct"
+        inference_date: "2026-05-14"
+        grid_count: 25
+        notes: |
+          train20_val5_hn (V3-C warm-start, JHB Vexcel sub-array fine-tune
+          2026-05-08) on JHB CBD 25-grid Vexcel 2024 via the direct
+          pipeline (detect_direct + finalize pixel-or, v4_canonical).
+      train20_val5_vexcel_2024_direct_sam_maskbox:
+        model_version: "train20_val5_hn_20260508_v3c+sam2_maskbox"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/analysis/direct_maskrcnn_v1/johannesburg/train20_val5_vexcel_2024_direct_sam_maskbox"
+        inference_date: "2026-05-14"
+        grid_count: 25
+        notes: |
+          SAM2.1 mask+box refinement of train20_val5_vexcel_2024_direct.
+      unified_reviewall_A_vexcel_2024_direct:
+        model_version: "exp_unified_reviewall_A"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/analysis/direct_maskrcnn_v1/johannesburg/unified_reviewall_A_vexcel_2024_direct"
+        inference_date: "2026-05-14"
+        grid_count: 25
+        notes: |
+          unified_reviewall A path (V3-C warm + per-instance mask_trusted
+          gate, trained 2026-05-13) on JHB CBD 25-grid Vexcel 2024 via
+          the direct pipeline.
+      unified_reviewall_A_vexcel_2024_direct_sam_maskbox:
+        model_version: "exp_unified_reviewall_A+sam2_maskbox"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/analysis/direct_maskrcnn_v1/johannesburg/unified_reviewall_A_vexcel_2024_direct_sam_maskbox"
+        inference_date: "2026-05-14"
+        grid_count: 25
+        notes: |
+          SAM2.1 mask+box refinement of unified_reviewall_A_vexcel_2024_direct.
