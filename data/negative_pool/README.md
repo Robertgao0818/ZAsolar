@@ -83,3 +83,11 @@ and extracts 400×400 chips into a COCO bundle.
 Seeded 2026-05-13 from `cls_pv_thermal_v2/subtype_labels.csv`. See
 `bootstrap_log.txt` (generated alongside this README on first ingest run)
 for per-source-bucket row counts and excluded entries.
+
+> **2026-05-29 — classifier extracted to `solar_cls`.** The `cls_pv_thermal_v2`
+> dataset now physically lives in `~/zasolar_data/cls/` (managed by the
+> `solar_cls` subrepo). `data/cls_pv_thermal_v2` in this repo is a **gitignored
+> symlink** to it, so `bootstrap_from_cls_v2.py` (a detector-side consumer that
+> only *reads* the subtype CSV) keeps resolving the path unchanged. The
+> bootstrap script itself stays in this repo — it belongs to the detector
+> negative-pool domain, not the classifier.

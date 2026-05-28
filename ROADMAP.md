@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-05-15: feat(training): project-level hard-negative pool bootstrap
-- 2026-05-15: feat(jhb-vexcel): 3-model CBD25 comparison + 382-grid production run
-- 2026-05-15: feat(infra): SAM mask+box refinement + 3-phase pod template
-- 2026-05-14: feat(scripts): runpod_flatten_tiles_for_build.sh — scripted /dev/shm flatten
-- 2026-05-14: feat(training): emit chips_metadata.json with per-chip max_polygon_area_m2
-- 2026-05-14: chore(runpod): rewrite init to skip torch reinstall, persist pip cache
-- 2026-05-13: feat(review-gui): exhaustive-annotation mode + Li handoff doc
-- 2026-05-13: chore(repo): remove GEID temporal scaffolding (subrepo owns GEHI now)
+- 2026-05-28: refactor(classifier): extract PV/non-PV classifier to sibling subrepo solar_cls
+- 2026-05-22: Weekly progress summary (05-13 to 05-22) + daily progress log updates
+- 2026-05-21: Daily log 2026-05-22: 05-13→05-22 weekly outline from progress logs and supplemental sources
+- 2026-05-20: backdating (GEHI availability + download ladder, build_inventory_chip_groups, gemini review) + ZAsolar Accepted prediction pool builder
+- 2026-05-20: Daily log 2026-05-20: full382 inventory-to-chip groups, GEHI/Gemini matrix pipeline, JNB0202 pilot
+- 2026-05-17: solar_zerov2 DINOv3-SAT-L + Mask2Former literature survey + Oracle mask spatial attention diagnosis
+- 2026-05-17: Daily log 2026-05-17: solar_zerov2 failure diagnosis, ViT/PV literature survey, DINOv3-SAT backbone probe
+- 2026-05-16: Daily log 2026-05-16: solar_zerov2 Phase 0 local inference, JHB CBD25 eval wiring, ablation/diagnostic setup
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
@@ -279,6 +279,6 @@ V4.1 improves precision (+1.4pp, FP-14.6%) but regresses recall (-6.4pp). V3-C r
 - 5-20m² FP (water heaters) still dominant — need visual-level classification, not just HN
 
 ### Next Steps
-- [ ] Binary PV vs solar-thermal classifier as post-processing plugin
+- [x] Binary PV vs solar-thermal classifier as post-processing plugin — built (v1 PV/thermal → v2 multi-subtype FP suppressor w/ per-imagery-layer thresholds); **extracted to sibling subrepo `solar_cls` 2026-05-29**, with `classify_predictions.py` P0-4 fixed (mosaic/multi-city-aware tile lookup via `resolve_tiles_dir` + `thresholds_v2.json` per-(arch,layer) consumption)
 - [ ] Tune HN ratio to 10-12% for better P/R balance
 - [ ] Batch 005 inference with stabilized model

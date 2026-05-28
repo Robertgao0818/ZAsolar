@@ -24,6 +24,11 @@ data/coco*/
 data/cls_pv_thermal/
 data/cls_pv_thermal_v*/
 data/cls_pv_nonpv_v*/
+# PV/thermal classifier extracted to sibling subrepo solar_cls (2026-05-29).
+# data/cls_pv_thermal_v2 remains as a gitignored symlink → ~/zasolar_data/cls/
+# (bootstrap seam for scripts/training/negative_pool/bootstrap_from_cls_v2.py).
+# Trailing-slash patterns above don't match a symlink, so list it explicitly:
+data/cls_pv_thermal_v2
 data/geid_temporal
 data/geid_temporal/
 
