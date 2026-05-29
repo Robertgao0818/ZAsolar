@@ -33,6 +33,7 @@ from shapely.ops import unary_union
 
 from core.grid_utils import get_grid_paths, normalize_grid_id, TILES_ROOT, resolve_tiles_dir
 from core.annotation_loader import discover_annotations, load_annotation_gdf, AnnotationEntry
+from core.boundary_trust import mask_trusted_map
 
 BASE_DIR = Path(__file__).parent
 
@@ -49,18 +50,9 @@ BASE_DIR = Path(__file__).parent
 # - Non-interactive batch SAM cut from FN markers → boundary follows model
 #   proposal, untrusted (Batch 003/004 sam_added_true_fn was this flow)
 # - V3-C reviewed predictions → boundary carries halo bias, untrusted
-_MASK_TRUSTED = {
-    # Annotator-initiated + per-instance interactive SAM or freehand → True
-    "human_manual":              True,
-    "human_manual_sam_assisted": True,
-    "human_manual_qgis_geosam":  True,
-    "sam_added_browser":         True,   # browser SAM point-prompt (post-2026-04-13)
-    # Model-initiated / non-interactive batch SAM / legacy weak → False
-    "reviewed_prediction":       False,
-    "sam_refined_review":        False,
-    "sam_added_true_fn":         False,  # Batch 003/004 FN marker → bulk SAM cut, no per-instance refine
-    "legacy_weak_supervision":   False,
-}
+# Single source of truth: data/training_pool/boundary_trust_rules.yaml
+# (was a hardcoded dict here, duplicated in train.py; unified via core.boundary_trust).
+_MASK_TRUSTED = mask_trusted_map()
 
 
 def mask_trusted_for(label_source: str | None) -> bool:

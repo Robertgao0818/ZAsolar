@@ -1,0 +1,46 @@
+# Single source of truth: label_source → (mask_trusted, boundary_w)
+# ─────────────────────────────────────────────────────────────────────────────
+# Consumed by:
+#   - export_coco_dataset.py   → _MASK_TRUSTED            (core.boundary_trust.mask_trusted_map)
+#   - train.py                 → _LABEL_SOURCE_TO_MASK_TRUSTED (mask_trusted_map)
+#                                _LABEL_SOURCE_TO_BOUNDARY_W   (boundary_w_map)
+#
+# Before 2026-05-29 these were TWO duplicate hardcoded dicts (one in each file)
+# that could silently drift. This YAML unifies the per-key values; the loader
+# lives in core/boundary_trust.py.
+#
+# Semantics (per .claude/rules/07-annotation-semantics.md + ANNOTATION_SPEC.md):
+#   mask_trusted=true  → this polygon's boundary supervises the mask head (full BCE).
+#   mask_trusted=false → mask BCE skipped for this instance; box + cls loss still apply.
+#   boundary_w         → per-pixel BCE weight inside the polygon edge band
+#                        (1.0 = full edge supervision, 0.0 = edge ignored).
+#
+# The 2-bucket trusted/untrusted view is DERIVED from mask_trusted; it is layered
+# on top of A1/A2/A3 × H/R/S/G × T1/T2, it does not replace them. T1 ⊂ trusted.
+#
+# NOTE on edge-cases (None / unknown source): each consumer keeps its existing
+# behavior (preserved verbatim for zero behavior change as of the 2026-05-29
+# extraction). The documented policy below states INTENT; converging the
+# consumers' divergent unknown/None handling is deferred (would change behavior):
+#   - export_coco_dataset.mask_trusted_for(None)    → ValueError (raise)
+#   - export_coco_dataset.mask_trusted_for(unknown) → ValueError (raise)
+#   - train._resolve_mask_trusted(missing label)    → True  (legacy back-compat)
+#   - train._resolve_mask_trusted(unknown label)    → False (conservative)
+#   - train._boundary_pixel_weights(unknown)        → 1.0   (.get default)
+schema_version: 1
+
+fail_closed_default: untrusted      # intent for unknown-but-present source
+legacy_no_source_field: trusted     # intent for genuinely-legacy rows w/o label_source column
+
+# trusted = annotator-initiated, per-instance interactive boundary
+# untrusted = model-initiated / non-interactive batch SAM / legacy weak supervision
+map:
+  human_manual:                { mask_trusted: true,  boundary_w: 1.0 }   # H: freehand
+  human_manual_sam_assisted:   { mask_trusted: true,  boundary_w: 1.0 }   # H: SAM as drawing tool
+  human_manual_qgis_geosam:    { mask_trusted: true,  boundary_w: 1.0 }   # H: QGIS + GeoSAM
+  sam_added_browser:           { mask_trusted: true,  boundary_w: 1.0 }   # H: browser SAM point-prompt (post-2026-04-13)
+  reviewed_prediction:         { mask_trusted: false, boundary_w: 0.0 }   # R: V3-C prediction accepted as-is
+  gemini_reviewed_prediction:  { mask_trusted: false, boundary_w: 0.0 }   # R-like: Gemini/LLM visual review, weak supervision
+  sam_refined_review:          { mask_trusted: false, boundary_w: 0.0 }   # S: prediction re-cut with SAM after review
+  sam_added_true_fn:           { mask_trusted: false, boundary_w: 0.0 }   # Batch 003/004 FN marker → bulk non-interactive SAM cut
+  legacy_weak_supervision:     { mask_trusted: false, boundary_w: 0.0 }   # G: early Google Earth / weak supervision
