@@ -115,6 +115,10 @@ data/annotations_channel2_micro/
 # Claude Code scheduled-task runtime lock file
 .claude/scheduled_tasks.lock
 
+# Per-run training-ledger detail (run_manifest.json). The git-tracked index is
+# configs/training_runs.yaml; the heavy per-run detail under runs/ is a product.
+runs/
+
 # Building footprint data (downstream's responsibility per project_adoption_rate_dimension)
 data/buildings/
 

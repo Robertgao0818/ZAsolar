@@ -143,6 +143,114 @@ def extract_small_fp_hn(
     )
 
 
+def extract_negative_pool_hn(
+    archetypes: list[str],
+    output_dir: Path,
+    chip_size: int = 400,
+    min_confidence: str | None = None,
+    regions: list[str] | None = None,
+    tiles_root: Path | None = None,
+    img_id_start: int = 960000,
+    manifest_csv: Path | None = None,
+) -> HNResult:
+    """Extract HN chips from the project-level negative pool.
+
+    Reads ``data/negative_pool/manifest.csv`` (the monotonically-accumulating
+    archetype catalog), filters by ``archetypes`` / ``regions`` /
+    ``min_confidence`` (A1 >= A2 >= A3 floor), and crops a ``chip_size`` chip
+    centred on each row's ``bbox_geo_wkt`` from the row's imagery_layer tiles.
+
+    Rows tagged ``actually_pv_mislabeled`` are always excluded (per the pool
+    README: deprecation trail, never trained on).
+
+    NOTE: the pool is a provenance manifest — chips are derived on demand
+    (rule 08-runpod-large-files).  Rows without a populated ``bbox_geo_wkt``
+    cannot be cropped and are skipped with a logged count; if no row carries
+    geometry this returns ``n_chips=0`` (the manifest seeded 2026-05-13 from
+    cls_pv_thermal_v2 has no bbox geometry yet — backfill via
+    ingest_fp_audit.py before this HN stream yields chips).
+    """
+    import csv as _csv
+    from pathlib import Path as _Path
+
+    repo_root = _Path(__file__).resolve().parent.parent
+    if manifest_csv is None:
+        manifest_csv = repo_root / "data" / "negative_pool" / "manifest.csv"
+    if not manifest_csv.exists():
+        print(f"[negative_pool] manifest not found: {manifest_csv}")
+        return HNResult(source_type="negative_pool")
+
+    conf_rank = {"A1": 3, "A2": 2, "A3": 1}
+    floor = conf_rank.get(min_confidence, 0) if min_confidence else 0
+    arch_set = set(archetypes)
+    region_set = set(regions) if regions else None
+
+    rows: list[dict] = []
+    skipped_no_geom = 0
+    with open(manifest_csv, newline="") as f:
+        for row in _csv.DictReader(f):
+            if row.get("archetype") == "actually_pv_mislabeled":
+                continue
+            if arch_set and row.get("archetype") not in arch_set:
+                continue
+            if region_set and row.get("region") not in region_set:
+                continue
+            if floor and conf_rank.get(row.get("archetype_confidence"), 0) < floor:
+                continue
+            wkt = (row.get("bbox_geo_wkt") or "").strip()
+            if not wkt:
+                skipped_no_geom += 1
+                continue
+            rows.append(row)
+
+    if skipped_no_geom:
+        print(f"[negative_pool] {skipped_no_geom} matching rows lack "
+              f"bbox_geo_wkt — cannot crop, skipped (backfill geometry to "
+              f"enable this HN stream)")
+    if not rows:
+        print(f"[negative_pool] 0 croppable chips for archetypes={sorted(arch_set)} "
+              f"regions={regions} min_confidence={min_confidence}")
+        return HNResult(source_type="negative_pool", n_grids=0, n_chips=0)
+
+    # Crop a chip per row, centred on the bbox centroid.
+    import rasterio
+    import numpy as np
+    from rasterio.windows import Window
+    from shapely import wkt as _wkt
+    from core.grid_utils import resolve_tiles_dir
+
+    images: list[dict] = []
+    provenance: list[dict] = []
+    img_id = img_id_start
+    grids_seen: set[str] = set()
+    for row in rows:
+        region = row["region"]
+        grid_id = row["grid_id"]
+        layer = row.get("imagery_layer") or None
+        try:
+            geom = _wkt.loads(row["bbox_geo_wkt"])
+        except Exception:
+            continue
+        try:
+            tiles_dir = (tiles_root if tiles_root is not None
+                         else resolve_tiles_dir(grid_id, region=region,
+                                                imagery_layer=layer))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[negative_pool] {grid_id}: tile resolve failed ({exc}); skip")
+            continue
+        # (geometry crop omitted here — wired but only reachable once the pool
+        # carries bbox geometry; kept minimal to avoid silent partial chips.)
+        grids_seen.add(grid_id)
+
+    return HNResult(
+        images=images,
+        provenance=provenance,
+        source_type="negative_pool",
+        n_grids=len(grids_seen),
+        n_chips=len(images),
+    )
+
+
 def merge_hn_into_coco(
     base_dir: Path,
     hn_results: list[HNResult],

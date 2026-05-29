@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """Build the unified_reviewall_20260511 COCO dataset.
 
+⚠️ DEPRECATED (2026-05-29, training-pool normalization Phase 4) — kept for
+historical reproducibility, DO NOT DELETE. This bespoke builder is now
+superseded by the declarative spec
+``configs/pipelines/datasets/unified_reviewall_v2.yaml`` driven by
+``pipeline.dataset_builder`` (the v2 positive-source path). The v2 builder
+reuses the loaders in THIS module, so the two are byte-equivalent: a
+dry-run byte-diff (2026-05-29) showed the spec build's
+``build_manifest.json::selected_annotations`` SET-EQUAL to this script's on
+``(region, grid_id, label_source, source_file, source_id)`` — 9,738 rows
+each, 0 added / 0 dropped (also equal including ``split`` + ``imagery_layer``).
+New builds should use the v2 spec; the spec adds ``exclude_imagery_layers``
+(aerial_2023 archive enforcement) which this script lacks.
+
 Per docs/plans/review-aerial-2023-jhb-opengeoai-v3c-parallel-biscuit.md:
 - CT positives  = Batch003/004/002b/EarlySAM2 (69 grids), exclude cape_town_independent_26 (26)
 - JHB positives = 20 grids of Vexcel 2024 raw review:
@@ -47,6 +60,12 @@ from export_coco_dataset import (  # noqa: E402
     write_selected_chips,
     mask_trusted_for,
     _MASK_TRUSTED,
+)
+from pipeline.manifests import (  # noqa: E402
+    write_build_manifest,
+    generate_build_id,
+    build_source_inventory,
+    compute_string_sha256,
 )
 
 
@@ -284,6 +303,138 @@ def _per_record_summary(records, kind="train"):
     return rows
 
 
+def _selected_annotations_from_records(records: list[dict]) -> list[dict]:
+    """Flatten per-record annotation GeoDataFrames into a per-polygon
+    provenance list for the build manifest.
+
+    ``source_id`` is the positional row index within the record's annotation
+    GeoDataFrame (which has been re-indexed via ``reset_index(drop=True)`` in
+    the loaders), matching the row-index-as-id convention used elsewhere in
+    the pipeline (e.g. predictions_metric.gpkg). ``source_file`` is resolved
+    from ``label_source`` via the record's ``source_files`` map.
+    """
+    selected: list[dict] = []
+    for rec in records:
+        annots = rec["annots"]
+        src_map = rec.get("source_files", {})
+        has_label_source = "label_source" in annots.columns
+        # CT records carry a single source file keyed by None.
+        default_src = src_map.get(None)
+        for pos, (_, row) in enumerate(annots.iterrows()):
+            label_source = (
+                str(row["label_source"]) if has_label_source else None
+            )
+            src = src_map.get(label_source, default_src)
+            selected.append({
+                "region": rec["region"],
+                "grid_id": rec["grid_id"],
+                "imagery_layer": rec["imagery_layer"],
+                "split": rec["split"],
+                "label_source": label_source,
+                "source_file": (
+                    _src_rel(src) if src is not None else None
+                ),
+                "source_id": pos,
+            })
+    return selected
+
+
+def _src_rel(path: Path) -> str:
+    """Repo-relative path string when possible, else absolute."""
+    path = Path(path).resolve()
+    try:
+        return str(path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _emit_build_manifest(args: argparse.Namespace, out_dir: Path,
+                         records: list[dict], val_jhb_grids: set,
+                         exclude_ct: set) -> None:
+    """Write build_manifest.json (additive provenance, must never break the
+    build). Wrapped by caller in try/except."""
+    selected_annotations = _selected_annotations_from_records(records)
+
+    # Unique annotation source gpkgs across all records.
+    seen: set[str] = set()
+    annotation_paths: list[Path] = []
+    for rec in records:
+        for src in rec.get("source_files", {}).values():
+            if src is None:
+                continue
+            key = str(Path(src).resolve())
+            if key not in seen:
+                seen.add(key)
+                annotation_paths.append(Path(src))
+    source_inventory = build_source_inventory(annotation_paths)
+
+    regions = sorted({rec["region"] for rec in records})
+    resolved_tile_roots = {
+        f"{rec['region']}/{rec['imagery_layer']}": str(rec["tiles"][0].parent)
+        for rec in records
+    }
+
+    resolved_spec = {
+        "training_set_id": "unified_reviewall_20260511",
+        "regions": regions,
+        "ct_excluded_grids": sorted(exclude_ct),
+        "jhb_vexcel_grids": sorted(JHB_VEXCEL_25),
+        "jhb_val_grids": sorted(val_jhb_grids),
+        "ct_imagery_layer": "aerial_2025",
+        "jhb_imagery_layer": "vexcel_2024",
+        "chip_size": args.chip_size,
+        "overlap": args.overlap,
+        "neg_ratio": args.neg_ratio,
+        "seed": args.seed,
+        "skip_ct": bool(args.skip_ct),
+        "skip_jhb": bool(args.skip_jhb),
+    }
+
+    # Build fingerprint: everything that, if changed, would change the
+    # dataset contents — effective config plus the sha256 of every source
+    # gpkg. Excludes timestamps so re-running on identical inputs yields the
+    # same build_id.
+    fingerprint = {
+        "resolved_spec": resolved_spec,
+        "source_sha256": sorted(
+            (e["path"], e["sha256"]) for e in source_inventory
+        ),
+    }
+    build_fingerprint_json = json.dumps(fingerprint, sort_keys=True)
+    resolved_spec_hash = compute_string_sha256(
+        json.dumps(resolved_spec, sort_keys=True)
+    )
+    build_id = generate_build_id("unified_reviewall", build_fingerprint_json)
+
+    write_build_manifest(
+        out_dir,
+        build_id=build_id,
+        spec_path="bespoke:scripts/training/build_unified_reviewall.py",
+        resolved_spec=resolved_spec,
+        resolved_spec_hash=resolved_spec_hash,
+        regions=regions,
+        evaluation_regime="installation",
+        exclude_grids=sorted(exclude_ct),
+        excluded_grids_reason=(
+            "cape_town_independent_26 benchmark holdout "
+            "(configs/benchmarks/post_train.yaml) plus any --exclude-ct-grids"
+        ),
+        source_inventory=source_inventory,
+        split_strategy="whole_grid_jhb_holdout",
+        split_seed=args.seed,
+        easy_neg_ratio=args.neg_ratio,
+        hard_negatives_config=[],
+        selected_annotations=selected_annotations,
+        resolved_tile_roots=resolved_tile_roots,
+        resolved_output_root=str(out_dir),
+        entrypoint="scripts/training/build_unified_reviewall.py",
+    )
+    print(f"[BUILD_MANIFEST] {out_dir / 'build_manifest.json'} "
+          f"(build_id={build_id}, "
+          f"{len(source_inventory)} sources, "
+          f"{len(selected_annotations)} selected_annotations)")
+
+
 def build(args: argparse.Namespace) -> dict:
     out_dir = Path(args.output_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -327,6 +478,9 @@ def build(args: argparse.Namespace) -> dict:
                 "tile_crs": str(tile_crs),
                 "annots": annots,
                 "tile_to_annots": _assign_intersections(annots, tiles),
+                # Provenance: each CT grid resolves to a single discovered
+                # annotation gpkg (entry.path); label_source maps onto it.
+                "source_files": {None: Path(entry.path)},
             })
     print(f"[CT] {sum(1 for r in records if r['region'] == 'cape_town')} grids loaded")
 
@@ -344,6 +498,7 @@ def build(args: argparse.Namespace) -> dict:
             if len(annots) == 0:
                 print(f"[SKIP] JHB {grid_id}: no annotations after combine")
                 continue
+            jhb_review_dir = JHB_REVIEW_ROOT / grid_id / "review"
             records.append({
                 "split": "val" if grid_id in val_jhb_grids else "train",
                 "region": "johannesburg",
@@ -354,6 +509,12 @@ def build(args: argparse.Namespace) -> dict:
                 "tile_crs": str(tile_crs),
                 "annots": annots,
                 "tile_to_annots": _assign_intersections(annots, tiles),
+                # Provenance: label_source identifies which gpkg each row
+                # came from (see _load_jhb_grid_annotations).
+                "source_files": {
+                    "reviewed_prediction": jhb_review_dir / f"{grid_id}_reviewed.gpkg",
+                    "sam_added_browser": jhb_review_dir / f"{grid_id}_sam_added.gpkg",
+                },
             })
     n_jhb_train = sum(1 for r in records if r["region"] == "johannesburg" and r["split"] == "train")
     n_jhb_val = sum(1 for r in records if r["region"] == "johannesburg" and r["split"] == "val")
@@ -383,6 +544,12 @@ def build(args: argparse.Namespace) -> dict:
     print(f"[SUMMARY] {summary_csv}")
 
     if args.dry_run:
+        # Selection is fully determined here; emit provenance manifest so the
+        # dry-run is verifiable. Additive only — never break the build.
+        try:
+            _emit_build_manifest(args, out_dir, records, val_jhb_grids, exclude_ct)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[WARN] build_manifest write failed (non-fatal): {exc}")
         return {"summary": str(summary_csv), "dry_run": True}
 
     # ── Chip scan + COCO build ───────────────────────────────────────
@@ -511,6 +678,12 @@ def build(args: argparse.Namespace) -> dict:
         "chips": chips_metadata,
     }, indent=2) + "\n")
     print(f"[CHIPS_META] {chips_meta_path} ({len(chips_metadata)} chips)")
+
+    # ── Build provenance manifest (additive; never breaks the build) ─────
+    try:
+        _emit_build_manifest(args, out_dir, records, val_jhb_grids, exclude_ct)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] build_manifest write failed (non-fatal): {exc}")
 
     return {
         "output_dir": str(out_dir),

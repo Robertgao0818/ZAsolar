@@ -1,0 +1,235 @@
+# unified_reviewall — v2 declarative spec (schema_version 2)
+# ─────────────────────────────────────────────────────────────────────────────
+# Reproduces the dataset that scripts/training/build_unified_reviewall.py
+# produces, but driven entirely by this declarative spec via
+# pipeline.dataset_builder (the v2 positive-source path).
+#
+# Byte-diff acceptance gate (Phase 4, 2026-05-29): the selected_annotations in
+# this spec's build_manifest.json are SET-EQUAL to the bespoke script's on
+# (region, grid_id, label_source, source_file, source_id). See the bottom of
+# this file for the verdict.
+#
+# Positive sources (two regions × two trust buckets):
+#   - CT aerial_2025: discovered from data/annotations/Capetown/ (same
+#     provenance as the Phase-1 positive pool). label_source tagged per the
+#     bespoke _ct_source_to_label_source map. cape_town_independent_26 grids
+#     are excluded (benchmark holdout); legacy_ct weak-supervision grids are
+#     skipped by the loader.
+#   - JHB vexcel_2024: the Vexcel clean_gt review product under
+#     results/johannesburg/v3c_vexcel_2024_ch1_sample/<grid>/review/ —
+#     <grid>_reviewed.gpkg (filtered to review_status=="correct") +
+#     <grid>_sam_added.gpkg. This is a model-run review product, NOT
+#     data/annotations/ and NOT the Phase-1 pool (whose JHB rows are the
+#     to-be-archived aerial_2023 batches).
+#
+# aerial_2023 archive: exclude_imagery_layers drops any positive on
+# aerial_2023. CT is aerial_2025 and JHB positives are vexcel_2024, so this
+# build carries 0 aerial_2023 polygons (CBD + Sandton signal intentionally
+# dropped — locked product decision 2026-05-29).
+
+schema_version: 2
+name: unified_reviewall_v2
+build_family: detector_train
+regions: [cape_town, johannesburg]
+evaluation_regime: installation
+
+# ── Drop ALL aerial_2023 positives (CBD + Sandton). Enforced by the builder:
+#    any positive record whose imagery_layer is in this list is skipped. ──
+exclude_imagery_layers:
+  - aerial_2023
+
+selection:
+  # cape_town_independent_26 benchmark holdout (configs/benchmarks/post_train.yaml).
+  # CT discovery in the pool_manifest source skips these grids — matches the
+  # bespoke builder's CT_INDEP_26 exclusion.
+  tier_filter: T1+T2
+  exclude_grids:
+    - G1240
+    - G1243
+    - G1244
+    - G1245
+    - G1293
+    - G1294
+    - G1297
+    - G1298
+    - G1299
+    - G1300
+    - G1349
+    - G1354
+    - G1410
+    - G1411
+    - G1466
+    - G1467
+    - G1516
+    - G1520
+    - G1521
+    - G1522
+    - G1523
+    - G1524
+    - G1569
+    - G1570
+    - G1571
+    - G1572
+
+# ── Positive sources ────────────────────────────────────────────────────────
+# Each entry declares a region/source slice + which trust bucket it lands in.
+# bucket is provenance/audit metadata; the per-instance mask_trusted gate is
+# computed from label_source in scan_chips_from_tile (boundary_trust_rules.yaml).
+positives:
+  # CT — discovered from data/annotations/. label_source tagged by the bespoke
+  # CT map; trusted slice = human_manual_sam_assisted (interactive SAM/QGIS).
+  - bucket: trusted
+    source_kind: pool_manifest
+    pool_manifest: data/training_pool/positive_trusted_manifest.csv
+    regions: [cape_town]
+    imagery_layers: [aerial_2025]
+    tier_filter: T1+T2
+    label_sources: [human_manual_sam_assisted]
+  # CT untrusted slice = reviewed_prediction (V3-C accepted) + sam_added_true_fn
+  # (batch FN markers). Same source file, just the untrusted label_sources.
+  - bucket: untrusted
+    source_kind: pool_manifest
+    pool_manifest: data/training_pool/positive_untrusted_manifest.csv
+    regions: [cape_town]
+    imagery_layers: [aerial_2025]
+    tier_filter: T1+T2
+    label_sources: [reviewed_prediction, sam_added_true_fn]
+
+  # JHB — Vexcel clean_gt review product (results-side, NOT data/annotations).
+  # trusted slice = sam_added_browser (post-2026-04-13 browser SAM point-prompt).
+  - bucket: trusted
+    source_kind: results_review_dir
+    review_root: results/johannesburg/v3c_vexcel_2024_ch1_sample
+    regions: [johannesburg]
+    imagery_layers: [vexcel_2024]
+    label_sources: [sam_added_browser]
+    grids:
+      - G0772
+      - G0773
+      - G0774
+      - G0775
+      - G0776
+      - G0814
+      - G0815
+      - G0816
+      - G0817
+      - G0818
+      - G0853
+      - G0854
+      - G0855
+      - G0856
+      - G0857
+      - G0888
+      - G0889
+      - G0890
+      - G0891
+      - G0892
+      - G0922
+      - G0923
+      - G0924
+      - G0925
+      - G0926
+  # JHB untrusted slice = reviewed_prediction (V3-C accepted, halo-prone).
+  # Same review dir + grid list; the loader tags both label_sources per row.
+  - bucket: untrusted
+    source_kind: results_review_dir
+    review_root: results/johannesburg/v3c_vexcel_2024_ch1_sample
+    regions: [johannesburg]
+    imagery_layers: [vexcel_2024]
+    label_sources: [reviewed_prediction]
+    grids:
+      - G0772
+      - G0773
+      - G0774
+      - G0775
+      - G0776
+      - G0814
+      - G0815
+      - G0816
+      - G0817
+      - G0818
+      - G0853
+      - G0854
+      - G0855
+      - G0856
+      - G0857
+      - G0888
+      - G0889
+      - G0890
+      - G0891
+      - G0892
+      - G0922
+      - G0923
+      - G0924
+      - G0925
+      - G0926
+
+# ── Whole-grid JHB holdout (5 grids). CT is all-train. ──────────────────────
+val_grids:
+  - G0772
+  - G0816
+  - G0817
+  - G0888
+  - G0925
+
+split:
+  strategy: whole_grid_jhb_holdout
+  seed: 42
+
+# easy negatives: empty chips (intentional hard negatives) balanced to 0.15:1
+negatives:
+  easy_neg_ratio: 0.15
+
+chip:
+  size: 400
+  overlap: 0.25
+
+# ── Per-instance mask supervision policy ────────────────────────────────────
+# per_instance_mask_trusted: scan_chips_from_tile writes mask_trusted onto each
+#   COCO annotation (trusted boundary supervises mask BCE; untrusted skips it).
+# untrusted_max_x_trusted: lifts the bespoke `untrusted <= 4 × trusted`
+#   assertion (Gerstgrasser 2024 COLM accumulation) into the builder; the v2
+#   builder asserts it on the train pool. Current ratio ≈ 1.68 (well under 4).
+# boundary_band_iters / freeze_mask_head: train.py hints (not used at build).
+mask_supervision:
+  per_instance_mask_trusted: true
+  boundary_band_iters: 0
+  untrusted_max_x_trusted: 4.0
+  freeze_mask_head: false
+
+# ── Hard negatives: project-level archetype pool ────────────────────────────
+# Filters data/negative_pool/manifest.csv by archetype + confidence floor.
+# NOTE: the pool currently has no bbox_geo_wkt geometry (seeded 2026-05-13
+# from cls_pv_thermal_v2), so this yields 0 chips today; the spec mechanism is
+# in place and will produce chips once geometry is backfilled. The bespoke
+# script bundles NO HN (HN merged downstream via export_v4_1_hn.py), so for
+# byte-diff parity the dataset positives/selection are unaffected by this entry.
+hard_negatives:
+  - type: negative_pool
+    archetypes:
+      - solar_thermal_water_heater
+      - skylight_roof_window
+      - hvac_rooftop_equipment
+    min_confidence: A2
+    max_ratio: 0.04
+
+# ── Warm-start weights ──────────────────────────────────────────────────────
+# model_registry id (v3c → checkpoints/exp003_C_targeted_hn/best_model.pth).
+# Consumed by train.py, not by the build; recorded for provenance.
+init_weights: v3c
+
+output:
+  root: ${SOLAR_ARTIFACT_ROOT:-/home/gaosh/zasolar_data}
+  name_template: "coco_{name}_{date}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BYTE-DIFF VERDICT (2026-05-29, Phase 4): BYTE-EQUIVALENT.
+#   This spec build (via `python -m pipeline.dataset_builder --dry-run`) emits
+#   build_manifest.json::selected_annotations that are SET-EQUAL to the bespoke
+#   scripts/training/build_unified_reviewall.py --dry-run output on
+#   (region, grid_id, label_source, source_file, source_id): 9,738 rows each,
+#   0 added / 0 dropped (also equal incl. split + imagery_layer).
+#   train trusted=3383 untrusted=5691 (ratio 1.68); CT 68 grids (aerial_2025,
+#   5,903 polys), JHB 20 train + 5 val (vexcel_2024, 3,835 polys); 0 aerial_2023.
+#   => scripts/training/build_unified_reviewall.py is header-DEPRECATED (kept
+#      for historical reproducibility, not deleted).

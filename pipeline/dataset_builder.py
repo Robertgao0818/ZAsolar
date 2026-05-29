@@ -73,6 +73,7 @@ def build_dataset(
     output_dir: str | Path | None = None,
     *,
     check_files: bool = True,
+    dry_run: bool = False,
 ) -> Path:
     """Build a COCO dataset from a declarative spec.
 
@@ -90,6 +91,14 @@ def build_dataset(
     # ── 1. Load and validate spec ────────────────────────────────────
     spec = load_spec(spec_path, check_files=check_files)
     print(f"[BUILD] Loaded spec: {spec.name} (regions={spec.regions})")
+
+    # ── v2 positive-source path ───────────────────────────────────────
+    # When a spec declares explicit `positives` (schema_version >= 2) it is
+    # using the explicit-source builder, which drives the SAME selection
+    # loaders as scripts/training/build_unified_reviewall.py so the emitted
+    # build_manifest.json is byte-identical to the bespoke script.
+    if spec.positives:
+        return _build_dataset_v2(spec, spec_path, output_dir, dry_run=dry_run)
 
     # ── 2. Resolve paths and build fingerprint inputs ─────────────────
     resolved_root = resolve_env_vars(spec.output.root)
@@ -351,6 +360,356 @@ def _copy_base_as_final(base_dir: Path, build_dir: Path) -> None:
 
 
 # ════════════════════════════════════════════════════════════════════════
+# v2 explicit positive-source builder (byte-equivalent to
+# scripts/training/build_unified_reviewall.py)
+# ════════════════════════════════════════════════════════════════════════
+def _build_records_from_positives(spec, *, exclude_imagery_layers: set[str]):
+    """Build the per-grid ``records`` list from spec.positives.
+
+    Reuses the bespoke loaders from build_unified_reviewall so the per-record
+    annotation ordering (hence ``source_id``) and the ``source_file`` paths
+    are byte-identical to the bespoke script.  Each PositiveSourceSpec routes
+    to either the CT pool loader or the JHB results-review loader.
+
+    ``exclude_imagery_layers`` drops any positive whose imagery_layer is in
+    the set (the aerial_2023 archive enforcement).
+    """
+    import rasterio
+    from scripts.training import build_unified_reviewall as bur
+
+    val_grids = set(spec.val_grids)
+    # Group sources by (region, source_kind, imagery_layer) — each such group
+    # contributes one record per grid (CT grids come from discover; JHB grids
+    # come from the explicit grid list).
+    records: list[dict] = []
+    seen_record_keys: set[tuple] = set()
+
+    for ps in spec.positives:
+        imagery_layers = ps.imagery_layers or []
+        for imagery_layer in (imagery_layers or [None]):
+            if imagery_layer in exclude_imagery_layers:
+                print(f"[EXCLUDE-LAYER] dropping positive source "
+                      f"(region={ps.regions}, layer={imagery_layer})")
+                continue
+
+            if ps.source_kind == "pool_manifest":
+                # CT: discover grids from data/annotations/, skip legacy +
+                # spec exclude_grids, tag label_source via bespoke mapping.
+                for region in ps.regions:
+                    entries = bur._ct_entries() if region == "cape_town" else None
+                    if entries is None:
+                        raise NotImplementedError(
+                            f"pool_manifest source for region {region!r} not "
+                            f"wired (only cape_town's _ct_entries loader exists)"
+                        )
+                    exclude = set(spec.selection.exclude_grids)
+                    for grid_id, entry in entries.items():
+                        if grid_id in exclude:
+                            continue
+                        rkey = (region, grid_id, imagery_layer)
+                        if rkey in seen_record_keys:
+                            continue
+                        if entry.schema_type == "legacy_ct":
+                            print(f"[SKIP] CT {grid_id}: legacy weak-supervision "
+                                  f"(schema={entry.schema_type})")
+                            continue
+                        tiles = bur._tiles_for(grid_id, region=region,
+                                               imagery_layer=imagery_layer)
+                        if not tiles:
+                            print(f"[SKIP] CT {grid_id}: no tiles")
+                            continue
+                        with rasterio.open(tiles[0]) as src:
+                            tile_crs = src.crs
+                        annots = bur._load_ct_grid_annotations(grid_id, tile_crs)
+                        if len(annots) == 0:
+                            continue
+                        seen_record_keys.add(rkey)
+                        split = ps.split or (
+                            "val" if grid_id in val_grids else "train"
+                        )
+                        records.append({
+                            "split": split,
+                            "region": region,
+                            "imagery_layer": imagery_layer,
+                            "grid_id": grid_id,
+                            "tiles": tiles,
+                            "tile_map": {t.stem: t for t in tiles},
+                            "tile_crs": str(tile_crs),
+                            "annots": annots,
+                            "tile_to_annots": bur._assign_intersections(annots, tiles),
+                            "source_files": {None: Path(entry.path)},
+                        })
+
+            elif ps.source_kind == "results_review_dir":
+                # JHB: explicit grid list, load reviewed + sam_added gpkgs
+                # from results/<region>/<run>/<grid>/review/.
+                review_root = (REPO_ROOT / ps.review_root).resolve()
+                # Temporarily point the bespoke loader at the spec's root so
+                # _load_jhb_grid_annotations + source_files paths match.
+                orig_root = bur.JHB_REVIEW_ROOT
+                bur.JHB_REVIEW_ROOT = review_root
+                try:
+                    region = ps.regions[0] if ps.regions else "johannesburg"
+                    for grid_id in ps.grids:
+                        rkey = (region, grid_id, imagery_layer)
+                        if rkey in seen_record_keys:
+                            continue
+                        tiles = bur._tiles_for(grid_id, region=region,
+                                               imagery_layer=imagery_layer)
+                        if not tiles:
+                            print(f"[SKIP] JHB {grid_id}: no tiles")
+                            continue
+                        with rasterio.open(tiles[0]) as src:
+                            tile_crs = src.crs
+                        annots = bur._load_jhb_grid_annotations(grid_id, tile_crs)
+                        if len(annots) == 0:
+                            print(f"[SKIP] JHB {grid_id}: no annotations after combine")
+                            continue
+                        seen_record_keys.add(rkey)
+                        review_dir = review_root / grid_id / "review"
+                        split = ps.split or (
+                            "val" if grid_id in val_grids else "train"
+                        )
+                        records.append({
+                            "split": split,
+                            "region": region,
+                            "imagery_layer": imagery_layer,
+                            "grid_id": grid_id,
+                            "tiles": tiles,
+                            "tile_map": {t.stem: t for t in tiles},
+                            "tile_crs": str(tile_crs),
+                            "annots": annots,
+                            "tile_to_annots": bur._assign_intersections(annots, tiles),
+                            "source_files": {
+                                "reviewed_prediction": review_dir / f"{grid_id}_reviewed.gpkg",
+                                "sam_added_browser": review_dir / f"{grid_id}_sam_added.gpkg",
+                            },
+                        })
+                finally:
+                    bur.JHB_REVIEW_ROOT = orig_root
+            else:
+                raise ValueError(f"unknown source_kind {ps.source_kind!r}")
+
+    return records
+
+
+def _build_dataset_v2(spec, spec_path, output_dir, *, dry_run: bool = False) -> Path:
+    """v2 builder driven by spec.positives. Byte-equivalent selection."""
+    from scripts.training import build_unified_reviewall as bur
+
+    resolved_root = resolve_env_vars(spec.output.root)
+    build_date = datetime.now(timezone.utc)
+    if output_dir is None:
+        date_str = build_date.strftime("%Y%m%d")
+        dir_name = spec.output.name_template.format(
+            name=spec.name, date=date_str,
+        )
+        build_dir = Path(resolved_root) / dir_name
+    else:
+        build_dir = Path(output_dir)
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    exclude_layers = set(spec.exclude_imagery_layers)
+    print(f"[V2] exclude_imagery_layers: {sorted(exclude_layers)}")
+    records = _build_records_from_positives(
+        spec, exclude_imagery_layers=exclude_layers,
+    )
+
+    # Confirm exclude enforcement: 0 records on an excluded layer.
+    bad = [r for r in records if r["imagery_layer"] in exclude_layers]
+    assert not bad, (
+        f"exclude_imagery_layers leak: {[(r['region'], r['grid_id'], r['imagery_layer']) for r in bad]}"
+    )
+
+    n_ct = sum(1 for r in records if r["region"] == "cape_town")
+    n_jhb_train = sum(1 for r in records
+                      if r["region"] == "johannesburg" and r["split"] == "train")
+    n_jhb_val = sum(1 for r in records
+                    if r["region"] == "johannesburg" and r["split"] == "val")
+    print(f"[V2] CT grids={n_ct}  JHB train={n_jhb_train}  val={n_jhb_val}")
+
+    # ── untrusted <= N × trusted assertion (lifted to mask_supervision) ──
+    max_x = (spec.mask_supervision.untrusted_max_x_trusted
+             if spec.mask_supervision else 4.0)
+    train_recs = [r for r in records if r["split"] == "train"]
+    train_summary = bur._per_record_summary(train_recs)
+    train_trusted = sum(r["n_trusted"] for r in train_summary)
+    train_untrusted = sum(r["n_untrusted"] for r in train_summary)
+    ratio = train_untrusted / max(1, train_trusted)
+    print(f"[V2][ASSERT] train trusted={train_trusted} untrusted={train_untrusted} "
+          f"ratio={ratio:.2f} (cap={max_x})")
+    assert train_untrusted <= max_x * train_trusted, (
+        f"untrusted {train_untrusted} > {max_x} × trusted {train_trusted} "
+        f"(mask_supervision.untrusted_max_x_trusted)"
+    )
+
+    # ── Build manifest (byte-equivalent shape) ───────────────────────
+    selected_annotations = bur._selected_annotations_from_records(records)
+
+    seen: set[str] = set()
+    annotation_paths: list[Path] = []
+    for rec in records:
+        for src in rec.get("source_files", {}).values():
+            if src is None:
+                continue
+            key = str(Path(src).resolve())
+            if key not in seen:
+                seen.add(key)
+                annotation_paths.append(Path(src))
+    source_inventory = build_source_inventory(annotation_paths)
+
+    regions = sorted({rec["region"] for rec in records})
+    resolved_tile_roots = {
+        f"{rec['region']}/{rec['imagery_layer']}": str(rec["tiles"][0].parent)
+        for rec in records
+    }
+
+    hn_config_list = []
+    for hn in spec.hard_negatives:
+        hn_config_list.append({
+            "type": hn.type,
+            "region": hn.region,
+            "grids": hn.grids,
+            "archetypes": hn.archetypes,
+            "min_confidence": hn.min_confidence,
+            "max_ratio": hn.max_ratio,
+        })
+
+    resolved_spec = _resolve_value(spec_to_dict(spec))
+
+    if not dry_run:
+        _scan_and_write_v2_coco(spec, records, build_dir)
+        _maybe_add_negative_pool_hn(spec, build_dir)
+
+    write_build_manifest(
+        build_dir,
+        build_id=generate_build_id(
+            spec.name,
+            json.dumps({
+                "resolved_spec": resolved_spec,
+                "source_sha256": sorted(
+                    (e["path"], e["sha256"]) for e in source_inventory
+                ),
+                "selected_annotations": selected_annotations,
+            }, sort_keys=True),
+            build_date,
+        ),
+        spec_path=str(spec_path),
+        resolved_spec=resolved_spec,
+        resolved_spec_hash=compute_string_sha256(
+            json.dumps(resolved_spec, sort_keys=True)
+        ),
+        regions=regions,
+        evaluation_regime=spec.evaluation_regime,
+        exclude_grids=spec.selection.exclude_grids,
+        excluded_grids_reason=(
+            "cape_town_independent_26 benchmark holdout + spec exclude_grids"
+        ),
+        source_inventory=source_inventory,
+        split_strategy=spec.split.strategy,
+        split_seed=spec.split.seed,
+        easy_neg_ratio=spec.negatives.easy_neg_ratio,
+        hard_negatives_config=hn_config_list,
+        selected_annotations=selected_annotations,
+        resolved_tile_roots=resolved_tile_roots,
+        resolved_output_root=str(build_dir),
+        entrypoint="pipeline.dataset_builder(v2)",
+    )
+    print(f"[V2][BUILD_MANIFEST] {build_dir / 'build_manifest.json'} "
+          f"({len(source_inventory)} sources, "
+          f"{len(selected_annotations)} selected_annotations)")
+    return build_dir
+
+
+def _scan_and_write_v2_coco(spec, records, build_dir: Path) -> None:
+    """Scan chips + write COCO for the v2 records (mirrors the bespoke
+    chip-scan loop; writes mask_trusted per instance via scan_chips_from_tile).
+    """
+    from export_coco_dataset import (
+        scan_chips_from_tile, balance_chips, write_selected_chips,
+        build_coco_json,
+    )
+    for split_name in ("train", "val"):
+        all_images, all_annots, all_prov = [], [], []
+        img_id, ann_id = 1, 1
+        for rec in records:
+            if rec["split"] != split_name:
+                continue
+            for stem, annot_indices in rec["tile_to_annots"].items():
+                tile_path = rec["tile_map"][stem]
+                imgs, anns, prov = scan_chips_from_tile(
+                    tile_path=tile_path,
+                    annotations=rec["annots"],
+                    annot_indices=annot_indices,
+                    chip_size=spec.chip.size,
+                    overlap=spec.chip.overlap,
+                    split_name=split_name,
+                    image_id_start=img_id,
+                    annot_id_start=ann_id,
+                )
+                for img in imgs:
+                    img["region"] = rec["region"]
+                    img["grid_id"] = rec["grid_id"]
+                    img["imagery_layer"] = rec["imagery_layer"]
+                img_id += len(imgs)
+                ann_id += len(anns)
+                all_images.extend(imgs)
+                all_annots.extend(anns)
+                all_prov.extend(prov)
+
+        if split_name == "train" and spec.negatives.easy_neg_ratio >= 0:
+            all_images, all_annots, all_prov = balance_chips(
+                all_images, all_annots, all_prov,
+                seed=spec.split.seed, neg_ratio=spec.negatives.easy_neg_ratio,
+            )
+
+        write_selected_chips(all_images, build_dir, spec.chip.size)
+        coco = build_coco_json(all_images, all_annots, split=split_name,
+                               category_name="solar_panel")
+        (build_dir / f"{split_name}.json").write_text(json.dumps(coco) + "\n")
+        print(f"[V2][COCO] wrote {build_dir / f'{split_name}.json'} "
+              f"({len(all_images)} chips, {len(all_annots)} instances)")
+
+
+def _maybe_add_negative_pool_hn(spec, build_dir: Path) -> None:
+    """Extract + merge negative_pool HN chips if declared in the spec."""
+    np_specs = [hn for hn in spec.hard_negatives if hn.type == "negative_pool"]
+    if not np_specs:
+        return
+    from pipeline.hn_ops import extract_negative_pool_hn, merge_hn_into_coco
+    base_train = build_dir / "train.json"
+    if not base_train.exists():
+        print("[V2][HN] no train.json yet; skipping negative_pool HN")
+        return
+    with open(base_train) as f:
+        n_base_train = len(json.load(f)["images"])
+    hn_results = []
+    for i, hn in enumerate(np_specs):
+        result = extract_negative_pool_hn(
+            archetypes=hn.archetypes,
+            output_dir=build_dir,
+            chip_size=spec.chip.size,
+            min_confidence=hn.min_confidence,
+            regions=spec.regions,
+        )
+        # cap to max_ratio
+        if hn.max_ratio and result.n_chips and n_base_train:
+            max_allowed = int(hn.max_ratio / (1 - hn.max_ratio) * n_base_train)
+            if result.n_chips > max_allowed:
+                print(f"[V2][HN {i}] capping {result.n_chips} → {max_allowed}")
+                result.images = result.images[:max_allowed]
+                result.provenance = result.provenance[:max_allowed]
+                result.n_chips = max_allowed
+        hn_results.append(result)
+        print(f"[V2][HN {i}] negative_pool: {result.n_chips} chips")
+    if any(r.n_chips > 0 for r in hn_results):
+        # merge_hn_into_coco reads base from a dir; build_dir already holds the
+        # base train/val + chips, so merge in place.
+        merge_hn_into_coco(base_dir=build_dir, hn_results=hn_results,
+                           output_dir=build_dir)
+
+
+# ════════════════════════════════════════════════════════════════════════
 # CLI
 # ════════════════════════════════════════════════════════════════════════
 def main():
@@ -369,12 +728,17 @@ def main():
         "--no-check-files", action="store_true",
         help="Skip file existence checks during validation",
     )
+    parser.add_argument(
+        "--dry-run", action="store_true",
+        help="v2 path only: compute selection + manifest, no chip writes.",
+    )
     args = parser.parse_args()
 
     build_dataset(
         spec_path=args.spec,
         output_dir=args.output_dir,
         check_files=not args.no_check_files,
+        dry_run=args.dry_run,
     )
 
 

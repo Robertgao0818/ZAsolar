@@ -97,11 +97,33 @@ def validate_training_sets(
 
     valid_source_families = {
         "human_manual", "human_manual_sam_assisted",
-        "reviewed_prediction", "sam_refined_review",
+        "human_manual_qgis_geosam",
+        "reviewed_prediction", "gemini_reviewed_prediction",
+        "sam_refined_review", "sam_added_browser", "sam_added_true_fn",
         "legacy_weak_supervision",
     }
 
+    # Known top-level keys for a training_sets entry (unknown-key pass).
+    known_entry_keys = {
+        "id", "description", "region_scope", "source_family",
+        "annotation_source_policy", "tier_policy", "audit_policy",
+        "easy_negative_ratio", "hn_policy", "hn_ratio_target",
+        "hn_ratio_actual", "hn_actual_composition", "output_dir",
+        "val_strategy", "init_weights", "epoch_budget", "builder_script",
+        "untrusted_trusted_ratio", "notes",
+        # v2 (training-pool normalization, 2026-05-29)
+        "spec_schema_version", "selected_annotations",
+    }
+
     for ts_id, ts_data in training_sets.items():
+        # Unknown-key pass
+        unknown = set(ts_data.keys()) - known_entry_keys
+        if unknown:
+            messages.append(
+                f"training_set '{ts_id}': unknown keys {sorted(unknown)} "
+                f"(allowed: {sorted(known_entry_keys)})"
+            )
+
         # Validate source_family values
         source_family = ts_data.get("source_family", []) or []
         for sf in source_family:

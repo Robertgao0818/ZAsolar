@@ -35,6 +35,14 @@ from scripts.training.export_v4_hn import (
     extract_hn_chips,
     EXCLUDE_CORRECTIONS,
 )
+from core import region_registry
+from core.grid_utils import get_results_root
+from pipeline.manifests import (
+    write_build_manifest,
+    generate_build_id,
+    build_source_inventory,
+    compute_string_sha256,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -132,6 +140,140 @@ def merge_with_base(
         print(f"  WARNING: HN ratio {hn_pct:.1f}% is below 10%, may not suppress FP effectively")
 
 
+def _src_rel(path: Path) -> str:
+    """Repo-relative path string when possible, else absolute."""
+    path = Path(path).resolve()
+    try:
+        return str(path.relative_to(PROJECT_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _emit_build_manifest(
+    args: argparse.Namespace,
+    batch003_grids: list[str],
+    b3_prov: list[dict],
+    b4_prov: list[dict],
+) -> None:
+    """Write build_manifest.json for the V4.1 combined HN export.
+
+    Additive provenance only — wrapped by the caller in try/except so a
+    failure here never breaks the build. HN chips are negatives (no GT
+    polygons); ``selected_annotations`` records the selected HN *chips*
+    (the supervision items this builder emits), keyed by source tile/type.
+    """
+    out_dir = Path(args.output_dir)
+
+    # ── Source inventory ────────────────────────────────────────────────
+    # batch003: reviewed FP gpkgs (one per grid, region-resolved).
+    annotation_paths: list[Path] = []
+    for gid in batch003_grids:
+        rkey = region_registry.lookup_region(gid)
+        results_root = get_results_root(region=rkey)
+        reviewed_path = results_root / gid / "review" / f"{gid}_reviewed.gpkg"
+        annotation_paths.append(reviewed_path)
+    # batch004: curated small-FP shortlist CSV.
+    source_inventory = build_source_inventory(
+        annotation_paths,
+        hn_shortlist_csvs=[Path(args.batch004_shortlist)],
+    )
+
+    # ── Selected supervision = the HN chips this builder emits ──────────
+    selected_annotations: list[dict] = []
+    for p in b3_prov:
+        selected_annotations.append({
+            "region": "cape_town",
+            "imagery_layer": "aerial_2025",
+            "label_source": "reviewed_prediction_fp_negative",
+            "split": p.get("split", "train"),
+            "source_file": "batch003_reviewed_fp",
+            "source_id": p.get("image_id"),
+            "source_tile": p.get("source_tile"),
+            "source_type": p.get("source_type"),
+        })
+    for p in b4_prov:
+        selected_annotations.append({
+            "region": "cape_town",
+            "imagery_layer": "aerial_2025",
+            "label_source": "small_fp_hn_negative",
+            "split": p.get("split", "train"),
+            "source_file": _src_rel(Path(args.batch004_shortlist)),
+            "source_id": p.get("image_id"),
+            "source_tile": p.get("source_tile"),
+            "source_type": p.get("source_type"),
+        })
+
+    resolved_spec = {
+        "training_set_id": "v4_1_hn",
+        "regions": ["cape_town"],
+        "imagery_layer": "aerial_2025",
+        "base_coco": _src_rel(Path(args.base_coco)),
+        "batch003_grids": sorted(batch003_grids),
+        "batch004_shortlist": _src_rel(Path(args.batch004_shortlist)),
+        "batch004_sample_rate": args.batch004_sample_rate,
+        "batch003_id_start": BATCH003_ID_START,
+        "batch004_id_start": BATCH004_ID_START,
+        "chip_size": args.chip_size,
+        "seed": args.seed,
+    }
+
+    # Fingerprint: effective config + source sha256s; changes iff the HN
+    # dataset contents would change. Excludes timestamps.
+    fingerprint = {
+        "resolved_spec": resolved_spec,
+        "source_sha256": sorted(
+            (e["path"], e["sha256"]) for e in source_inventory
+        ),
+    }
+    build_fingerprint_json = json.dumps(fingerprint, sort_keys=True)
+    resolved_spec_hash = compute_string_sha256(
+        json.dumps(resolved_spec, sort_keys=True)
+    )
+    build_id = generate_build_id("v4_1_hn", build_fingerprint_json)
+
+    write_build_manifest(
+        out_dir,
+        build_id=build_id,
+        spec_path="bespoke:scripts/training/export_v4_1_hn.py",
+        resolved_spec=resolved_spec,
+        resolved_spec_hash=resolved_spec_hash,
+        regions=["cape_town"],
+        evaluation_regime="installation",
+        # This is an HN export merged onto a base COCO; it defines no
+        # benchmark holdout of its own.
+        exclude_grids=[],
+        excluded_grids_reason="n/a (HN export; holdout owned by base COCO build)",
+        source_inventory=source_inventory,
+        split_strategy="hn_merge_into_base_train",
+        split_seed=args.seed,
+        # HN export has no easy-negative sampling of its own.
+        easy_neg_ratio=0.0,
+        hard_negatives_config=[
+            {
+                "source": "batch003_reviewed_fp",
+                "id_start": BATCH003_ID_START,
+                "n_chips": len(b3_prov),
+            },
+            {
+                "source": "batch004_small_fp_shortlist",
+                "id_start": BATCH004_ID_START,
+                "n_chips": len(b4_prov),
+                "sample_rate": args.batch004_sample_rate,
+            },
+        ],
+        selected_annotations=selected_annotations,
+        resolved_tile_roots={
+            "tiles_root": str(args.tiles_root) if args.tiles_root else "default(resolve_tiles_dir)",
+        },
+        resolved_output_root=str(out_dir),
+        entrypoint="scripts/training/export_v4_1_hn.py",
+    )
+    print(f"[BUILD_MANIFEST] {out_dir / 'build_manifest.json'} "
+          f"(build_id={build_id}, "
+          f"{len(source_inventory)} sources, "
+          f"{len(selected_annotations)} selected_annotations)")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Export V4.1 combined HN: batch 003 reviewed FPs + batch 004 curated shortlist"
@@ -152,7 +294,8 @@ def main():
 
     # ── Batch 003 HN ─────────────────────────────────────────────────
     print("[1/4] Loading batch 003 reviewed FP predictions...")
-    fp_by_grid = load_fp_locations(DEFAULT_BATCH_003_GRIDS)
+    batch003_grids = DEFAULT_BATCH_003_GRIDS
+    fp_by_grid = load_fp_locations(batch003_grids)
     total_b3_fp = sum(len(gdf) for gdf in fp_by_grid.values())
     print(f"  Found {total_b3_fp} FPs across {len(fp_by_grid)} grids")
 
@@ -214,6 +357,12 @@ def main():
         args.output_dir,
     )
     print(f"\nOutput: {args.output_dir}")
+
+    # ── Build provenance manifest (additive; never breaks the build) ─────
+    try:
+        _emit_build_manifest(args, batch003_grids, b3_prov, b4_prov)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[WARN] build_manifest write failed (non-fatal): {exc}")
 
 
 if __name__ == "__main__":

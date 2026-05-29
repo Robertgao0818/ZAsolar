@@ -349,4 +349,54 @@ training_sets:
         gap < 2pp → choose G (cleaner experimental semantics, no V3-C halo legacy).
         A leads ≥2pp → keep A (V3-C prior is worth preserving).
         G leads ≥2pp → next round starts from G.
+
+  unified_reviewall_v2:
+    id: "unified_reviewall_v2"
+    description: >
+      Declarative-spec rebuild of unified_reviewall, normalized for the
+      training-pool effort (Phase 4, 2026-05-29). Same dataset as
+      unified_reviewall_20260511 but built via the v2 dataset spec
+      (configs/pipelines/datasets/unified_reviewall_v2.yaml + pipeline.
+      dataset_builder), and with ALL aerial_2023 positives archived
+      (exclude_imagery_layers: [aerial_2023]). Auto-backfilled from the v2
+      build_manifest.json. BYTE-EQUIVALENT to the bespoke builder on
+      selected_annotations (9,738 rows, 0 diff).
+    region_scope: [cape_town, johannesburg]
+    source_family:
+      - human_manual_sam_assisted    # CT trusted slice
+      - reviewed_prediction          # CT + JHB V3C-reviewed accepted (untrusted)
+      - sam_added_true_fn            # CT batch FN catches (untrusted)
+      - sam_added_browser            # JHB interactive browser SAM (trusted)
+    annotation_source_policy: >
+      Identical selection to unified_reviewall_20260511 (CT discover −
+      cape_town_independent_26 − legacy_ct; JHB Vexcel review reviewed+sam_added
+      over 25 grids), expressed declaratively via spec.positives (two
+      pool_manifest CT sources + two results_review_dir JHB sources) with
+      exclude_imagery_layers=[aerial_2023]. Verified byte-equivalent.
+    tier_policy: "All tiers (T1+T2)."
+    audit_policy: null
+    easy_negative_ratio: 0.15
+    hn_policy: >
+      negative_pool HN declared in the spec (archetypes:
+      solar_thermal_water_heater / skylight_roof_window /
+      hvac_rooftop_equipment, min_confidence A2, max_ratio 0.04). Yields 0
+      chips today (pool manifest has no bbox geometry yet); mechanism in place
+      for when geometry is backfilled.
+    output_dir: "${SOLAR_ARTIFACT_ROOT:-/home/gaosh/zasolar_data}/coco/coco_unified_reviewall_v2_<date>"
+    val_strategy: >
+      Whole-grid JHB holdout (val_grids: G0772, G0816, G0817, G0888, G0925).
+      CT all-train. Same as unified_reviewall_20260511.
+    init_weights: v3c   # model_registry id → checkpoints/exp003_C_targeted_hn/best_model.pth
+    builder_script: "pipeline.dataset_builder (spec: configs/pipelines/datasets/unified_reviewall_v2.yaml)"
+    spec_schema_version: 2
+    selected_annotations: 9738    # auto-backfilled from build_manifest.json
+    untrusted_trusted_ratio:
+      bound: "untrusted <= 4 × trusted (mask_supervision.untrusted_max_x_trusted)"
+      combined_train: { trusted: 3383, untrusted: 5691, ratio: 1.68 }
+    notes: >
+      Supersedes unified_reviewall_20260511's bespoke builder
+      (scripts/training/build_unified_reviewall.py, header-deprecated). Per
+      polygon: CT aerial_2025 5,903 + JHB vexcel_2024 3,835 = 9,738; 0
+      aerial_2023. mask_supervision: per_instance_mask_trusted=true,
+      untrusted_max_x_trusted=4.0, freeze_mask_head=false.
         A retreats on cape_town_independent_26 (< 0.78) → A fail, G default.

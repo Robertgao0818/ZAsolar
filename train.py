@@ -25,6 +25,12 @@ import torch.utils.data
 
 from core.models import build_solar_maskrcnn
 from core.profiling import StageProfiler
+from core.boundary_trust import boundary_w_map, mask_trusted_map
+from scripts.training.run_ledger import (
+    seed_everything,
+    make_dataloader_seeding,
+    record_run,
+)
 
 assert torch.cuda.is_available(), (
     "CUDA is required for training. WSL2 does not currently expose CUDA to PyTorch. "
@@ -47,32 +53,12 @@ assert torch.cuda.is_available(), (
 # Annotator-initiated annotations (pure human, SAM-as-drawing-tool, SAM-added
 # true-FN catches that V3-C missed) keep full weight on boundary supervision —
 # they break the cycle by injecting fresh edge information.
-_LABEL_SOURCE_TO_BOUNDARY_W = {
-    # H (annotator-initiated, per-instance interactive): full boundary weight
-    "human_manual": 1.0,
-    "human_manual_sam_assisted": 1.0,
-    "human_manual_qgis_geosam": 1.0,
-    "sam_added_browser": 1.0,           # browser SAM point-prompt, interactive (post-2026-04-13)
-    # R / S / batch-SAM / legacy: zero on edge (mask_trusted=False sources)
-    "sam_refined_review": 0.0,
-    "reviewed_prediction": 0.0,
-    "sam_added_true_fn": 0.0,           # Batch 003/004 non-interactive SAM cut
-    "legacy_weak_supervision": 0.0,
-}
-
-# Per-instance mask supervision gate (mirror of export_coco_dataset._MASK_TRUSTED).
-# True  → instance contributes full mask BCE.
-# False → mask BCE skipped entirely (box + cls still apply).
-_LABEL_SOURCE_TO_MASK_TRUSTED = {
-    "human_manual": True,
-    "human_manual_sam_assisted": True,
-    "human_manual_qgis_geosam": True,
-    "sam_added_browser": True,
-    "reviewed_prediction": False,
-    "sam_refined_review": False,
-    "sam_added_true_fn": False,
-    "legacy_weak_supervision": False,
-}
+# Single source of truth: data/training_pool/boundary_trust_rules.yaml
+# (was a hardcoded dict here, duplicated in export_coco_dataset.py; unified via
+# core.boundary_trust). boundary_w = per-pixel BCE weight inside the polygon
+# edge band (1.0 full / 0.0 ignore); mask_trusted = per-instance mask BCE gate.
+_LABEL_SOURCE_TO_BOUNDARY_W = boundary_w_map()
+_LABEL_SOURCE_TO_MASK_TRUSTED = mask_trusted_map()
 
 
 def _boundary_pixel_weights(mask_np, label_source, band_iters=2):
@@ -842,9 +828,11 @@ def main():
         "--per-source-mask-weight", action="store_true",
         help="Down-weight mask boundary BCE by COCO ann label_source. "
              "Annotator-initiated (human_manual / human_manual_sam_assisted / "
-             "sam_added_true_fn) keep weight=1.0; V3-C-derived "
-             "(reviewed_prediction / sam_refined_review / "
-             "legacy_weak_supervision) drop to 0 on the polygon edge band. "
+             "human_manual_qgis_geosam / sam_added_browser) keep weight=1.0; "
+             "model- or batch-derived "
+             "(reviewed_prediction / gemini_reviewed_prediction / "
+             "sam_refined_review / sam_added_true_fn / legacy_weak_supervision) "
+             "drop to 0 on the polygon edge band. "
              "Foreground/background core stays weight=1.0 for all sources, so "
              "pred-vs-bg classification is preserved. Reads label_source from "
              "each annotation in the COCO json. Implements docs/plans/"
@@ -862,8 +850,9 @@ def main():
         "--per-instance-mask-trusted", action="store_true",
         help="Per-instance mask-loss gate. Reads ann['mask_trusted'] from COCO "
              "(falls back to label_source mapping). Untrusted instances (R-type "
-             "reviewed_prediction, sam_refined_review, sam_added_true_fn, "
-             "legacy_weak_supervision) contribute box + cls loss but zero mask "
+             "reviewed_prediction, gemini_reviewed_prediction, "
+             "sam_refined_review, sam_added_true_fn, legacy_weak_supervision) "
+             "contribute box + cls loss but zero mask "
              "BCE. Trusted instances (human_manual / *_sam_assisted / "
              "sam_added_browser / qgis_geosam) contribute full mask loss. "
              "Implements unified_reviewall plan (docs/plans/"
@@ -936,7 +925,30 @@ def main():
              "by an external selector that reads training_history + grid-level "
              "eval results.",
     )
+    parser.add_argument(
+        "--seed", type=int, default=42,
+        help="Master RNG seed. Seeds python random / numpy / torch / cuda and "
+             "the train DataLoader shuffle generator + per-worker RNG. "
+             "Recorded in the run manifest for reproducibility.",
+    )
+    parser.add_argument(
+        "--deterministic", action="store_true",
+        help="In addition to --seed, force cuDNN deterministic mode "
+             "(deterministic=True, benchmark=False) and request deterministic "
+             "algorithms (guarded; some ops have no deterministic kernel). "
+             "Slower but fully reproducible.",
+    )
+    parser.add_argument(
+        "--register-as", default=None,
+        help="If set, write the dataset build_id into "
+             "configs/model_registry.yaml under this model key as "
+             "training_set_id (opt-in; the registry is NOT mutated otherwise).",
+    )
     args = parser.parse_args()
+
+    # ── Seed all RNGs (before any dataset/model construction) ─────────────
+    seed_everything(args.seed, deterministic=args.deterministic)
+    print(f"[SEED] seed={args.seed} deterministic={args.deterministic}")
 
     device = torch.device("cuda:0")
     coco_dir = Path(args.coco_dir)
@@ -1024,7 +1036,13 @@ def main():
     )
     if args.num_workers > 0:
         loader_kwargs["prefetch_factor"] = args.prefetch_factor
-    train_loader = torch.utils.data.DataLoader(train_ds, shuffle=True, **loader_kwargs)
+    # Seeded shuffle order + per-worker RNG for reproducible run-to-run training.
+    train_generator, worker_init_fn = make_dataloader_seeding(args.seed)
+    train_loader = torch.utils.data.DataLoader(
+        train_ds, shuffle=True,
+        generator=train_generator, worker_init_fn=worker_init_fn,
+        **loader_kwargs,
+    )
     val_loader = torch.utils.data.DataLoader(val_ds, shuffle=False, **loader_kwargs)
 
     # ── Model ─────────────────────────────────────────────────────────
@@ -1514,6 +1532,57 @@ def main():
         "log_per_source_box_reg_loss": args.log_per_source_box_reg_loss,
     }
     history_path.write_text(json.dumps(history_payload, indent=2) + "\n")
+
+    # ── Run ledger (pure provenance; must NEVER crash a finished run) ─────
+    # extend_training_history folds a `run_manifest` block into the file just
+    # written above, preserving the legacy history/best_ap50/best_f1 keys.
+    try:
+        run_manifest = record_run(
+            output_dir=output_dir,
+            coco_dir=coco_dir,
+            init_weights=pretrained_path,
+            seed=args.seed,
+            hyperparams={
+                "lr1": args.lr1,
+                "lr2": args.lr2,
+                "epochs1": args.epochs1,
+                "epochs2": args.epochs2,
+                "batch_size": args.batch_size,
+                "chip_size": args.chip_size,
+                "num_workers": args.num_workers,
+                "no_amp": args.no_amp,
+                "boundary_band_iters": args.boundary_band_iters,
+                "reinit_mask_head": args.reinit_mask_head,
+                "reinit_box_predictor": args.reinit_box_predictor,
+                "diff_lr_backbone_mult": args.diff_lr_backbone_mult,
+                "diff_lr_rpn_box_mult": args.diff_lr_rpn_box_mult,
+                "diff_lr_mask_mult": args.diff_lr_mask_mult,
+                "eval_schedule": args.eval_schedule,
+                "early_stop_metrics": args.early_stop_metrics,
+                "early_stop_min_delta": args.early_stop_min_delta,
+                "early_stop_patience": args.early_stop_patience,
+                "best_ckpt_bulk_range": args.best_ckpt_bulk_range,
+            },
+            boundary_aware={
+                "per_instance_mask_trusted": args.per_instance_mask_trusted,
+                "per_source_mask_weight": args.per_source_mask_weight,
+                "freeze_mask_head": args.freeze_mask_head,
+            },
+            spec_path=args.jhb_phaseA_spec,
+            metrics={
+                "best_f1": best_f1,
+                "best_ap50": best_ap50,
+                "num_eval_epochs": len(history),
+            },
+            output_checkpoints=[
+                str(best_path), str(best_ap50_path), str(final_path),
+            ],
+            register_as=args.register_as,
+        )
+        print(f"[LEDGER] run_id={run_manifest['run_id']} "
+              f"(dataset build_id={run_manifest['dataset']['build_id']})")
+    except Exception as exc:  # ledger failure must not fail a finished run
+        print(f"[LEDGER][WARN] run-ledger recording failed (non-fatal): {exc}")
 
     print("\n" + "=" * 60)
     print("Training complete!")
