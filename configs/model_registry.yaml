@@ -3,6 +3,7 @@
 #
 # 字段说明:
 #   tag:                        短标签，用于 CLI 和报告显示
+#   status:                     生命周期 (可选, active|archived|deprecated|superseded; 缺省=active)
 #   checkpoint:                 相对于 repo root 的权重路径
 #   description:                训练配置简述
 #   coco_ap50:                  训练时的验证集 COCO AP@IoU=0.5 (可选)
@@ -58,6 +59,7 @@ models:
 
   v4_2:
     tag: "V4.2-JHB-FT"
+    status: archived    # 2026-05-29: trained on aerial_2023 (vintage/GSD mismatch vs vexcel_2024 base). Kept for reproducibility / benchmark history, not for production reuse.
     checkpoint: "checkpoints/exp006_v4_2_jhb_ft/best_model.pth"
     description: "V4.2 JHB-leaning fine-tune (25 CT anchor + 25 JHB CBD aerial_2023 + 25 JHB Sandton aerial_2023; init from V4)"
     coco_ap50: 0.8371

@@ -33,6 +33,8 @@ ALLOWED_LABEL_SOURCE = {
 }
 ALLOWED_SEMANTIC_CONFIDENCE = {"A1", "A2", "A3", ""}
 ALLOWED_QUALITY_TIER = {"T1", "T2", ""}
+# Lifecycle status for training_sets / model_registry entries. Absent == active.
+ALLOWED_STATUS = {"active", "archived", "deprecated", "superseded"}
 
 
 def load_yaml(path: Path) -> dict:
@@ -113,6 +115,7 @@ def validate_training_sets(
         "untrusted_trusted_ratio", "notes",
         # v2 (training-pool normalization, 2026-05-29)
         "spec_schema_version", "selected_annotations",
+        "status",  # lifecycle marker (active|archived|...); absent == active
     }
 
     for ts_id, ts_data in training_sets.items():
@@ -122,6 +125,14 @@ def validate_training_sets(
             messages.append(
                 f"training_set '{ts_id}': unknown keys {sorted(unknown)} "
                 f"(allowed: {sorted(known_entry_keys)})"
+            )
+
+        # Validate lifecycle status (if present)
+        status = ts_data.get("status")
+        if status is not None and status not in ALLOWED_STATUS:
+            messages.append(
+                f"training_set '{ts_id}': invalid status '{status}' "
+                f"(allowed: {sorted(ALLOWED_STATUS)})"
             )
 
         # Validate source_family values
@@ -150,6 +161,12 @@ def validate_model_registry(
     errors: list[str] = []
 
     for model_id, model_data in models.items():
+        status = model_data.get("status")
+        if status is not None and status not in ALLOWED_STATUS:
+            errors.append(
+                f"model '{model_id}': invalid status '{status}' "
+                f"(allowed: {sorted(ALLOWED_STATUS)})"
+            )
         ts_id = model_data.get("training_set_id")
         if ts_id and ts_id not in training_set_ids:
             errors.append(

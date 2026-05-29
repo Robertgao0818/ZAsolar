@@ -71,6 +71,7 @@ training_sets:
 
   v4_2_jhb_ft:
     id: "v4_2_jhb_ft"
+    status: archived    # 2026-05-29: positives are aerial_2023 (vintage/GSD mismatch vs the now-dominant vexcel_2024 base); superseded by unified_reviewall_v2. Kept for reproducibility, NOT for reuse in new pools.
     description: "V4.2 — JHB-leaning fine-tune; 50 JHB + 25 CT panel-stratified anchor"
     region_scope: [cape_town, johannesburg]
     source_family: [reviewed_prediction, sam_refined_review, human_manual_sam_assisted]
@@ -108,6 +109,7 @@ training_sets:
 
   v4_3_hn:
     id: "v4_3_hn"
+    status: archived    # 2026-05-29: positive pool identical to v4_2_jhb_ft (aerial_2023); the only training set whose HN chips include aerial_2023. Superseded by unified_reviewall_v2. Kept for reproducibility, NOT for reuse.
     description: "V4.3 — V4.2 + hard negatives to repair CBD precision collapse"
     region_scope: [cape_town, johannesburg]
     source_family: [reviewed_prediction, sam_refined_review, human_manual_sam_assisted]
