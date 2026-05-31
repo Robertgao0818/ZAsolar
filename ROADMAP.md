@@ -3,6 +3,7 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-05-31: feat(gemini): production-wire two-stage FP-review into the JHB inventory seam
 - 2026-05-31: docs(handoff): JHB two-stage FP-review production handoff
 - 2026-05-31: feat(gemini): two-stage skylight FP-review with fail-closed merge + soak instrumentation
 - 2026-05-31: feat(analysis): post-hoc merge/NMS spatial eval + polygon-conf sweep
@@ -10,7 +11,6 @@
 - 2026-05-31: chore(gitignore): exclude gemini calibration artifacts, agy/CLI state, local launchers
 - 2026-05-31: feat(gemini): FP-review calibration tooling + RA-comparison eval
 - 2026-05-31: feat(gemini): worker concurrency for FP-review + detection-review scorers
-- 2026-05-29: chore(registry): mark aerial_2023 training sets + V4.2 model archived
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
