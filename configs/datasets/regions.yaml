@@ -214,6 +214,23 @@ regions:
     default_imagery_layer: "aerial_2023"
 
     model_runs:
+      phase0_dinov3sat_m2f_perdet:
+        model_version: "solar_zerov2_phase0_m2f_dinov3sat_l_frozen"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/johannesburg/phase0_dinov3sat_m2f_perdet"
+        inference_date: "2026-05-16"
+        grid_count: 25
+        notes: |
+          solar_zerov2 Phase 0 PILOT eval bridge (registered 2026-05-29 to
+          score the DINOv3-SAT-L/16 frozen + Mask2Former architecture bet
+          against the locked JHB CBD 25 clean_gt baseline). Predictions are
+          RAW M2F masks, per-detection merge mode, conf_threshold 0.5,
+          chip 512 / overlap 0.25 — NO SAM refinement, NO polygon-conf
+          sweep. Source gpkgs symlinked from
+          /home/gaosh/projects/solar_zerov2/outputs/infer/phase_0_jhb25/<grid>/per_detection/.
+          Fair raw-vs-raw comparator is v3c_vexcel_2024 (V3-C raw per-det);
+          locked baseline-to-beat is V3-C+SAM (agg_F1 0.821 / σ_Bw 0.180 /
+          RMSE 1066). Architecture-alive gate only — not a production run.
       unified_reviewall_A_perdet_sam_maskbox_vexcel_2024_full382:
         model_version: "exp_unified_reviewall_A+sam2_maskbox"
         imagery_layer: "vexcel_2024"
@@ -356,6 +373,17 @@ regions:
           Stage2 ep5 (global 10). Best ckpt = Stage2 ep3, chip val_F1@85=0.4361
           / val_AP50=0.3846. Per handoff §5.3 with chip-level deltas < 2pp, G
           is selected on tie-breaker (cleaner experimental semantics).
+
+      zerov2_phase0_vexcel_2024:
+        model_version: "solar_zerov2_phase0_m2f_dinov3sat_l"
+        imagery_layer: "vexcel_2024"
+        results_path: "results/johannesburg/zerov2_phase0_vexcel_2024"
+        inference_date: "2026-05-16"
+        grid_count: 25
+        notes: |
+          solar_zerov2 Phase 0 pilot: DINOv3-SAT-L frozen + SimpleFPN adapter +
+          Mask2Former decoder, 30 epochs CT-only training, per-detection output.
+          Bet-validation run against V3-C baselines on JHB CBD 25 Vexcel 2024.
 
     grids:
       # Legacy 6-grid pilot (manual transfer test only)

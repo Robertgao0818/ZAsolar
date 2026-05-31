@@ -287,6 +287,7 @@ def matches_any_region_pattern(grid_id: str) -> bool:
 
 _REGION_ALIASES: dict[str, str] = {
     "jhb": "johannesburg",
+    "jnb": "johannesburg",
     "joburg": "johannesburg",
     "ct": "cape_town",
     "capetown": "cape_town",
