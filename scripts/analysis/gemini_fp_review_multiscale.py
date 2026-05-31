@@ -1,24 +1,19 @@
 #!/usr/bin/env python3
-"""Single-image FP-discrimination Gemini review (the "B" harness).
+"""Multi-scale FP-discrimination Gemini review (the "B-multiscale" harness).
 
-Unlike ``score_gemini_detection_review_chips.py`` (which reuses the temporal
-date x target *matrix* machinery and, mis-applied to single-image review, both
-abstains ~50-60% of the time and asks a generic "is PV present" question), this
-scorer is purpose-built for the FP-suppression objective:
+Single-crop review forces a resolution<->context tradeoff (calibrated 2026-05-31
+on JHB Vexcel conf>=0.95): a TIGHT 20 m crop makes the panel-module grid legible
+so TP recall jumps (0.851 -> 0.957) but loses the surrounding roof layout, so
+look-alikes that are only identifiable in context (solar water heater = collector
++ horizontal tank, pool mats, gridded skylights spanning a roof) leak through
+(FP-cut 0.915 -> 0.809). A WIDE 48 m crop is the mirror image.
 
-  - ONE chip -> ONE Gemini call, judging the single marked target.
-  - A TP-protective prompt: keep anything plausibly PV; only call ``not_pv``
-    when confidently a known look-alike (solar water heater, pool mat, skylight,
-    HVAC, tank, painted roof, shadow, vehicle).  This matches the production
-    goal (preserve TP recall, cut FP) rather than RA-behaviour agreement.
-  - A clean JSON contract (native ``response_schema``) + lenient fallback parse,
-    so parse failures are rare -> abstain rate collapses.
-  - Per-chip error isolation: a failed call records an error row and continues;
-    it never crashes the batch.
-
-Output JSONL is schema-compatible with ``eval_gemini_review_vs_ra.py`` and
-``build_gemini_review_training_pool.py`` (top-level ``pv_present`` /
-``confidence`` / ``quality_flag``).
+This scorer breaks the tradeoff by sending BOTH crops of the SAME target in one
+call: image 1 = tight zoom (judge module texture), image 2 = wide context (rule
+out look-alikes). Everything else mirrors ``gemini_fp_review.py`` (TP-protective
+prompt, native ``response_schema``, per-chip error isolation, threaded workers
+with optional global QPS cap) and the output JSONL stays schema-compatible with
+``eval_gemini_review_vs_ra.py``.
 """
 
 from __future__ import annotations
@@ -53,18 +48,22 @@ from scripts.validation.gemini_solar_image_review import (  # noqa: E402
     load_env_file,
 )
 
-FP_PROMPT = """You are auditing ONE rooftop object in a high-resolution aerial/satellite image chip to decide whether it is a real photovoltaic (PV) solar panel installation or a false-positive look-alike.
+MULTISCALE_PROMPT = """You are auditing ONE rooftop object to decide whether it is a real photovoltaic (PV) solar panel installation or a false-positive look-alike.
 
-The single target is marked with a colored polygon outline and a cross/ring at its center. Judge ONLY that marked object, not other roofs in the chip.
+You are given TWO images of the SAME object, both marking the SAME target with a colored polygon outline and a cross/ring at its center:
+- IMAGE 1 is a TIGHT zoom on the target. Use it to read fine texture: real PV is a grid of flat rectangular dark/blue modules with thin regular seams between cells.
+- IMAGE 2 is a WIDER view of the same target with surrounding roof context. Use it to spot look-alikes by their layout: a solar water heater / geyser is a flat collector PLUS a horizontal cylindrical tank; pool-heating mats sit beside a pool; skylights/glazing span a roof ridge in a repeating bay pattern; HVAC units, water tanks, vehicles sit in characteristic places.
+
+Judge ONLY the marked target (the SAME object in both images), not other roofs.
 
 Choose exactly one label:
-- "pv": the marked object is, or is plausibly, a photovoltaic solar panel or panel array (flat rectangular dark/blue modules, often in rows on a roof).
-- "not_pv": you are confident the marked object is NOT a PV panel. Common look-alikes: solar water heater / geyser collector (a flat collector plus a horizontal cylindrical tank), pool-heating mats, skylights / glass roofing, HVAC units, water tanks, painted or dark roof patches, shadows, vehicles.
+- "pv": the marked object is, or is plausibly, a photovoltaic solar panel or array.
+- "not_pv": you are confident it is NOT PV. Common look-alikes: solar water heater / geyser (collector + cylindrical tank), pool mats, skylights / glass roofing, HVAC, water tanks, painted/dark roof patches, shadows, vehicles.
 
 Decision rules (IMPORTANT):
 - Bias toward "pv" under uncertainty. We must NOT discard real installations, so only output "not_pv" when the object is clearly a non-PV look-alike.
-- A solar water heater (collector + cylindrical tank) is "not_pv", even though it is solar.
-- If the chip is too blurry/cropped to judge the marked object at all, still pick the more likely label but set confidence low.
+- Use BOTH images: confirm module texture in image 1 AND check the context in image 2. A solar water heater (collector + cylindrical tank) is "not_pv" even though it is solar — the tank in image 2 is the giveaway.
+- If both images are too blurry/cropped to judge, still pick the more likely label but set confidence low.
 
 Return ONLY a JSON object (no prose, no markdown fence):
 {"label": "pv" | "not_pv", "confidence": 0.0-1.0, "lookalike_type": "water_heater|pool|skylight|hvac|tank|roof|shadow|vehicle|none", "reason": "<one short clause>"}
@@ -83,39 +82,57 @@ RESPONSE_SCHEMA: dict[str, Any] = {
 
 
 @dataclass(frozen=True)
-class Chip:
+class Pair:
     candidate_id: str
     chip_id: str
     grid_id: str
     pred_id: int
     region_key: str
     predictions_path: str
-    image_path: Path
+    tight_image: Path
+    wide_image: Path
     raw_image_path: str
 
 
-def load_chips(path: Path) -> list[Chip]:
-    out: list[Chip] = []
+def _index(path: Path) -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
     with path.open(newline="", encoding="utf-8") as fh:
         for row in csv.DictReader(fh):
-            img = Path(str(row.get("image_path", "")).strip())
             cid = str(row.get("candidate_id") or row.get("target_id") or "").strip()
-            if not cid or not img:
-                continue
-            out.append(
-                Chip(
-                    candidate_id=cid,
-                    chip_id=str(row.get("chip_id", "")).strip(),
-                    grid_id=str(row.get("grid_id", "")).strip().upper(),
-                    pred_id=int(float(row.get("pred_id") or 0)),
-                    region_key=str(row.get("region_key") or row.get("region") or "").strip(),
-                    predictions_path=str(row.get("predictions_path", "")).strip(),
-                    image_path=img,
-                    raw_image_path=str(row.get("raw_image_path", "")).strip(),
-                )
-            )
-    # one target per chip is expected; if a chip_id repeats keep them all (each judged on its own marker)
+            if cid:
+                out[cid] = row
     return out
+
+
+def load_pairs(tight_csv: Path, wide_csv: Path) -> list[Pair]:
+    tight = _index(tight_csv)
+    wide = _index(wide_csv)
+    common = [c for c in tight if c in wide]
+    missing = sorted(set(tight) ^ set(wide))
+    if missing:
+        print(f"[WARN] {len(missing)} candidate(s) not in both crops; using {len(common)} paired.")
+    pairs: list[Pair] = []
+    for cid in common:
+        t = tight[cid]
+        w = wide[cid]
+        ti = Path(str(t.get("image_path", "")).strip())
+        wi = Path(str(w.get("image_path", "")).strip())
+        if not ti or not wi:
+            continue
+        pairs.append(
+            Pair(
+                candidate_id=cid,
+                chip_id=str(t.get("chip_id", "")).strip(),
+                grid_id=str(t.get("grid_id", "")).strip().upper(),
+                pred_id=int(float(t.get("pred_id") or 0)),
+                region_key=str(t.get("region_key") or t.get("region") or "").strip(),
+                predictions_path=str(t.get("predictions_path", "")).strip(),
+                tight_image=ti,
+                wide_image=wi,
+                raw_image_path=str(t.get("raw_image_path", "")).strip(),
+            )
+        )
+    return pairs
 
 
 def load_config(args: argparse.Namespace) -> GeminiClientConfig:
@@ -146,14 +163,14 @@ def load_config(args: argparse.Namespace) -> GeminiClientConfig:
     )
 
 
-def _routing_salt(mode: str, config: GeminiClientConfig, chip: Chip) -> str | None:
+def _routing_salt(mode: str, config: GeminiClientConfig, pair: Pair) -> str | None:
     if config.api_format != "native":
         return None
     if mode == "none":
         return None
     if mode == "auto" and "pro" not in config.model.lower():
         return None
-    return f"{config.model}:{chip.candidate_id}:{chip.grid_id}:{chip.pred_id}"
+    return f"{config.model}:{pair.candidate_id}:{pair.grid_id}:{pair.pred_id}"
 
 
 def _sleep_before_retry(attempt: int, retries: int, base_delay: float, max_delay: float) -> None:
@@ -164,8 +181,8 @@ def _sleep_before_retry(attempt: int, retries: int, base_delay: float, max_delay
         time.sleep(delay * (0.75 + random.random() * 0.5))
 
 
-def judge_chip(
-    chip: Chip,
+def judge_pair(
+    pair: Pair,
     *,
     prompt: str,
     config: GeminiClientConfig,
@@ -176,16 +193,18 @@ def judge_chip(
     retry_max_delay: float,
 ) -> dict[str, Any]:
     last_err = ""
+    last_exc_type = ""
+    t0 = time.perf_counter()
     for attempt in range(retries + 1):
         try:
             text, _raw = _call_gemini(
-                image_paths=[chip.image_path],
+                image_paths=[pair.tight_image, pair.wide_image],
                 prompt=prompt,
                 config=config,
                 max_tokens=max_tokens,
                 response_mime_type="application/json" if config.api_format == "native" else None,
                 response_schema=RESPONSE_SCHEMA if config.api_format == "native" else None,
-                routing_salt=_routing_salt(routing_salt_mode, config, chip),
+                routing_salt=_routing_salt(routing_salt_mode, config, pair),
             )
             parsed = extract_json_object(text)
             if not isinstance(parsed, dict):
@@ -208,9 +227,13 @@ def judge_chip(
                 "lookalike_type": str(parsed.get("lookalike_type", "")).strip(),
                 "reason": str(parsed.get("reason", "")).strip(),
                 "gemini_error": "",
+                "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+                "retry_count": attempt,
+                "error_type": "",
             }
         except Exception as exc:  # network / parse / transport
             last_err = f"{type(exc).__name__}: {exc}"
+            last_exc_type = type(exc).__name__
             _sleep_before_retry(attempt, retries, retry_base_delay, retry_max_delay)
     return {
         "pv_present": None,
@@ -220,12 +243,16 @@ def judge_chip(
         "lookalike_type": "",
         "reason": "",
         "gemini_error": last_err,
+        "latency_ms": round((time.perf_counter() - t0) * 1000, 1),
+        "retry_count": attempt,
+        "error_type": last_exc_type,
     }
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--chip-targets-csv", type=Path, required=True)
+    ap.add_argument("--tight-chips-csv", type=Path, required=True, help="chip_targets.csv for the TIGHT crop (image 1).")
+    ap.add_argument("--wide-chips-csv", type=Path, required=True, help="chip_targets.csv for the WIDE/context crop (image 2).")
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--summary", type=Path, default=None)
     ap.add_argument("--env-file", type=Path, default=SOLAR_BACKDATING_ROOT / ".env.gemini.local")
@@ -236,8 +263,8 @@ def main() -> None:
     ap.add_argument("--native-path")
     ap.add_argument("--agy-bin")
     ap.add_argument("--timeout", type=int, default=120)
-    ap.add_argument("--max-tokens", type=int, default=400)
-    ap.add_argument("--retries", type=int, default=1)
+    ap.add_argument("--max-tokens", type=int, default=2048)
+    ap.add_argument("--retries", type=int, default=2)
     ap.add_argument("--retry-base-delay", type=float, default=1.0)
     ap.add_argument("--retry-max-delay", type=float, default=30.0)
     ap.add_argument(
@@ -257,56 +284,45 @@ def main() -> None:
         type=int,
         help="Legacy Gemini thinkingBudget token value. Do not combine with --thinking-level.",
     )
-    ap.add_argument("--prompt-file", type=Path, help="Override the FP prompt.")
+    ap.add_argument("--prompt-file", type=Path, help="Override the multi-scale prompt.")
     ap.add_argument("--limit", type=int)
-    ap.add_argument(
-        "--workers",
-        type=int,
-        default=1,
-        help="Concurrent Gemini calls (one chip per call). Keep <= backend capacity "
-        "(accounts * per-account slots). Default 1 = serial.",
-    )
-    ap.add_argument(
-        "--qps",
-        type=float,
-        default=0.0,
-        help="Optional global requests/sec cap across all workers. 0 = disabled "
-        "(worker count alone caps concurrency).",
-    )
+    ap.add_argument("--workers", type=int, default=1)
+    ap.add_argument("--qps", type=float, default=0.0)
     ap.add_argument(
         "--worker-jitter",
         type=float,
         default=0.25,
-        help="Max startup jitter (seconds) before each parallel worker fires its "
-        "request. Sleeps a random 0.6x-1.0x of this value so concurrent workers "
-        "don't hit the gateway in the same instant (which skews account routing). "
-        "Default 0.25 = 150-250 ms band; 0 disables. Ignored when --workers <= 1.",
+        help="Max startup jitter (s) before each parallel worker fires a request; "
+        "sleeps a random 0.6x-1.0x of it so concurrent workers don't hit the gateway "
+        "in the same instant (skews account routing). Default 0.25 = 150-250 ms band; "
+        "0 disables. Ignored when --workers <= 1.",
     )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    prompt = args.prompt_file.read_text(encoding="utf-8") if args.prompt_file else FP_PROMPT
-    chips = load_chips(args.chip_targets_csv)
+    prompt = args.prompt_file.read_text(encoding="utf-8") if args.prompt_file else MULTISCALE_PROMPT
+    pairs = load_pairs(args.tight_chips_csv, args.wide_chips_csv)
     if args.limit is not None:
-        chips = chips[: args.limit]
+        pairs = pairs[: args.limit]
     config = load_config(args)
 
-    # Fail fast on missing chips before issuing any API call.
-    for chip in chips:
-        if not chip.image_path.exists():
-            raise FileNotFoundError(chip.image_path)
+    for p in pairs:
+        if not p.tight_image.exists():
+            raise FileNotFoundError(p.tight_image)
+        if not p.wide_image.exists():
+            raise FileNotFoundError(p.wide_image)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     n_usable = n_abstain = n_pv = n_notpv = 0
     limiter = RateLimiter(args.qps)
     jitter = args.worker_jitter if args.workers > 1 else 0.0
 
-    def process(chip: Chip) -> tuple[Chip, dict[str, Any]]:
+    def process(pair: Pair) -> tuple[Pair, dict[str, Any]]:
         if jitter > 0:
             time.sleep(random.uniform(0.6 * jitter, jitter))
         limiter.wait()
-        res = judge_chip(
-            chip,
+        res = judge_pair(
+            pair,
             prompt=prompt,
             config=config,
             max_tokens=args.max_tokens,
@@ -315,12 +331,12 @@ def main() -> None:
             retry_base_delay=args.retry_base_delay,
             retry_max_delay=args.retry_max_delay,
         )
-        return chip, res
+        return pair, res
 
     with args.output.open("w", encoding="utf-8") as fh:
         write_lock = threading.Lock()
 
-        def record_result(chip: Chip, res: dict[str, Any]) -> None:
+        def record_result(pair: Pair, res: dict[str, Any]) -> None:
             nonlocal n_usable, n_abstain, n_pv, n_notpv
             if res["quality_flag"] == "usable":
                 n_usable += 1
@@ -331,18 +347,19 @@ def main() -> None:
             else:
                 n_abstain += 1
             record = {
-                "candidate_id": chip.candidate_id,
-                "target_id": chip.candidate_id,
-                "chip_id": chip.chip_id,
-                "grid_id": chip.grid_id,
-                "pred_id": chip.pred_id,
-                "region_key": chip.region_key,
-                "region": chip.region_key,
-                "predictions_path": chip.predictions_path,
-                "image_path": str(chip.image_path),
-                "raw_image_path": chip.raw_image_path,
+                "candidate_id": pair.candidate_id,
+                "target_id": pair.candidate_id,
+                "chip_id": pair.chip_id,
+                "grid_id": pair.grid_id,
+                "pred_id": pair.pred_id,
+                "region_key": pair.region_key,
+                "region": pair.region_key,
+                "predictions_path": pair.predictions_path,
+                "image_path": str(pair.tight_image),
+                "wide_image_path": str(pair.wide_image),
+                "raw_image_path": pair.raw_image_path,
                 "model": config.model,
-                "decision_source": "gemini_fp_review",
+                "decision_source": "gemini_fp_review_multiscale",
                 **res,
             }
             with write_lock:
@@ -350,20 +367,20 @@ def main() -> None:
                 fh.flush()
 
         if args.dry_run:
-            pass  # existence already validated; no API calls in dry-run
+            pass
         elif args.workers <= 1:
-            for chip in chips:
-                chip, res = process(chip)
-                record_result(chip, res)
+            for pair in pairs:
+                pair, res = process(pair)
+                record_result(pair, res)
         else:
             with ThreadPoolExecutor(max_workers=args.workers) as pool:
-                futures = [pool.submit(process, chip) for chip in chips]
+                futures = [pool.submit(process, pair) for pair in pairs]
                 for future in as_completed(futures):
-                    chip, res = future.result()
-                    record_result(chip, res)
+                    pair, res = future.result()
+                    record_result(pair, res)
 
     summary = {
-        "n_chips": len(chips),
+        "n_pairs": len(pairs),
         "workers": args.workers,
         "qps": args.qps,
         "worker_jitter": args.worker_jitter,
@@ -372,7 +389,7 @@ def main() -> None:
         "thinking_budget": config.thinking_budget,
         "n_usable": n_usable,
         "n_abstain": n_abstain,
-        "abstain_rate": round(n_abstain / max(1, len(chips)), 4),
+        "abstain_rate": round(n_abstain / max(1, len(pairs)), 4),
         "gemini_pv": n_pv,
         "gemini_not_pv": n_notpv,
         "output": str(args.output),

@@ -15,6 +15,7 @@
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
 - Export reviewed keep/exclude decisions into a reusable grid manifest for later tile downloads.
+- Gemini two-stage skylight pass — geometry-layer guard for redundant stage2 keeps: drop a `stage2_skylight_keep` flip when its prediction footprint is largely covered by other already-confirmed PV polygons on the same roof (skylight-embedded-in-array over-keep, e.g. G0890 — confirmed genuine skylight FP, not a label error). Fix post-hoc in geometry/post-proc, NOT by hardening the stage2 adjacency prompt (prompt-hardening the skylight↔PV rule backfires on TP recall). Targets the one stable −1 FP cost in the JHB conf≥0.95 pre-launch eval.
 <!-- progress:roadmap:end -->
 
 ## V0: Baseline Detection Pipeline — DONE
