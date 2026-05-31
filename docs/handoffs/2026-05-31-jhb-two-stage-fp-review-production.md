@@ -102,39 +102,58 @@ Route by detector confidence:
 
 ---
 
-## 4. Production-wiring gaps (build before full JHB inventory runs end-to-end)
+## 4. Production-wiring — end-to-end (BUILT 2026-05-31)
 
-The **review step** is ready; the **inventory integration** still needs these. None are blockers for
-a pilot batch but all are required for the full census flow.
+The full inventory seam is now in place and validated on the 25-grid JHB Vexcel sample. End-to-end:
 
-1. **Production candidate manifest (from RAW predictions, no RA labels).**
-   `build_gemini_review_calibration_manifest.py` is a *calibration* tool — it reads reviewed gpkgs
-   (`review_status` → RA label) and stratified-samples. Production has no RA labels yet. A
-   production-style manifest (cols: `candidate_id, grid_id, pred_id, region_key, region, image_path,
-   predictions_path, imagery_layer, model_run, results_root, source_tile, score, confidence,
-   area_m2`, **no** `ra_label`) already exists as a pattern under
-   `results/analysis/gemini_real_sample_20260520/candidate_manifest.csv`. **Action:** confirm/reuse
-   the builder behind that (see `scripts/analysis/build_unified_reviewall.py` /
-   `score_gemini_detection_review_chips.py`) to emit one manifest per JHB grid covering **all
-   conf ≥ 0.95** detections from `predictions_metric_merge01_c0925.gpkg` (the current JHB production
-   inference is unified_reviewall_A per-det+SAM @ c=0.925 — see `project_jhb_production_model_2026-05-14`).
+```
+raw predictions_metric.gpkg
+  └─(1) build_gemini_review_production_manifest.py  → prod candidate manifest (conf>=0.95)
+       └─ build_gemini_detection_review_chips.py    → tight z20 + wide z48 chips
+            └─ gemini_fp_review_multiscale.py        → stage1.jsonl   (conf<0.95: stop here, stage-1 only)
+                 └─ gemini_fp_review_two_stage.py     → two_stage.jsonl (production decisions)
+                      └─ check_two_stage_failclosed.py  (HARD gate, exit 0 required)
+                           └─(2) apply_two_stage_decisions.py → <grid>_filtered.gpkg + review_queue.csv
+                                └─ detect_and_evaluate.py --classifier-filtered-gpkg <grid>_filtered.gpkg
+```
 
-2. **Apply-decisions-to-gpkg step (the missing seam).** No script yet turns the `two_stage.jsonl`
-   `auto_drop` flags back into a filtered predictions gpkg. **Action:** write a small applier that
-   joins the merged JSONL to the predictions gpkg by `(grid_id, pred_id)` / `candidate_id`, drops
-   rows where `auto_drop=true`, keeps `keep` + `review` rows, and writes a filtered gpkg. Feed it to
-   the existing evaluation/inventory hook `detect_and_evaluate.py --classifier-filtered-gpkg <path>`
-   (that flag skips detection and uses the externally-filtered gpkg directly — the established
-   FP-suppression apply pattern).
+1. **Production candidate manifest** — `scripts/analysis/build_gemini_review_production_manifest.py`
+   (DONE). Scans raw `predictions_metric.gpkg` (no RA labels), filters a conf band, emits a fully
+   renderable manifest; `pred_id` = positional row index (iloc), `candidate_id = {grid}_pred{idx:06d}`.
+   Validated: 335 conf≥0.95 candidates across the 25 JHB grids (of 667 total), 0 tiles missing.
+   ```bash
+   .venv/bin/python scripts/analysis/build_gemini_review_production_manifest.py \
+     --predictions-glob 'results/johannesburg/v3c_vexcel_2024_ch1_sample/G*/predictions_metric.gpkg' \
+     --region johannesburg --imagery-layer vexcel_2024 --min-conf 0.95 \
+     --out-csv <prod_manifest_conf095.csv>
+   # low-conf path: --min-conf 0.5 --max-conf 0.95 into a SEPARATE manifest (stage-1 only)
+   ```
 
-3. **Human-review queue for `production_action=review`.** In the prelaunch runs `review`=0 (stage-2
-   always returned usable), but the fail-closed path *will* fire in production. **Action:** route
-   `requires_human_review=true` rows to a review surface (the `build_stage2_flip_audit.py` HTML is a
-   ready starting point; the QGIS/Li review GUI is the other). These rows are retained in inventory
-   until a human decides.
+2. **Apply-decisions-to-gpkg** — `scripts/analysis/apply_two_stage_decisions.py` (DONE). Joins the
+   merged decision JSONL(s) to the predictions gpkg by `(predictions_path, pred_id)`, drops only
+   `auto_drop=true`, writes a same-schema/CRS row-subset `<grid>_filtered.gpkg` per grid (directly
+   consumable by `detect_and_evaluate.py --classifier-filtered-gpkg`). Fail-closed: keeps `keep` +
+   `review` + undecided rows, emits a review queue, aborts on `auto_drop=true ∧ action≠drop`
+   integrity violations, resolves cross-file conflicts conservatively (non-drop wins). Validated:
+   exact row removal (G0890 70→66 = its 4 auto_drops; 46 total = JSONL auto_drop count).
+   ```bash
+   .venv/bin/python scripts/analysis/apply_two_stage_decisions.py \
+     --decisions <two_stage.jsonl> [<stage1_lowconf.jsonl> ...] --out-dir <filtered_dir>
+   # then per grid:
+   python detect_and_evaluate.py --grid-id <G> --classifier-filtered-gpkg <filtered_dir>/<G>_filtered.gpkg ...
+   ```
 
-4. **Per-batch acceptance = re-run the gate (§5).** Wire `check_two_stage_failclosed.py` and a
-   metrics spot-check into the batch runner so a batch can't ship a drop set that violates fail-closed.
+3. **Human-review queue** — `apply_two_stage_decisions.py` auto-emits `review_queue.csv`
+   (`production_action=review` / `requires_human_review=true` rows, with chip paths). Remaining: wire
+   that CSV into a human surface (`build_stage2_flip_audit.py` HTML, or the QGIS/Li review GUI). In
+   prelaunch `review`=0, but the fail-closed path *will* fire in production. These rows stay in the
+   inventory until a human rules. **(queue produced; review UI still TODO.)**
+
+4. **Per-batch acceptance = re-run the gate (§5).** `check_two_stage_failclosed.py` must gate every
+   batch's decision JSONL (exit 0) before `apply_two_stage_decisions.py` runs; the applier also
+   re-asserts the drop/action integrity invariant and aborts on violation. Remaining: wrap the
+   soak-metric spot-check into the batch runner. **(fail-closed gating wired; soak aggregation still
+   manual.)**
 
 ---
 
@@ -194,6 +213,8 @@ before any talk of a global cutover.
 | `scripts/analysis/gemini_fp_review.py` | Single-crop scorer (routing-salt + retry backoff) | committed |
 | `scripts/analysis/eval_gemini_review_vs_ra.py` | RA-vs-Gemini scorer (**calibration only**, needs RA labels) | pre-existing |
 | `scripts/analysis/build_gemini_review_calibration_manifest.py` | RA-labeled calib manifest builder | pre-existing |
-| `tests/analysis/test_gemini_fp_review_two_stage.py`, `test_two_stage_failclosed_data.py` | unit + data-guard | committed |
+| `scripts/analysis/build_gemini_review_production_manifest.py` | **production** candidate manifest from raw predictions (§4.1) | committed |
+| `scripts/analysis/apply_two_stage_decisions.py` | apply auto_drop → filtered gpkg + review queue (§4.2) | committed |
+| `tests/analysis/test_gemini_fp_review_two_stage.py`, `test_two_stage_failclosed_data.py`, `test_apply_two_stage_decisions.py` | unit + data-guard | committed |
 | `data/analysis/gemini_review_calib/**` | prelaunch artifacts (gitignored) | local only |
-| **(to build)** production candidate-manifest builder + apply-to-gpkg step + review queue | §4 gaps | **TODO** |
+| **(remaining)** human review-queue UI; soak-metric step wired into batch runner | §4.3 / §4.4 | **TODO** |
