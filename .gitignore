@@ -136,3 +136,20 @@ docs/experiment-archive/**/*.gpkg
 docs/experiment-archive/**/*.kml
 docs/experiment-archive/**/*.parquet
 docs/experiment-archive/**/_build_summary.json
+
+# Gemini FP-review calibration artifacts (derived chips/jsonl/eval, 100s MB, regeneratable)
+data/annotations/gemini_review_calib/
+data/analysis/gemini_review_calib/
+
+# Annotation pre-clean backups (the .gpkg are already ignored; these .bak siblings are not)
+*.bak_pre_clean
+
+# agy / Antigravity CLI local state (may carry session/auth)
+.antigravitycli/
+
+# Scratch web captures
+.geobench2_*
+
+# Local per-machine agent launchers (hardcoded local paths)
+start-*.sh
+start-*.bat
