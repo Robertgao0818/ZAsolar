@@ -153,6 +153,14 @@ When integrating annotations from a new annotator or source, follow this procedu
 | Annotator draws purely freehand (no SAM) | `human_manual` | H |
 | Model predictions reviewed, accepted as-is | `reviewed_prediction` | R |
 | Model predictions reviewed, then SAM re-cut | `sam_refined_review` | S |
+| Model predictions visually reviewed by Gemini/LLM, accepted as PV without human redraw | `gemini_reviewed_prediction` | R-like weak supervision |
+
+Gemini/LLM review is an automation aid, not a gold annotation source. Treat
+`gemini_reviewed_prediction` as T2 weak supervision by default: suitable for
+backbone / RPN / box / class learning after confidence and overlap audits, but
+not trusted for mask-boundary BCE. To become A1/T1 or mask-trusted H data, the
+polygon must be human-reviewed against the installation spec or redrawn through
+a human-initiated tool workflow.
 
 ### 2. Default provenance assignment
 
