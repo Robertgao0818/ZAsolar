@@ -3,19 +3,18 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-05-31: docs(handoff): JHB two-stage FP-review production handoff
+- 2026-05-31: feat(gemini): two-stage skylight FP-review with fail-closed merge + soak instrumentation
 - 2026-05-31: feat(analysis): post-hoc merge/NMS spatial eval + polygon-conf sweep
 - 2026-05-31: chore(registry): register solar_zerov2 Phase 0 model_runs + jnb alias
 - 2026-05-31: chore(gitignore): exclude gemini calibration artifacts, agy/CLI state, local launchers
 - 2026-05-31: feat(gemini): FP-review calibration tooling + RA-comparison eval
 - 2026-05-31: feat(gemini): worker concurrency for FP-review + detection-review scorers
 - 2026-05-29: chore(registry): mark aerial_2023 training sets + V4.2 model archived
-- 2026-05-29: feat(training): single-source boundary-trust rules + positive pool manifest
-- 2026-05-29: feat(training): build manifests, run ledger + seed, DatasetSpec v2
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
 - Export reviewed keep/exclude decisions into a reusable grid manifest for later tile downloads.
-- Gemini two-stage skylight pass — geometry-layer guard for redundant stage2 keeps: drop a `stage2_skylight_keep` flip when its prediction footprint is largely covered by other already-confirmed PV polygons on the same roof (skylight-embedded-in-array over-keep, e.g. G0890 — confirmed genuine skylight FP, not a label error). Fix post-hoc in geometry/post-proc, NOT by hardening the stage2 adjacency prompt (prompt-hardening the skylight↔PV rule backfires on TP recall). Targets the one stable −1 FP cost in the JHB conf≥0.95 pre-launch eval.
 <!-- progress:roadmap:end -->
 
 ## V0: Baseline Detection Pipeline — DONE
