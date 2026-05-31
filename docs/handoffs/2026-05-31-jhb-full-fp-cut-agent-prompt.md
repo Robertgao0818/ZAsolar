@@ -66,6 +66,11 @@ pulling 362 grids of tiles local.
   ≈ **~50–53k Gemini calls**. This is a multi-hour run.
 - Gemini account pool ≈ 30 shared slots. Validated `--workers 10 --qps 4`. **Keep Σ(workers) ≤ 30**
   across concurrent runs; do NOT run `score_target_sequence` alongside (it stalls workers).
+- **ALWAYS pass `--routing-salt-mode target` for these flash (`gemini-3-flash-agent`) runs.** The default
+  `auto` salts `pro` models only, so a flash run injects no per-request routing nonce and the sub2api
+  gateway content-hashes every call onto ONE account (verified 2026-05-31: 2568 HI calls all hit one
+  account). `target` adds a `model:candidate_id:grid_id:pred_id` nonce per request so load spreads
+  across the pool. `--worker-jitter 0.25` (default) only staggers timing, not account choice.
 - **Batch by grid groups** (~25–50 grids/batch). Run under `tmux`/`nohup`. The reviewer is resumable:
   stage2 has `--reuse-stage2-jsonl`; renders are per-grid (re-render only missing); keep one
   output dir per batch.
@@ -103,19 +108,19 @@ done
 .venv/bin/python scripts/analysis/gemini_fp_review_multiscale.py \
   --tight-chips-csv $OUT/chips_hi_z20/chip_targets.csv --wide-chips-csv $OUT/chips_hi_z48/chip_targets.csv \
   --output $OUT/stage1_hi.jsonl --summary $OUT/stage1_hi_summary.json \
-  --model gemini-3-flash-agent --workers 10 --qps 4
+  --model gemini-3-flash-agent --workers 10 --qps 4 --routing-salt-mode target
 #   GUARD: if stage1 summary abstain_rate > 0.30, STOP (env/gateway broken).
 .venv/bin/python scripts/analysis/gemini_fp_review_two_stage.py \
   --stage1-jsonl $OUT/stage1_hi.jsonl \
   --tight-chips-csv $OUT/chips_hi_z20/chip_targets.csv --wide-chips-csv $OUT/chips_hi_z48/chip_targets.csv \
   --output $OUT/two_stage_hi.jsonl --stage2-jsonl $OUT/two_stage_hi_stage2.jsonl \
-  --summary $OUT/two_stage_hi_summary.json --model gemini-3-flash-agent --workers 10 --qps 4
+  --summary $OUT/two_stage_hi_summary.json --model gemini-3-flash-agent --workers 10 --qps 4 --routing-salt-mode target
 
 # 3b. LO band: stage1 only  (Gemini)
 .venv/bin/python scripts/analysis/gemini_fp_review_multiscale.py \
   --tight-chips-csv $OUT/chips_lo_z20/chip_targets.csv --wide-chips-csv $OUT/chips_lo_z48/chip_targets.csv \
   --output $OUT/stage1_lo.jsonl --summary $OUT/stage1_lo_summary.json \
-  --model gemini-3-flash-agent --workers 10 --qps 4
+  --model gemini-3-flash-agent --workers 10 --qps 4 --routing-salt-mode target
 
 # 4. HARD GATE (must exit 0 before applying drops)
 .venv/bin/python scripts/analysis/check_two_stage_failclosed.py $OUT/two_stage_hi.jsonl
