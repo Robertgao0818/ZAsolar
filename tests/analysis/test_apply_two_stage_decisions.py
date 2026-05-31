@@ -3,7 +3,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.analysis.apply_two_stage_decisions import grid_for_path, load_decisions
+from scripts.analysis.apply_two_stage_decisions import (
+    grid_for_path,
+    load_decisions,
+    synthesize_stage1_decision,
+)
 
 
 def _write_jsonl(rows):
@@ -63,6 +67,88 @@ class ApplyTwoStageDecisionsTests(unittest.TestCase):
         )
         # fallback to path parsing when grid_id absent
         self.assertEqual(grid_for_path({0: {}}, "/r/run/G0816/predictions_metric.gpkg"), "G0816")
+
+
+def _stage1_row(grid, pid, *, pv_present, label, quality_flag, path="/p/Gx/predictions_metric.gpkg"):
+    """A stage-1-only multiscale row: pv_present/label but NO production fields."""
+    return {
+        "candidate_id": f"{grid}_pred{pid:06d}",
+        "grid_id": grid,
+        "pred_id": pid,
+        "predictions_path": path,
+        "pv_present": pv_present,
+        "label": label,
+        "quality_flag": quality_flag,
+    }
+
+
+class SynthesizeStage1Tests(unittest.TestCase):
+    def test_not_pv_becomes_drop(self):
+        rec = synthesize_stage1_decision(
+            {"pv_present": False, "label": "not_pv", "quality_flag": "usable"}
+        )
+        self.assertEqual(rec["production_action"], "drop")
+        self.assertIs(rec["auto_drop"], True)
+        self.assertIs(rec["pv_present"], False)
+        self.assertIs(rec["requires_human_review"], False)
+
+    def test_pv_becomes_keep(self):
+        rec = synthesize_stage1_decision(
+            {"pv_present": True, "label": "pv", "quality_flag": "usable"}
+        )
+        self.assertEqual(rec["production_action"], "keep")
+        self.assertIs(rec["auto_drop"], False)
+        self.assertIs(rec["pv_present"], True)
+
+    def test_abstain_never_drops(self):
+        # The _as_bool(None)->False trap: a null pv_present must route to review, NOT drop.
+        rec = synthesize_stage1_decision(
+            {"pv_present": None, "label": "", "quality_flag": "unusable"}
+        )
+        self.assertEqual(rec["production_action"], "review")
+        self.assertIs(rec["auto_drop"], False)
+        self.assertIs(rec["requires_human_review"], True)
+        self.assertIsNone(rec["pv_present"])
+
+    def test_inconsistent_row_routes_to_review(self):
+        # usable but label/pv_present disagree -> fail-closed to review, not drop
+        rec = synthesize_stage1_decision(
+            {"pv_present": None, "label": "not_pv", "quality_flag": "usable"}
+        )
+        self.assertEqual(rec["production_action"], "review")
+        self.assertIs(rec["auto_drop"], False)
+
+
+class Stage1AsDropsLoadTests(unittest.TestCase):
+    def test_synthesizes_and_passes_failclosed(self):
+        p = _write_jsonl([
+            _stage1_row("G1", 0, pv_present=False, label="not_pv", quality_flag="usable"),
+            _stage1_row("G1", 1, pv_present=True, label="pv", quality_flag="usable"),
+            _stage1_row("G1", 2, pv_present=None, label="", quality_flag="unusable"),
+        ])
+        decisions, conflicts, violations = load_decisions([p], stage1_as_drops=True)
+        self.assertEqual(len(decisions), 3)
+        self.assertEqual(violations, [])  # synthesized rows satisfy the fail-closed gate
+        drops = [r for r in decisions.values() if r["auto_drop"] is True]
+        self.assertEqual(len(drops), 1)  # only the not_pv row
+
+    def test_without_flag_stage1_rows_are_not_dropped(self):
+        # Without --stage1-as-drops, a stage-1 row has no auto_drop -> never dropped.
+        p = _write_jsonl([
+            _stage1_row("G1", 0, pv_present=False, label="not_pv", quality_flag="usable"),
+        ])
+        decisions, _conflicts, violations = load_decisions([p])
+        (rec,) = decisions.values()
+        self.assertFalse(bool(rec.get("auto_drop")))
+        self.assertEqual(violations, [])
+
+    def test_malformed_existing_action_caught_by_gate(self):
+        # A row that already has production fields but violates fail-closed must be flagged.
+        p = _write_jsonl([
+            _row("G1", 0, auto_drop=True, action="keep"),  # auto_drop+keep is illegal
+        ])
+        _decisions, _conflicts, violations = load_decisions([p], stage1_as_drops=True)
+        self.assertTrue(violations)
 
 
 if __name__ == "__main__":

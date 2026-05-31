@@ -8,6 +8,17 @@ stage-1-only path), joins them to the raw predictions gpkg(s) by
 ``(predictions_path, pred_id)``, and writes a row-subset "filtered" gpkg per grid
 with every ``auto_drop=true`` prediction removed.
 
+STAGE-1-ONLY band (conf 0.925-0.95): ``gemini_fp_review_multiscale.py`` emits
+``pv_present``/``label`` but NOT the production fields (``production_action`` /
+``auto_drop`` / ``requires_human_review``) this applier drops on. Pass
+``--stage1-as-drops`` to synthesize those fields in-process -- ``label=="not_pv"``
+-> ``auto_drop=true`` (drop), ``label=="pv"`` -> keep, abstain/unusable -> human
+review (never dropped). This mirrors the non-skylight branches of
+``gemini_fp_review_two_stage.merge_decision`` (stage 2 / skylight routing is
+deliberately NOT applied in the sub-0.95 band). Every synthesized row is then run
+through the *same* ``check_two_stage_failclosed.validate_row`` gate before any
+drop is applied, so no tiny adapter script is needed for the LO band.
+
 The filtered gpkg keeps the SOURCE schema / CRS / layer untouched (it is a pure
 row subset), so it is directly consumable by
 ``detect_and_evaluate.py --classifier-filtered-gpkg <grid>_filtered.gpkg``
@@ -54,14 +65,79 @@ def _as_bool(value: Any) -> bool | None:
     return None
 
 
-def load_decisions(paths: list[Path]) -> tuple[dict[tuple[str, int], dict[str, Any]], list[str], list[str]]:
+def _load_failclosed_validator():
+    """Import the standalone fail-closed row validator (same dir, stdlib-only).
+
+    Imported lazily so the applier only pays for it in ``--stage1-as-drops`` mode,
+    and so it reuses the *exact* invariant logic the hard gate enforces rather than
+    reimplementing it here.
+    """
+    here = str(Path(__file__).resolve().parent)
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    from check_two_stage_failclosed import validate_row  # noqa: E402
+
+    return validate_row
+
+
+def synthesize_stage1_decision(rec: dict[str, Any]) -> dict[str, Any]:
+    """Add fail-closed production fields to a stage-1-only multiscale row, in place.
+
+    Mirrors the non-skylight branches of
+    ``gemini_fp_review_two_stage.merge_decision``:
+      * usable ``pv_present is True``  (label 'pv')     -> keep
+      * usable ``pv_present is False`` (label 'not_pv') -> drop (auto_drop=True)
+      * abstain / unusable / inconsistent               -> review (never dropped)
+
+    Stage-2 (skylight) routing is intentionally NOT applied: the conf 0.925-0.95
+    band runs stage-1 only, so every ``not_pv`` becomes a drop regardless of
+    ``lookalike_type``. ``pv_present`` is read as the raw JSON value (True / False /
+    None) -- it must NOT go through ``_as_bool`` because ``_as_bool(None)`` returns
+    False and would silently turn an abstain into a drop. The fields are set to the
+    exact ``True`` / ``False`` / ``None`` literals the fail-closed checker asserts on.
+    """
+    quality = str(rec.get("quality_flag") or "").strip().lower()
+    label = str(rec.get("label") or "").strip().lower()
+    pv_present = rec.get("pv_present")  # raw JSON bool / None -- do NOT coerce
+    if quality == "usable" and pv_present is True and label == "pv":
+        rec["production_action"] = "keep"
+        rec["auto_drop"] = False
+        rec["requires_human_review"] = False
+        rec["pv_present"] = True
+        decision_src = "stage1_pv"
+    elif quality == "usable" and pv_present is False and label == "not_pv":
+        rec["production_action"] = "drop"
+        rec["auto_drop"] = True
+        rec["requires_human_review"] = False
+        rec["pv_present"] = False
+        decision_src = "stage1_not_pv"
+    else:  # abstain / unusable / inconsistent -> fail-closed to human review
+        rec["production_action"] = "review"
+        rec["auto_drop"] = False
+        rec["requires_human_review"] = True
+        rec["pv_present"] = None
+        decision_src = "stage1_abstain"
+    rec.setdefault("production_decision_source", f"stage1_as_drops:{decision_src}")
+    return rec
+
+
+def load_decisions(
+    paths: list[Path],
+    stage1_as_drops: bool = False,
+) -> tuple[dict[tuple[str, int], dict[str, Any]], list[str], list[str]]:
     """Return {(predictions_path, pred_id): decision}, conflicts, violations.
 
     On conflict between files, keep the conservative (non-drop) record.
+
+    When ``stage1_as_drops`` is set, rows that lack a ``production_action`` (i.e.
+    stage-1-only multiscale output) get their production fields synthesized via
+    ``synthesize_stage1_decision`` and EVERY row is re-checked against the
+    standalone fail-closed validator, so the LO band needs no external adapter.
     """
     decisions: dict[tuple[str, int], dict[str, Any]] = {}
     conflicts: list[str] = []
     violations: list[str] = []
+    validate_row = _load_failclosed_validator() if stage1_as_drops else None
     for path in paths:
         with path.open(encoding="utf-8") as fh:
             for line_no, line in enumerate(fh, start=1):
@@ -75,6 +151,13 @@ def load_decisions(paths: list[Path]) -> tuple[dict[tuple[str, int], dict[str, A
                     continue
                 pred_path = str(Path(pred_path).resolve())
                 pid = int(pred_id)
+                if stage1_as_drops and not str(rec.get("production_action") or "").strip():
+                    synthesize_stage1_decision(rec)
+                if validate_row is not None:
+                    for reason in validate_row(rec):
+                        violations.append(
+                            f"{path.name}:{line_no} {rec.get('candidate_id')}: {reason}"
+                        )
                 auto_drop = _as_bool(rec.get("auto_drop")) or False
                 action = str(rec.get("production_action") or "").strip().lower()
                 # Fail-closed integrity: a drop flag must agree with the action.
@@ -129,6 +212,14 @@ def main() -> None:
     ap.add_argument("--review-csv", type=Path, help="Where to write the human-review queue (default: out-dir/review_queue.csv).")
     ap.add_argument("--summary", type=Path, help="Where to write the JSON summary (default: out-dir/apply_summary.json).")
     ap.add_argument(
+        "--stage1-as-drops",
+        action="store_true",
+        help="Treat stage-1-only multiscale rows (which carry pv_present/label but no "
+        "production_action) as production decisions: label=='not_pv' -> auto_drop=true, "
+        "'pv' -> keep, abstain -> human review. Synthesized rows are run through the "
+        "fail-closed validator before any drop. Use for the conf 0.925-0.95 LO band.",
+    )
+    ap.add_argument(
         "--allow-violations",
         action="store_true",
         help="Apply even if a decision row has auto_drop=true with action!=drop (NOT recommended; "
@@ -136,7 +227,7 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    decisions, conflicts, violations = load_decisions(args.decisions)
+    decisions, conflicts, violations = load_decisions(args.decisions, stage1_as_drops=args.stage1_as_drops)
     if violations and not args.allow_violations:
         print("[ABORT] fail-closed integrity violations in decision input(s):", file=sys.stderr)
         for v in violations[:20]:
@@ -153,6 +244,20 @@ def main() -> None:
         by_path[pred_path][pid] = rec
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+
+    # In --stage1-as-drops mode, persist the synthesized production decisions so the
+    # standalone check_two_stage_failclosed.py can be re-run on them independently.
+    synthesized_jsonl: Path | None = None
+    if args.stage1_as_drops:
+        synthesized_jsonl = args.out_dir / "stage1_as_drops_decisions.jsonl"
+        with synthesized_jsonl.open("w", encoding="utf-8") as fh:
+            for rec in decisions.values():
+                fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        print(
+            f"[stage1-as-drops] wrote {len(decisions)} synthesized decision(s) -> {synthesized_jsonl} "
+            f"(0 fail-closed violations)"
+        )
+
     review_rows: list[dict[str, Any]] = []
     per_gpkg: list[dict[str, Any]] = []
     totals = {"n_rows": 0, "n_decided": 0, "n_drop": 0, "n_keep": 0, "n_review": 0, "n_undecided": 0}
@@ -231,6 +336,8 @@ def main() -> None:
 
     summary = {
         "decision_inputs": [str(p) for p in args.decisions],
+        "stage1_as_drops": args.stage1_as_drops,
+        "synthesized_decisions_jsonl": str(synthesized_jsonl.resolve()) if synthesized_jsonl else None,
         "n_gpkgs": len(per_gpkg),
         "totals": totals,
         "n_conflicts": len(conflicts),
