@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-05-28: refactor(classifier): extract PV/non-PV classifier to sibling subrepo solar_cls
-- 2026-05-22: Weekly progress summary (05-13 to 05-22) + daily progress log updates
-- 2026-05-21: Daily log 2026-05-22: 05-13→05-22 weekly outline from progress logs and supplemental sources
-- 2026-05-20: backdating (GEHI availability + download ladder, build_inventory_chip_groups, gemini review) + ZAsolar Accepted prediction pool builder
-- 2026-05-20: Daily log 2026-05-20: full382 inventory-to-chip groups, GEHI/Gemini matrix pipeline, JNB0202 pilot
-- 2026-05-17: solar_zerov2 DINOv3-SAT-L + Mask2Former literature survey + Oracle mask spatial attention diagnosis
-- 2026-05-17: Daily log 2026-05-17: solar_zerov2 failure diagnosis, ViT/PV literature survey, DINOv3-SAT backbone probe
-- 2026-05-16: Daily log 2026-05-16: solar_zerov2 Phase 0 local inference, JHB CBD25 eval wiring, ablation/diagnostic setup
+- 2026-05-31: feat(analysis): post-hoc merge/NMS spatial eval + polygon-conf sweep
+- 2026-05-31: chore(registry): register solar_zerov2 Phase 0 model_runs + jnb alias
+- 2026-05-31: chore(gitignore): exclude gemini calibration artifacts, agy/CLI state, local launchers
+- 2026-05-31: feat(gemini): FP-review calibration tooling + RA-comparison eval
+- 2026-05-31: feat(gemini): worker concurrency for FP-review + detection-review scorers
+- 2026-05-29: chore(registry): mark aerial_2023 training sets + V4.2 model archived
+- 2026-05-29: feat(training): single-source boundary-trust rules + positive pool manifest
+- 2026-05-29: feat(training): build manifests, run ledger + seed, DatasetSpec v2
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
