@@ -1,0 +1,16 @@
+{
+  "post_conf_threshold": 0.925,
+  "_meta": {
+    "tag": "xdomain_c0925",
+    "task": "Cross-domain consumption filter: production unified_reviewall_A polygon-conf threshold",
+    "notes": "Applies the JHB-production polygon-confidence cut (c=0.925) at consumption time to SAM-refined predictions_metric.gpkg, mirroring the unified_reviewall_A_perdet_sam_maskbox_vexcel_2024_full382 production inventory. Used by scripts/analysis/filter_sam_inventory.py to freeze the 6-city cross-domain inventory before area_aggregate_eval.",
+    "inventory_policy": {
+      "tag": "xdomain_c0925",
+      "filter": {
+        "detector_confidence_min": 0.925,
+        "sam_score_min": 0.0,
+        "update_area_columns": true
+      }
+    }
+  }
+}

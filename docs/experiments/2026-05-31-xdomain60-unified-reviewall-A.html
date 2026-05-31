@@ -1,0 +1,184 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>跨域泛化评估 — unified_reviewall_A · 6城60grid</title>
+<style>
+body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;max-width:980px;margin:0 auto;padding:24px;color:#1a1a1a;line-height:1.55;background:#fafafa}
+h1{font-size:24px;margin-bottom:4px} h2{font-size:18px;margin-top:32px;border-left:4px solid #2c7fb8;padding-left:10px}
+.sub{color:#666;font-size:13px;margin-bottom:20px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px;background:#fff;box-shadow:0 1px 3px #0001}
+th,td{border:1px solid #e0e0e0;padding:6px 9px;text-align:center} th{background:#2c7fb8;color:#fff;font-weight:600}
+td.city{text-align:left;font-weight:600}
+.cards{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+.card{flex:1;min-width:150px;background:#fff;border-radius:8px;padding:14px;box-shadow:0 1px 3px #0001;text-align:center}
+.card .num{font-size:26px;font-weight:700;color:#2c7fb8} .card .lbl{font-size:12px;color:#666;margin-top:4px}
+.tldr{background:#eef6fb;border-radius:8px;padding:16px 18px;margin:16px 0;border-left:4px solid #2c7fb8}
+.good{color:#1a9850;font-weight:600} .bad{color:#d73027;font-weight:600}
+.note{font-size:12px;color:#777;background:#fff8e6;padding:10px 12px;border-radius:6px;border-left:3px solid #f0ad4e;margin:10px 0}
+code{background:#eee;padding:1px 5px;border-radius:3px;font-size:12px}
+ul{margin:8px 0}
+</style></head><body>
+
+<h1>跨域泛化评估：<code>unified_reviewall_A</code> 在 6 个新城市</h1>
+<div class="sub">2026-05-31 · 生产检测器(per-detection + SAM2.1 mask+box @ polygon-conf c=0.925,<b>未挂分类器</b>)· 60 grid / 60 grid 含空 · GT = Li RA sub-array (A2/T2)</div>
+
+<div class="tldr">
+<b>一句话结论：</b>生产检测器原样部署到 6 个未见城市,<span class="good">聚合库存校准基本保住</span>(总体 bulk 1.04、through-origin slope 1.09、R² 0.97、agg area-F1 0.76 vs in-domain 0.84),
+但<span class="bad">per-grid 可靠性退化约 8×</span>(σ_Bw 0.157 → 1.23)。两种失败模式:稀疏低密 grid 的 lookalike-FP 过涂(durban/bloemfontein,正是没挂的 <code>solar_cls</code> 的靶子)+ 密集/细碎 grid 的 recall 崩(pretoria)。<b>Pietermaritzburg / East London 近 in-domain 质量。</b>
+</div>
+
+<div class="cards">
+<div class="card"><div class="num">60/60</div><div class="lbl">grid 跑通 · 0 失败</div></div>
+<div class="card"><div class="num">0.76</div><div class="lbl">总体 agg area-F1<br><span style="color:#999">(in-domain 0.84)</span></div></div>
+<div class="card"><div class="num">1.04</div><div class="lbl">总体 bulk(预测/GT)</div></div>
+<div class="card"><div class="num bad">1.23</div><div class="lbl">σ_Bw(in-domain 0.16)</div></div>
+</div>
+
+<h2>总体 Tier-1 对比(50 个非空 grid vs JHB in-domain)</h2>
+<table>
+<tr><th>指标</th><th>跨域 (50 grid)</th><th>JHB in-domain (25 grid)</th><th>Δ</th></tr>
+<tr><td class="city">agg area-F1</td><td>0.763</td><td>0.839</td><td class="bad">−0.076</td></tr>
+<tr><td class="city">bulk(预测/GT)</td><td>1.042</td><td>0.97</td><td>+0.072</td></tr>
+<tr><td class="city">σ_Bw(B-加权 ratio 标准差)</td><td class="bad">1.228</td><td>0.157</td><td class="bad">+1.07(≈8×)</td></tr>
+<tr><td class="city">RMSE (m²/grid)</td><td>1628</td><td>916</td><td class="bad">+712</td></tr>
+<tr><td class="city">through-origin slope</td><td>1.093</td><td>0.95</td><td>+0.14</td></tr>
+<tr><td class="city">OLS R²</td><td class="good">0.971</td><td>—</td><td>—</td></tr>
+<tr><td class="city">mean per-grid F1</td><td>0.630</td><td>—</td><td>—</td></tr>
+<tr><td class="city">grid 落在 ±20% 内</td><td>0.48</td><td>—</td><td>—</td></tr>
+</table>
+<p style="font-size:13px"><b>读法:</b>level(bulk / slope / R²)保住 → 一阶人口普查总量可用;<b>dispersion(σ_Bw / RMSE)是牺牲项</b>。按主裁判 σ_Bw+RMSE,bulk∈[0.5,2.0] 仅作 sanity gate(通过)。</p>
+
+<h2>每城 Tier-1(按 σ_Bw+RMSE 排序)</h2>
+<table>
+<tr><th>城市</th><th>n</th><th>agg-F1</th><th>mean-pg-F1</th><th>bulk</th><th>σ_Bw</th><th>RMSE</th><th>slope</th><th>R²</th><th>±20%</th></tr>
+<tr>
+      <td class="city">Pietermaritzburg</td><td>8</td>
+      <td style="background:#1a98501a">0.872</td>
+      <td>0.844</td>
+      <td style="background:#1a98501a">1.068</td>
+      <td style="background:#1a985033"><b>0.214</b></td>
+      <td>466</td><td>1.049</td><td>0.982</td>
+      <td>0.75</td></tr>
+<tr>
+      <td class="city">East London</td><td>9</td>
+      <td style="background:#fee08b1a">0.725</td>
+      <td>0.799</td>
+      <td style="background:#1a98501a">0.970</td>
+      <td style="background:#1a985033"><b>0.245</b></td>
+      <td>481</td><td>0.952</td><td>1.000</td>
+      <td>0.78</td></tr>
+<tr>
+      <td class="city">Pretoria</td><td>9</td>
+      <td style="background:#d730271a">0.543</td>
+      <td>0.507</td>
+      <td style="background:#1a98501a">0.920</td>
+      <td style="background:#1a985033"><b>0.272</b></td>
+      <td>223</td><td>0.992</td><td>0.991</td>
+      <td>0.44</td></tr>
+<tr>
+      <td class="city">Gqeberha</td><td>6</td>
+      <td style="background:#fee08b1a">0.765</td>
+      <td>0.658</td>
+      <td style="background:#fee08b1a">1.203</td>
+      <td style="background:#fee08b33"><b>0.532</b></td>
+      <td>4330</td><td>1.251</td><td>0.998</td>
+      <td>0.17</td></tr>
+<tr>
+      <td class="city">Bloemfontein</td><td>10</td>
+      <td style="background:#1a98501a">0.829</td>
+      <td>0.551</td>
+      <td style="background:#fee08b1a">1.115</td>
+      <td style="background:#d7302733"><b>2.556</b></td>
+      <td>444</td><td>1.083</td><td>0.979</td>
+      <td>0.30</td></tr>
+<tr>
+      <td class="city">Durban</td><td>8</td>
+      <td style="background:#fee08b1a">0.756</td>
+      <td>0.442</td>
+      <td style="background:#fee08b1a">0.876</td>
+      <td style="background:#d7302733"><b>3.837</b></td>
+      <td>1311</td><td>0.845</td><td>1.000</td>
+      <td>0.38</td></tr>
+</table>
+<p style="font-size:13px"><span class="good">■</span> Pietermaritzburg / East London 近 in-domain(σ_Bw≈0.21–0.25);
+<span class="bad">■</span> Durban / Bloemfontein σ_Bw 被个别 grid 的过涂炸到 2.6–3.8。</p>
+
+<h2>失败模式 1 — 稀疏低密 grid 的 lookalike-FP 过涂(precision 崩)</h2>
+<p style="font-size:13px">Li 只标了 1–4 块,检测器却出 9–29 个 poly。这是 σ_Bw 爆炸的主因(durban/bloemfontein),<b>正是 <code>solar_cls</code>(本轮故意没挂)的靶子</b>。</p>
+<table>
+<tr><th>grid</th><th>城市</th><th>n_pred</th><th>n_gt</th><th>预测 m²</th><th>GT m²</th><th>过涂比</th><th>area-P</th></tr>
+<tr><td>BFN0126</td><td>Bloemfontein</td><td>29</td><td>4</td>
+      <td>871</td><td>51</td>
+      <td style="color:#d73027"><b>17.0×</b></td><td>0.06</td></tr>
+<tr><td>DBN0044</td><td>Durban</td><td>9</td><td>2</td>
+      <td>234</td><td>18</td>
+      <td style="color:#d73027"><b>12.7×</b></td><td>0.07</td></tr>
+<tr><td>DBN0100</td><td>Durban</td><td>13</td><td>2</td>
+      <td>322</td><td>33</td>
+      <td style="color:#d73027"><b>9.8×</b></td><td>0.02</td></tr>
+<tr><td>DBN0666</td><td>Durban</td><td>13</td><td>2</td>
+      <td>261</td><td>40</td>
+      <td style="color:#d73027"><b>6.4×</b></td><td>0.04</td></tr>
+<tr><td>BFN0106</td><td>Bloemfontein</td><td>2</td><td>1</td>
+      <td>53</td><td>11</td>
+      <td style="color:#d73027"><b>5.0×</b></td><td>0.20</td></tr>
+</table>
+
+<h2>失败模式 2 — 密集/细碎 grid 的 recall 崩</h2>
+<p style="font-size:13px">Li 把面板切成很多小模块,检测器(installation 级)只覆盖一小部分面积。PTA0292 极端:287 个 GT 模块,检测器只覆盖 6% 面积。</p>
+<table>
+<tr><th>grid</th><th>城市</th><th>n_pred</th><th>n_gt</th><th>预测 m²</th><th>GT m²</th><th>area-R</th></tr>
+<tr><td>BFN0233</td><td>Bloemfontein</td><td>13</td><td>2</td>
+      <td>117</td><td>171</td>
+      <td style="color:#d73027"><b>0.04</b></td></tr>
+<tr><td>PTA0292</td><td>Pretoria</td><td>11</td><td>287</td>
+      <td>68</td><td>631</td>
+      <td style="color:#d73027"><b>0.06</b></td></tr>
+<tr><td>PTA0360</td><td>Pretoria</td><td>16</td><td>147</td>
+      <td>122</td><td>443</td>
+      <td style="color:#d73027"><b>0.13</b></td></tr>
+<tr><td>DBN0100</td><td>Durban</td><td>13</td><td>2</td>
+      <td>322</td><td>33</td>
+      <td style="color:#d73027"><b>0.15</b></td></tr>
+<tr><td>DBN0666</td><td>Durban</td><td>13</td><td>2</td>
+      <td>261</td><td>40</td>
+      <td style="color:#d73027"><b>0.24</b></td></tr>
+</table>
+
+<h2>空标注 grid FP 探针(10 个确认无 PV 的 grid)</h2>
+<p style="font-size:13px">这里每个预测都是 FP(GT 确认为零,最干净的 precision 信号)。总计 <b>33</b> 个 FP poly / <b>944 m²</b>,平均 <b>3.3</b> 个/grid,<span class="good">2/10 个完全干净</span> → 模型不会在空地大面积幻觉。</p>
+<table>
+<tr><th>grid</th><th>城市</th><th>FP poly</th><th>FP 面积 m²</th></tr>
+<tr><td>ELS0064</td><td>East London</td>
+      <td style="color:#1a9850"><b>0</b></td><td>0</td></tr>
+<tr><td>PMB0226</td><td>Pietermaritzburg</td>
+      <td style="color:#1a9850"><b>0</b></td><td>0</td></tr>
+<tr><td>PMB0042</td><td>Pietermaritzburg</td>
+      <td style="color:#333"><b>3</b></td><td>20</td></tr>
+<tr><td>GQB0204</td><td>Gqeberha</td>
+      <td style="color:#333"><b>4</b></td><td>21</td></tr>
+<tr><td>DBN0402</td><td>Durban</td>
+      <td style="color:#333"><b>4</b></td><td>37</td></tr>
+<tr><td>GQB0203</td><td>Gqeberha</td>
+      <td style="color:#333"><b>4</b></td><td>57</td></tr>
+<tr><td>GQB0327</td><td>Gqeberha</td>
+      <td style="color:#333"><b>5</b></td><td>90</td></tr>
+<tr><td>GQB0202</td><td>Gqeberha</td>
+      <td style="color:#333"><b>6</b></td><td>116</td></tr>
+<tr><td>DBN0403</td><td>Durban</td>
+      <td style="color:#333"><b>4</b></td><td>265</td></tr>
+<tr><td>PTA0738</td><td>Pretoria</td>
+      <td style="color:#333"><b>3</b></td><td>337</td></tr>
+</table>
+
+<div class="note"><b>注意(GT 语义):</b>Li GT 是 sub-array / panel 级(A2,可能非穷尽)。稀疏 grid 的高过涂比<b>可能部分是 Li 漏标</b>而非纯模型 FP —— 报告中已标注需 RA spot-check;空标注 grid 是更干净的 FP 信号。polygon F1(总体 0.36)被碎切压低,仅作诊断,不用于模型选择。</div>
+
+<h2>建议下一步</h2>
+<ul>
+<li><b>挂上 <code>solar_cls</code> 重评</b> —— 直接针对失败模式 1(durban/bloemfontein,mean area-P 0.43–0.47),预期 σ_Bw 和 bulk 收紧最明显。</li>
+<li><b>RA spot-check 高过涂 grid</b>(BFN0126、DBN0044/0100/0666),区分真 lookalike FP vs Li 漏标,标定真实跨域 precision 下界。</li>
+<li><b>可视化复核 recall 崩的 grid</b>(PTA0292、PTA0360)—— 确认是真漏检还是 Li 过度细切。</li>
+<li><b>一阶普查现在可用</b>(总体 bulk 1.04、slope 1.09、R² 0.97);PMB/ELS 已可 grid 级使用。其余四城需先做 cls + recall 工作再做经济级 per-grid 使用。</li>
+</ul>
+
+<p style="font-size:12px;color:#999;margin-top:30px">完整报告:<code>docs/experiments/2026-05-31-xdomain60-unified-reviewall-A.md</code> · 指标:<code>results/analysis/xdomain60/*.csv</code> · 评估脚本:<code>scripts/analysis/eval_xdomain60.py</code></p>
+</body></html>
