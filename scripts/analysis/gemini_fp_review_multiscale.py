@@ -297,6 +297,14 @@ def main() -> None:
         "in the same instant (skews account routing). Default 0.25 = 150-250 ms band; "
         "0 disables. Ignored when --workers <= 1.",
     )
+    ap.add_argument(
+        "--resume",
+        action="store_true",
+        help="If --output already exists, keep its rows whose quality_flag=='usable' and only "
+        "(re)run the candidates that are still missing or were abstentions (quality_flag!='usable'). "
+        "The output is rewritten as preserved-usable + freshly-run rows (no duplicate candidate_id). "
+        "Designed for quota/limit resumption: a re-run only spends credit on what did not succeed.",
+    )
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -304,6 +312,30 @@ def main() -> None:
     pairs = load_pairs(args.tight_chips_csv, args.wide_chips_csv)
     if args.limit is not None:
         pairs = pairs[: args.limit]
+
+    preserved_records: list[dict[str, Any]] = []
+    if args.resume and args.output.exists():
+        seen_usable: set[str] = set()
+        for line in args.output.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            cid = rec.get("candidate_id")
+            if cid and rec.get("quality_flag") == "usable":
+                preserved_records.append(rec)
+                seen_usable.add(cid)
+        n_before = len(pairs)
+        pairs = [p for p in pairs if p.candidate_id not in seen_usable]
+        print(
+            f"[resume] preserved {len(seen_usable)} usable row(s); {len(pairs)}/{n_before} "
+            f"candidate(s) to (re)run (missing or prior abstention).",
+            flush=True,
+        )
+
     config = load_config(args)
 
     for p in pairs:
@@ -335,6 +367,13 @@ def main() -> None:
 
     with args.output.open("w", encoding="utf-8") as fh:
         write_lock = threading.Lock()
+
+        # On --resume, carry the previously-usable rows forward so the output stays
+        # the full candidate set (preserved-usable + freshly-run) with no duplicates.
+        for rec in preserved_records:
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        if preserved_records:
+            fh.flush()
 
         def record_result(pair: Pair, res: dict[str, Any]) -> None:
             nonlocal n_usable, n_abstain, n_pv, n_notpv
