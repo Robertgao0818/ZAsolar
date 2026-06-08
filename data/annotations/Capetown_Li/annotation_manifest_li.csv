@@ -1,0 +1,18 @@
+grid_id,src_filename,n_polygons,paren_count,count_match,crs,src_layer_name,out_layer_name,label_source,semantic_confidence,quality_tier
+L1842,G1842  (31).gpkg,31,31,yes,EPSG:4326,SAM_太阳能_20260327_195511,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1843,G1843（21）.gpkg,21,21,yes,EPSG:4326,SAM_太阳能_20260327_205629,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1844,G1844 (46).gpkg,46,46,yes,EPSG:4326,SAM_太阳能_20260327_211028,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1846,G1846 (5).gpkg,5,5,yes,EPSG:4326,SAM_太阳能_20260327_211755,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1895,G1895 (260).gpkg,260,260,yes,EPSG:4326,SAM_太阳能_20260329_125402,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1896,G1896(202).zip (3 parts merged),202,202,yes,EPSG:4326,SAM_1896-2_20260329_192755|SAM_1896-3_20260329_194304|SAM_1896_20260329_141302,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1897,G1897（112）.gpkg,112,112,yes,EPSG:4326,SAM_1897_20260329_204040,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1898,G1898(26）.gpkg,26,26,yes,EPSG:4326,SAM_1898_20260329_210802,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1899,G1899（94）.gpkg,94,94,yes,EPSG:4326,SAM_1899_20260329_221413,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1900,G1900(41).gpkg,41,41,yes,EPSG:4326,SAM_1900_20260330_135827,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1901,G1901（12）.gpkg,12,12,yes,EPSG:4326,SAM_1901_20260330_141309,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1902,G1902(8).gpkg,8,8,yes,EPSG:4326,SAM_1902_20260330_142459,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1950,G1950（82）.gpkg,82,82,yes,EPSG:4326,SAM_1903_20260330_145935,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1951,G1951（135）.gpkg,135,135,yes,EPSG:4326,SAM_1951_20260330_160543,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1952,G1952（210）.gpkg,210,210,yes,EPSG:4326,SAM_1952_20260402_194245,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1953,G1953(55).gpkg,55,55,yes,EPSG:4326,SAM_1953_20260402_202404,li_ct_gt,human_manual_sam_assisted,A2,T2
+L1954,G1954(153).gpkg,153,153,yes,EPSG:4326,SAM_1954_20260402_210259,li_ct_gt,human_manual_sam_assisted,A2,T2

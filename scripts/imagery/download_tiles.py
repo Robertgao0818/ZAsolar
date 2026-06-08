@@ -161,6 +161,7 @@ def download_grid(
     dry_run: bool = False,
     tile_mask: set | None = None,
     *,
+    region: str | None = None,
     tiff_compress: str = DEFAULT_TIFF_COMPRESS,
     jpeg_quality: int = DEFAULT_JPEG_QUALITY,
     tiled: bool = True,
@@ -173,13 +174,16 @@ def download_grid(
         dry_run: Only print info, don't download.
         tile_mask: Optional set of (col, row) tuples to download.
                    If None, download all tiles.
+        region: Region key (e.g. "ct"). Required for non-default annotation
+                schemes — L-prefix Li grids live in the `li` scheme's
+                data/task_grid_li.gpkg and only resolve when region is passed.
         tiff_compress: GeoTIFF compression. Use "NONE" for uncompressed.
         jpeg_quality: JPEG quality when tiff_compress="JPEG".
         tiled: Write tiled GeoTIFF output.
         force: Re-download and overwrite existing tiles.
     """
     grid_id = normalize_grid_id(grid_id)
-    spec = get_grid_spec(grid_id)
+    spec = get_grid_spec(grid_id, region=region)
 
     from core.grid_utils import TILES_ROOT
     tiles_dir = TILES_ROOT / grid_id
@@ -257,6 +261,12 @@ def download_grid(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="下载 Cape Town WMS 瓦片")
     parser.add_argument("--grid-id", required=True, help="目标 grid ID (e.g. G1189)")
+    parser.add_argument(
+        "--region",
+        default=None,
+        help="Region key (e.g. ct). Required for L-prefix Li grids so they "
+        "resolve from the li scheme's task_grid_li.gpkg, not the Gao task grid.",
+    )
     parser.add_argument("--dry", action="store_true", help="只打印 tile 信息")
     parser.add_argument(
         "--tiff-compress",
@@ -284,6 +294,7 @@ if __name__ == "__main__":
     download_grid(
         args.grid_id,
         dry_run=args.dry,
+        region=args.region,
         tiff_compress=args.tiff_compress,
         jpeg_quality=args.jpeg_quality,
         tiled=not args.no_tiled,

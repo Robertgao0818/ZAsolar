@@ -151,37 +151,46 @@ def discover_annotations(
                 annotation_layer=ann_layer,
             )
 
-        # --- Fallback: scan annotations_dir for unregistered files ---
-        ann_dir = base_dir / config.paths.annotations_dir
-        if not ann_dir.exists():
-            continue
+        # --- Fallback: scan annotations dirs for unregistered files ---
+        # Scan the region's primary annotations_dir plus every annotation_scheme
+        # dir (e.g. Cape Town's li scheme -> Capetown_Li), so independently-
+        # gridded schemes (L-prefix Li grids) are discovered, not just Gao.
+        scan_dirs: list[Path] = [base_dir / config.paths.annotations_dir]
+        for scheme in config.annotation_schemes.values():
+            sdir = base_dir / scheme.annotations_dir
+            if sdir not in scan_dirs:
+                scan_dirs.append(sdir)
 
-        unregistered_count = 0
-        for gpkg in sorted(ann_dir.glob("*.gpkg")):
-            # Extract grid_id from filename
-            grid_id = _extract_grid_id(gpkg.name, config.grid_id_pattern)
-            if grid_id is None:
+        for ann_dir in scan_dirs:
+            if not ann_dir.exists():
                 continue
-            if grid_id in entries or grid_id in exclude:
-                continue
 
-            entries[grid_id] = AnnotationEntry(
-                grid_id=grid_id,
-                region_key=rkey,
-                path=gpkg,
-                schema_type=_classify_schema(gpkg, grid_id),
-                annotation_count=None,
-                annotation_layer=None,
-                registered=False,
-            )
-            unregistered_count += 1
+            unregistered_count = 0
+            for gpkg in sorted(ann_dir.glob("*.gpkg")):
+                # Extract grid_id from filename
+                grid_id = _extract_grid_id(gpkg.name, config.grid_id_pattern)
+                if grid_id is None:
+                    continue
+                if grid_id in entries or grid_id in exclude:
+                    continue
 
-        if unregistered_count > 0:
-            print(
-                f"[WARN] {rkey}: {unregistered_count} annotation files found "
-                f"in {ann_dir.name}/ but not registered in regions.yaml. "
-                f"Consider adding them for full provenance tracking."
-            )
+                entries[grid_id] = AnnotationEntry(
+                    grid_id=grid_id,
+                    region_key=rkey,
+                    path=gpkg,
+                    schema_type=_classify_schema(gpkg, grid_id),
+                    annotation_count=None,
+                    annotation_layer=None,
+                    registered=False,
+                )
+                unregistered_count += 1
+
+            if unregistered_count > 0:
+                print(
+                    f"[WARN] {rkey}: {unregistered_count} annotation files found "
+                    f"in {ann_dir.name}/ but not registered in regions.yaml. "
+                    f"Consider adding them for full provenance tracking."
+                )
 
     return entries
 

@@ -45,6 +45,15 @@ class ImageryLayerConfig:
     # for status=done_installed_during_census. May be None for layers added before
     # the field was introduced.
     census_imagery_mid_date: str | None = None
+    # Real capture-window bounds (ISO YYYY-MM-DD) when known from the provider's
+    # collection metadata (e.g. Vexcel /ortho/dates). census_imagery_mid_date is a
+    # single-value fallback; for per-grid install-date present-side clamping prefer
+    # the real per-grid flight date. capture_date_range_end is the safe global
+    # upper bound (no detection can be present-dated later than the last flight).
+    capture_date_range_start: str | None = None
+    capture_date_range_end: str | None = None
+    # Comma-separated distinct flight dates observed across the collection footprint.
+    capture_flight_dates: str | None = None
 
 
 @dataclass(frozen=True)
@@ -60,6 +69,29 @@ class ModelRunConfig:
 
 
 @dataclass(frozen=True)
+class AnnotationSchemeConfig:
+    """One annotation scheme within a region.
+
+    A region can host more than one independent grid scheme that share the
+    same imagery (e.g. Cape Town's primary ``gao`` scheme and ``li``, Li Yang's
+    independently-gridded SAM2 GT on the eastern Cape Flats). Schemes do NOT
+    share a grid namespace — Li's G1895 != Gao's G1895 — so each scheme can
+    carry its own ``annotations_dir``, ``task_grid``, ``task_kml`` and an
+    optional scheme-level ``grid_id_pattern`` used to route a grid_id to the
+    right annotations directory.
+    """
+    scheme_id: str
+    region_key: str
+    annotations_dir: str
+    grid_id_pattern: str | None = None
+    task_grid: str | None = None
+    task_kml: str | None = None
+    grid_count: int | None = None
+    grid_id_range: str | None = None
+    notes: str | None = None
+
+
+@dataclass(frozen=True)
 class RegionConfig:
     key: str
     description: str
@@ -70,6 +102,7 @@ class RegionConfig:
     grids: dict[str, dict[str, Any]] = field(default_factory=dict)
     imagery_layers: dict[str, ImageryLayerConfig] = field(default_factory=dict)
     model_runs: dict[str, ModelRunConfig] = field(default_factory=dict)
+    annotation_schemes: dict[str, AnnotationSchemeConfig] = field(default_factory=dict)
     default_imagery_layer: str | None = None
 
 
@@ -107,6 +140,9 @@ def _load_registry() -> dict[str, RegionConfig]:
                 coverage_grids=tuple(layer_data.get("coverage_grids", [])),
                 provenance=layer_data.get("provenance"),
                 census_imagery_mid_date=layer_data.get("census_imagery_mid_date"),
+                capture_date_range_start=layer_data.get("capture_date_range_start"),
+                capture_date_range_end=layer_data.get("capture_date_range_end"),
+                capture_flight_dates=layer_data.get("capture_flight_dates"),
             )
 
         model_runs: dict[str, ModelRunConfig] = {}
@@ -122,6 +158,22 @@ def _load_registry() -> dict[str, RegionConfig]:
                 notes=run_data.get("notes"),
             )
 
+        annotation_schemes: dict[str, AnnotationSchemeConfig] = {}
+        for scheme_id, scheme_data in (data.get("annotation_schemes") or {}).items():
+            annotation_schemes[scheme_id] = AnnotationSchemeConfig(
+                scheme_id=scheme_id,
+                region_key=key,
+                annotations_dir=scheme_data.get(
+                    "annotations_dir", paths.annotations_dir
+                ),
+                grid_id_pattern=scheme_data.get("grid_id_pattern"),
+                task_grid=scheme_data.get("task_grid"),
+                task_kml=scheme_data.get("task_kml"),
+                grid_count=scheme_data.get("grid_count"),
+                grid_id_range=scheme_data.get("grid_id_range"),
+                notes=scheme_data.get("notes"),
+            )
+
         regions[key] = RegionConfig(
             key=key,
             description=data.get("description", ""),
@@ -132,6 +184,7 @@ def _load_registry() -> dict[str, RegionConfig]:
             grids=data.get("grids", {}),
             imagery_layers=imagery_layers,
             model_runs=model_runs,
+            annotation_schemes=annotation_schemes,
             default_imagery_layer=data.get("default_imagery_layer"),
         )
     return regions
@@ -187,7 +240,12 @@ def lookup_regions(grid_id: str) -> list[str]:
         covered = any(
             grid_id in layer.coverage_grids for layer in config.imagery_layers.values()
         )
-        if covered or grid_id in config.grids or grid_id in _task_grid_ids(key):
+        if (
+            covered
+            or grid_id in config.grids
+            or grid_id in _task_grid_ids(key)
+            or grid_id in _scheme_task_grid_ids(key)
+        ):
             hits.append(key)
     return hits
 
@@ -265,6 +323,37 @@ def _task_grid_ids(region_key: str) -> frozenset[str]:
     if "gridcell_id" not in gdf.columns:
         return frozenset()
     return frozenset(str(item).strip().upper() for item in gdf["gridcell_id"].dropna())
+
+
+@lru_cache(maxsize=None)
+def _scheme_task_grid_ids(region_key: str) -> frozenset[str]:
+    """Return grid IDs from all annotation_scheme task_grids in a region.
+
+    Lets independently-gridded schemes (e.g. Cape Town's ``li`` L-prefix GT,
+    whose cells live in ``data/task_grid_li.gpkg`` rather than the region's
+    primary task_grid) be discovered by ``lookup_regions``.
+    """
+    try:
+        config = get_region_config(region_key)
+    except KeyError:
+        return frozenset()
+    ids: set[str] = set()
+    for scheme in config.annotation_schemes.values():
+        if not scheme.task_grid:
+            continue
+        path = BASE_DIR / scheme.task_grid
+        if not path.exists():
+            continue
+        try:
+            import geopandas as gpd
+
+            gdf = gpd.read_file(path, columns=["gridcell_id"])
+        except Exception:
+            continue
+        if "gridcell_id" not in gdf.columns:
+            continue
+        ids.update(str(item).strip().upper() for item in gdf["gridcell_id"].dropna())
+    return frozenset(ids)
 
 
 def get_all_grid_id_patterns() -> list[str]:
@@ -410,3 +499,74 @@ def get_model_run_path(region_key: str, run_id: str) -> Path:
     """Return the absolute filesystem path where a model_run writes results."""
     run = get_model_run(region_key, run_id)
     return BASE_DIR / run.results_path
+
+
+# ---------------------------------------------------------------------------
+# Annotation schemes (added 2026-06-04 for Li CT GT independent grid scheme)
+# ---------------------------------------------------------------------------
+
+def list_annotation_schemes(region_key: str) -> list[str]:
+    """Return all annotation scheme IDs registered under a region."""
+    return list(get_region_config(region_key).annotation_schemes.keys())
+
+
+def get_annotation_scheme(region_key: str, scheme_id: str) -> AnnotationSchemeConfig:
+    """Return the AnnotationSchemeConfig for a (region, scheme_id) pair."""
+    config = get_region_config(region_key)
+    if scheme_id not in config.annotation_schemes:
+        raise KeyError(
+            f"Annotation scheme '{scheme_id}' not found in region '{region_key}'. "
+            f"Available: {list(config.annotation_schemes.keys())}"
+        )
+    return config.annotation_schemes[scheme_id]
+
+
+def resolve_annotation_scheme(region_key: str, grid_id: str) -> AnnotationSchemeConfig | None:
+    """Pick the annotation scheme that owns a grid_id.
+
+    Resolution: a scheme with its own ``grid_id_pattern`` claims a grid_id
+    whose normalized form fully matches that pattern. If exactly one scheme
+    declares a pattern and matches, return it. If no scheme declares a pattern
+    (or none match), fall back to the scheme whose ``annotations_dir`` equals
+    the region default (the "primary" scheme), else None.
+
+    This lets independently-gridded schemes (e.g. Cape Town's ``li`` L-prefix
+    GT) route grid IDs to their own ``annotations_dir`` without colliding with
+    the primary scheme.
+    """
+    grid_id = grid_id.strip().upper()
+    config = get_region_config(region_key)
+    schemes = config.annotation_schemes
+    if not schemes:
+        return None
+
+    # 1. Schemes that declare a grid_id_pattern and match this grid.
+    for scheme in schemes.values():
+        pat = scheme.grid_id_pattern
+        if pat and re.fullmatch(pat, grid_id):
+            return scheme
+
+    # 2. Fall back to the scheme pointing at the region's default annotations_dir.
+    default_dir = config.paths.annotations_dir
+    for scheme in schemes.values():
+        if scheme.annotations_dir == default_dir:
+            return scheme
+    return None
+
+
+def get_annotations_dir_for_grid(region_key: str, grid_id: str) -> Path | None:
+    """Return the absolute annotations directory that should hold a grid's GT.
+
+    Routes via ``resolve_annotation_scheme``; falls back to the region's
+    default ``annotations_dir`` when no scheme matches. Used by GT auto-
+    discovery so L-prefix Li grids resolve to ``data/annotations/Capetown_Li``
+    instead of the primary ``data/annotations/Capetown``.
+    """
+    scheme = resolve_annotation_scheme(region_key, grid_id)
+    if scheme is not None:
+        return BASE_DIR / scheme.annotations_dir
+    try:
+        config = get_region_config(region_key)
+    except KeyError:
+        return None
+    return BASE_DIR / config.paths.annotations_dir

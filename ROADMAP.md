@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-05-31: feat(gemini): production-wire two-stage FP-review into the JHB inventory seam
-- 2026-05-31: docs(handoff): JHB two-stage FP-review production handoff
-- 2026-05-31: feat(gemini): two-stage skylight FP-review with fail-closed merge + soak instrumentation
-- 2026-05-31: feat(analysis): post-hoc merge/NMS spatial eval + polygon-conf sweep
-- 2026-05-31: chore(registry): register solar_zerov2 Phase 0 model_runs + jnb alias
-- 2026-05-31: chore(gitignore): exclude gemini calibration artifacts, agy/CLI state, local launchers
-- 2026-05-31: feat(gemini): FP-review calibration tooling + RA-comparison eval
-- 2026-05-31: feat(gemini): worker concurrency for FP-review + detection-review scorers
+- 2026-06-08: fix(progress): make ROADMAP recently-completed amend/rebase-safe
+- 2026-06-08: chore: roll ROADMAP recently-completed + add watch-pull-and-stop-pod helper
+- 2026-06-08: feat(backdating): Vexcel /ortho/dates capture-date probe + descriptive stats
+- 2026-06-08: docs(cls): adaptive-chip upgrade plan + validated results
+- 2026-06-08: feat(ct-census): Li independent GT scheme + registry plumbing + lock v2_all baseline
+- 2026-06-01: feat(gemini): --resume for multiscale FP-review + JHB full-inventory FP-cut delivery
+- 2026-05-31: docs(handoff): require --routing-salt-mode target for flash FP-cut runs
+- 2026-05-31: feat(xdomain): 6-city cross-domain eval of unified_reviewall_A vs Li RA GT
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.

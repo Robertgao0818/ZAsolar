@@ -22,16 +22,44 @@ regions:
       results_root: "results"
       annotations_dir: "data/annotations/Capetown"
       task_grid: "data/task_grid.gpkg"
-    grid_id_pattern: "G\\d{4}"
+    # Region pattern accepts both the primary Gao scheme (G\d{4}) and Li's
+    # independent L-prefix scheme (L\d{4}); per-scheme routing is in
+    # annotation_schemes[*].grid_id_pattern.
+    grid_id_pattern: "(G\\d{4}|L\\d{4})"
 
     annotation_schemes:
       gao:
+        grid_id_pattern: "G\\d{4}"
         task_grid: "data/task_grid.gpkg"
         task_kml: "Dropbox/RA_Solar/grid_data/cape_town_grid_Gao.kml"
         grid_count: 2214
         grid_id_range: "G0001..G4401"
         annotations_dir: "data/annotations/Capetown"
         notes: "Primary scheme; source of all aerial_2025 imagery and training data."
+      li:
+        grid_id_pattern: "L\\d{4}"
+        task_grid: "data/task_grid_li.gpkg"
+        task_kml: "/mnt/c/Users/gaosh/Dropbox/RA_Solar/Li/capetown/cape_town_grid_Li_G0029_G1841.kml"
+        grid_count: 17
+        grid_id_range: "L1842..L1954"
+        annotations_dir: "data/annotations/Capetown_Li"
+        notes: |
+          Li Yang's independent CT GT scheme (registered 2026-06-04, Phase 0.5 of
+          ct-census-model-comparison-plan). 17 grids (L1842/43/44/46, L1895-1902,
+          L1950-54), ~1,493 polygons. SOURCE IDS WERE GAO-NAMED (G1842..G1954) but
+          remapped to L-prefix here because Li uses an INDEPENDENT grid namespace —
+          Li's G1895 != Gao's G1895 (Gao task_grid has no G1895). L-prefix avoids
+          all collision. Semantics: SAM2 sub-array level, A2 / T2,
+          label_source=human_manual_sam_assisted; layers named SAM_太阳能_* /
+          SAM_<id>_*. EPSG:4326. Annotated on aerial_2025 imagery (on-disk
+          aerial_2025/G1895 tile bbox matches Li L1895 GT + KML cell exactly).
+          Located in the eastern Cape Flats / False Bay (lon ~18.81-18.90), outside
+          the Gao task_grid range — adds distinct urban-fabric geo-diversity to the
+          ranking face. Leakage-clean (not in any Gao suite or v3c/unified_A
+          training set). task_grid_li.gpkg carries the real KML cell geometry.
+          NOTE: aerial_2025 tiles for L1895 are physically at
+          tiles/cape_town/aerial_2025/G1895/ (downloaded under the source Gao ID);
+          the other 16 Li grids still need WMS download (Phase 0.5 step 3).
 
     imagery_layers:
       aerial_2025:
@@ -57,6 +85,10 @@ regions:
           G1973, G1974, G1975, G1976, G1977, G1979, G1981, G2025, G2026,
           G2027, G2028, G2029, G2030, G2031, G2032, G2033, G2034, G2035,
           G2037, G2038,
+          # Li L-prefix scheme grids (eastern Cape Flats; aerial_2025 vintage; added 2026-06-04).
+          # Namespaced (L-prefix) so they never collide with Gao G-IDs. Tiles land under aerial_2025/L<NNNN>/.
+          L1842, L1843, L1844, L1846, L1895, L1896, L1897, L1898, L1899,
+          L1900, L1901, L1902, L1950, L1951, L1952, L1953, L1954,
         ]
     default_imagery_layer: "aerial_2025"
 
@@ -87,6 +119,128 @@ regions:
           per handoff §5.3 for A vs G decision. Imagery_layer aerial_2025
           (V3-C training imagery). Eval against existing SAM2 GT auto-
           discovered from data/annotations/Capetown/.
+      v3c_wave1_pixelor:
+        model_version: "exp003_C_targeted_hn"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/v3c_wave1_pixelor"
+        inference_date: "2026-06-04"
+        grid_count: 27
+        notes: |
+          CT census wave1 horizontal eval, merge_mode pixel-or, v4_canonical
+          postproc. 27 grids = cape_town_independent_26 (G1240/G1243/.../G1572)
+          + L1895 (the sole Li GT grid).
+      v3c_wave1_perdet:
+        model_version: "exp003_C_targeted_hn"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/v3c_wave1_perdet"
+        inference_date: "2026-06-04"
+        grid_count: 27
+        notes: |
+          CT census wave1 horizontal eval, merge_mode per-detection,
+          v4_canonical postproc. 27 grids = cape_town_independent_26 + L1895.
+      unifiedA_wave1_pixelor:
+        model_version: "exp_unified_reviewall_A"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/unifiedA_wave1_pixelor"
+        inference_date: "2026-06-04"
+        grid_count: 27
+        notes: |
+          CT census wave1 horizontal eval, merge_mode pixel-or, v4_canonical
+          postproc. 27 grids = cape_town_independent_26 + L1895.
+      unifiedA_wave1_perdet:
+        model_version: "exp_unified_reviewall_A"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/unifiedA_wave1_perdet"
+        inference_date: "2026-06-04"
+        grid_count: 27
+        notes: |
+          CT census wave1 horizontal eval, merge_mode per-detection,
+          v4_canonical postproc. 27 grids = cape_town_independent_26 + L1895.
+      v3c_li_perdet:
+        model_version: "exp003_C_targeted_hn"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/v3c_li_perdet"
+        inference_date: "2026-06-07"
+        grid_count: 16
+        notes: |
+          CT census Path1/Path2 held-out eval, merge_mode per-detection,
+          v4_canonical postproc. 16 held-out Li grids (L1842/43/44/46,
+          L1896-1902, L1950-54), leakage-clean, never used to tune any threshold.
+          Incumbent reference for the post-proc path bake-off.
+      unifiedA_li_perdet:
+        model_version: "exp_unified_reviewall_A"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/unifiedA_li_perdet"
+        inference_date: "2026-06-07"
+        grid_count: 16
+        notes: |
+          CT census Path1/Path2 held-out eval, merge_mode per-detection,
+          v4_canonical postproc. 16 held-out Li grids. Challenger; subject of the
+          Path1 (t=0.85 + FP-cut) vs Path2 (GT-tuned polygon-conf) decision.
+      unifiedA_li_gemfpcut:
+        model_version: "exp_unified_reviewall_A"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/unifiedA_li_gemfpcut"
+        inference_date: "2026-06-07"
+        grid_count: 16
+        notes: |
+          Path 1 = unifiedA_li_perdet + Gemini FP-review FP-cut (gemini-3-flash-agent,
+          band-split: HI conf>=0.95 two-stage multiscale+skylight, LO 0.5-0.95 stage1-only
+          as drops). All 3277 per-det polygons reviewed; 1176 dropped (35.9%), 2101 kept.
+          Fail-closed apply (0 conflicts/integrity violations). Compared vs Path 2
+          (GT-tuned polygon-conf t=0.97) on sigma_Bw/RMSE/bulk + cov50 count recall.
+      unifiedA_li_clsonly:
+        model_version: "exp_unified_reviewall_A"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/unifiedA_li_clsonly"
+        inference_date: "2026-06-08"
+        grid_count: 16
+        notes: |
+          **SUPERSEDED 2026-06-08 by unifiedA_li_clsonly_v2_all (adaptive_v1).**
+          Historical fixed-400-chip baseline, kept for provenance/A-B reference.
+          unifiedA_li_perdet -> solar_cls PV filter (dinov2_vits14, fixed 400px
+          centroid crop, aerial_2025 calibrated thresh 0.5396, production default
+          area_cutoff=30: >=30 m2 auto-kept, <30 m2 adjudicated). NO Gemini, NO
+          GT-threshold tuning. 3277 base -> 2211 kept (1066 dropped, 32.5%).
+          Metrics: cov50 0.815 / sigma_Bw 0.297 / bulk 1.427 / aggF1 0.723. Was the
+          locked baseline until the adaptive bbox+margin chip beat it on every metric
+          (sigma_Bw 0.297->0.260, nonpv_kill@0.95R 0.871->0.959, cov50 0.815->0.829).
+          calib thresh set out-of-sample (CT v1 val = Gao G16xx-G20xx), leakage gate
+          vs these 16 L-grids = CLEAN. Domain bound: CT aerial_2025 in-domain only.
+      unifiedA_li_clsonly_v2_bypass:
+        model_version: "exp_unified_reviewall_A"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/unifiedA_li_clsonly_v2_bypass"
+        inference_date: "2026-06-08"
+        grid_count: 16
+        notes: |
+          A/B config (b) for the adaptive-bbox chip upgrade (chip_spec_version=
+          adaptive_v1). unifiedA_li_perdet -> solar_cls dinov2 RETRAINED on
+          adaptive bbox+margin chips, aerial_2025 recalibrated thresh 0.7168,
+          area_cutoff=30 bypass kept (matches baseline production policy). Compare
+          vs unifiedA_li_clsonly (locked fixed-400 baseline: cov50 0.815/sigma_Bw
+          0.297/bulk 1.427). Plan: docs/plans/2026-06-08-cls-chip-adaptive-upgrade-plan.md
+      unifiedA_li_clsonly_v2_all:
+        model_version: "exp_unified_reviewall_A"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/unifiedA_li_clsonly_v2_all"
+        inference_date: "2026-06-08"
+        grid_count: 16
+        notes: |
+          **LOCKED CT-census post-proc baseline (promoted 2026-06-08).** Supersedes
+          unifiedA_li_clsonly (fixed-400). unifiedA_li_perdet -> solar_cls dinov2
+          RETRAINED on adaptive bbox+margin chips (chip_spec_version=adaptive_v1:
+          bbox-center, MARGIN=0.6, clamp [96,512]px, edge-reflect pad, INTER_CUBIC
+          up / INTER_AREA down), aerial_2025 recalibrated thresh 0.7168, classify-all
+          (area_cutoff bypass dropped; only ext_px>MAX_SIDE clipped dets kept as a
+          PV floor, ~0.1% of CT dets). 3277 base -> 2144 kept. Metrics: cov50 0.829
+          / sigma_Bw 0.260 / bulk 1.376 / RMSE 1332 / R2 0.955 / aggF1 0.742 --
+          beats the fixed-400 baseline on EVERY metric and is threshold-robust
+          (dominates cov50 at every sweep point 0.85-0.97). Tier-0 aerial_2025
+          nonpv_kill@0.95R 0.959 (was 0.871). Domain bound: CT aerial_2025 in-domain
+          only; JHB Vexcel/GEID keep the Gemini cross-domain reviewer (re-validate
+          classify-all large band on JHB CBD 25-grid before extending cross-domain).
+          Results: docs/plans/2026-06-08-cls-chip-adaptive-upgrade-RESULTS.md
       # Deferred: checkpoints_cleaned (24 grids) and NaN-config (~77 grids)
       # remain under legacy results/ for PR8 triage.
 
@@ -201,11 +355,14 @@ regions:
         path: "/home/gaosh/zasolar_data/tiles/johannesburg/vexcel_2024"
         source: "vexcel"
         vintage: "2024"
-        census_imagery_mid_date: "2024-06-30"  # mid-year fallback; verify against Vexcel za-gp-johannesburg-2024 collection manifest when next refreshed
+        census_imagery_mid_date: "2024-03-18"  # FALLBACK ONLY: true midpoint of the real flight window 2024-02-17..2024-04-19. For install-date present-side clamping use the PER-GRID real flight date (capture_date_range_* + /ortho/dates), not this single value. Dominant flight (~80% of area) is 2024-02-21; eastern strip is 2024-04-19. Verified via /ortho/dates API 2026-06-04 (was nominal 2024-06-30, ~3-4mo too late).
+        capture_date_range_start: "2024-02-17"  # earliest first-capture-date returned by /ortho/dates (W edge + E edge)
+        capture_date_range_end: "2024-04-19"    # latest last-capture-date returned by /ortho/dates (eastern strip ~lon 28.08-28.11)
+        capture_flight_dates: "2024-02-17, 2024-02-21, 2024-04-19"  # three distinct flight dates observed across 36-point grid sample; per-point queryable via /ortho/dates (authoritative for per-grid present-clamp)
         file_layout: "chunked"
         file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
         crs: "EPSG:3857"
-        provenance: "Vexcel za-gp-johannesburg-2024 ortho (~6.7 cm GSD); downloaded 2026-04-29 via scripts/validation/download_vexcel_eval_sample.py. Native raster CRS is Web Mercator (EPSG:3857) per rasterio inspection 2026-05-05."
+        provenance: "Vexcel za-gp-johannesburg-2024 ortho (~6.7 cm GSD); downloaded 2026-04-29 via scripts/validation/download_vexcel_eval_sample.py. Native raster CRS is Web Mercator (EPSG:3857) per rasterio inspection 2026-05-05. Capture dates verified 2026-06-04 via Vexcel API /ortho/dates (36-point grid sample): flights on 2024-02-17 (W and E edges), 2024-02-21 (central/southern majority), 2024-04-19 (eastern strip ~lon 28.08-28.11). Confirmed via endpoint https://api.vexcelgroup.com/v2/ortho/dates with collection=za-gp-johannesburg-2024 and layer=urban."
         coverage_grids: [
           G0772, G0773, G0774, G0775, G0776, G0814, G0815, G0816, G0817,
           G0818, G0853, G0854, G0855, G0856, G0857, G0888, G0889, G0890,
