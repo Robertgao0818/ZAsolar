@@ -29,6 +29,7 @@ import pyogrio
 from shapely.ops import unary_union
 
 from core.region_registry import (
+    get_annotations_dir_for_grid,
     get_model_run,
     get_region_config,
     list_model_runs,
@@ -195,8 +196,11 @@ def _gt_spec_for(
     layer = entry.get("annotation_layer")
     gt_path = _resolve(src) if src else None
     if gt_path is None or not gt_path.exists():
-        # Fall back to auto-discovery in the region's annotations directory.
-        annotations_dir = _resolve(region_cfg.paths.annotations_dir)
+        # Fall back to auto-discovery. Route through the annotation scheme that
+        # owns this grid_id (e.g. L-prefix Li grids -> Capetown_Li), so multi-
+        # scheme regions don't all glob the primary annotations dir.
+        scheme_dir = get_annotations_dir_for_grid(region_cfg.key, grid_id)
+        annotations_dir = scheme_dir or _resolve(region_cfg.paths.annotations_dir)
         gt_path = _discover_gt(annotations_dir, grid_id)
         layer = None  # _sum_area_m2 will pick the first available layer
     if gt_path is None:

@@ -67,3 +67,12 @@ models:
     region_scope: [cape_town, johannesburg]
     evaluation_profile_default: "installation"
     postproc_config: "configs/postproc/v4_canonical.json"
+
+  exp_unified_reviewall_A:
+    tag: "UnifiedRA-A"
+    checkpoint: "checkpoints/exp_unified_reviewall_A/best_model.pth"
+    description: "V3-C warm-start unified reviewall (2026-05-13, mask-trusted halo fix); CT aerial_2025 + JHB Vexcel 2024, per-instance mask_trusted gating"
+    training_set_id: "unified_reviewall_20260511"
+    region_scope: [cape_town, johannesburg]
+    evaluation_profile_default: "installation"
+    postproc_config: "configs/postproc/v4_canonical.json"

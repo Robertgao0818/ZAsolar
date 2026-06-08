@@ -109,6 +109,20 @@ def _resolve_gt_gpkg(grid_id: str, *, region: str | None = None) -> Path:
                 return source
         except KeyError:
             pass
+        # Scheme-aware auto-discovery: route grid_id (e.g. L-prefix Li grids)
+        # to the annotations dir of the scheme that owns it before falling back
+        # to the region's default Capetown/Joburg dirs below.
+        try:
+            scheme_dir = region_registry.get_annotations_dir_for_grid(rkey, grid_id)
+        except KeyError:
+            scheme_dir = None
+        if scheme_dir is not None:
+            match = _find_latest_gpkg(
+                scheme_dir,
+                [f"{grid_id}_SAM2_*.gpkg", f"{grid_id}.gpkg", f"{grid_id}_*.gpkg"],
+            )
+            if match is not None:
+                return match
 
     # --- Fallback: directory-based search ---
     search_roots: list[tuple[Path, list[str]]] = []
@@ -303,6 +317,22 @@ def get_grid_record(grid_id: str, *, region: str | None = None):
                 if len(matches) > 0:
                     return matches.iloc[0]
         except KeyError:
+            pass
+
+        # Fall back to the matching annotation-scheme task grid. L-prefix Li
+        # grids live in the `li` scheme's data/task_grid_li.gpkg, not the
+        # region's primary (gao) task_grid, so get_metric_crs/get_grid_spec
+        # must consult the scheme grid before the aggregate fallback.
+        try:
+            scheme = region_registry.resolve_annotation_scheme(rkey, grid_id)
+            if scheme is not None and scheme.task_grid:
+                stg_path = BASE_DIR / scheme.task_grid
+                if stg_path.exists():
+                    stg = gpd.read_file(stg_path)
+                    matches = stg.loc[stg["gridcell_id"].astype(str) == grid_id]
+                    if len(matches) > 0:
+                        return matches.iloc[0]
+        except (KeyError, AttributeError):
             pass
 
     task_grid = get_task_grid()
