@@ -97,7 +97,21 @@ def commit_touches_only(commit_hash: str, allowed: set[str]) -> bool:
 
 
 def render_recent_updates(entries: list[ProgressEntry], limit: int = 8) -> list[str]:
-    return [f"- {entry.day}: {entry.summary}" for entry in sorted(entries, key=lambda item: item.timestamp, reverse=True)[:limit]]
+    # Dedup by summary, keeping the most-recent occurrence. Entries are keyed
+    # internally by commit hash, so `git commit --amend` (and rebases) leave an
+    # orphaned entry whose hash no longer exists but whose summary is identical
+    # to the rewritten commit's. Deduping at render time keeps ROADMAP idempotent
+    # across history rewrites instead of printing the same line twice.
+    lines: list[str] = []
+    seen: set[str] = set()
+    for entry in sorted(entries, key=lambda item: item.timestamp, reverse=True):
+        if entry.summary in seen:
+            continue
+        seen.add(entry.summary)
+        lines.append(f"- {entry.day}: {entry.summary}")
+        if len(lines) >= limit:
+            break
+    return lines
 
 
 def replace_or_insert_block(
