@@ -3,6 +3,7 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-06-08: fix(progress): make ROADMAP recently-completed amend/rebase-safe
 - 2026-06-08: chore: roll ROADMAP recently-completed + add watch-pull-and-stop-pod helper
 - 2026-06-08: feat(backdating): Vexcel /ortho/dates capture-date probe + descriptive stats
 - 2026-06-08: docs(cls): adaptive-chip upgrade plan + validated results
@@ -10,7 +11,6 @@
 - 2026-06-01: feat(gemini): --resume for multiscale FP-review + JHB full-inventory FP-cut delivery
 - 2026-05-31: docs(handoff): require --routing-salt-mode target for flash FP-cut runs
 - 2026-05-31: feat(xdomain): 6-city cross-domain eval of unified_reviewall_A vs Li RA GT
-- 2026-05-31: feat(gemini): --stage1-as-drops applier mode for the LO FP-cut band
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
