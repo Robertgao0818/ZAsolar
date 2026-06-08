@@ -25,6 +25,9 @@ data/
   annotations/                — 标注数据（详见 annotations/README.md）
     Capetown/                 — Cape Town 标注（{GridID}_SAM2_{YYMMDD}.gpkg），COCO export 主数据源
                                 包含 SAM2 cleaned, 早期 legacy（G1023/G1134 等）, all_annotations_cleaned.gpkg
+    Capetown_Li/              — Li Yang 独立 CT GT scheme（L-prefix 命名空间，eastern Cape Flats，2026-06-04）
+                                17 grids（L1842..L1954），SAM2 sub-array A2/T2；CT census 排名面。
+                                路由由 regions.yaml annotation_schemes.li 驱动（task_grid_li.gpkg）
     Joburg/                   — Johannesburg 标注
                                 JHB01-06.gpkg          — 手标 6-grid pilot (legacy)
                                 G07xx-G09xx_V4_*.gpkg  — CBD batch1 25 grids (V4 推理 → review → SAM 重切, 2026-04-07)
@@ -32,6 +35,8 @@ data/
     PROGRESS.md               — 标注进度自动汇总（batch/grid/installation 统计）
     annotation_manifest.csv   — 标注 manifest (quality tier T1/T2, review status)
   coco/                       — COCO 格式训练数据（export_coco_dataset.py 生成）
+  analysis/                   — 小体量分析产物 CSV（如 Vexcel /ortho/dates 拍摄日、Wayback 覆盖表）；
+                                大体量结果仍在 ~/zasolar_data/results/ 与 gitignore 的 results/
 tiles/                        — 项目目录占位符（实际数据禁止放 WSL 项目目录）
                                post-2026-04-26: 数据迁移到 ~/zasolar_data/ (WSL ext4, 替代 /mnt/d/ZAsolar/)
                                env: SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles
