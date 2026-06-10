@@ -42,7 +42,10 @@ def test_jhb_geid_2024_02_exposes_census_mid_date() -> None:
 
 def test_jhb_vexcel_2024_exposes_census_mid_date() -> None:
     layer = get_imagery_layer("johannesburg", "vexcel_2024")
-    assert layer.census_imagery_mid_date == "2024-06-30"
+    # Corrected 2026-06-04 from the nominal 2024-06-30 to the true flight-window
+    # midpoint (2024-02-17..2024-04-19) after /ortho/dates verification. This is a
+    # fallback-only aggregate; per-grid present-side clamping uses real flight dates.
+    assert layer.census_imagery_mid_date == "2024-03-18"
 
 
 def test_jhb_aerial_2023_exposes_census_mid_date() -> None:
