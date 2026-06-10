@@ -1518,14 +1518,12 @@ def plot_iou_threshold_metrics(metrics_df: pd.DataFrame):
 # Installation-level evaluation profile (V1.2)
 # ════════════════════════════════════════════════════════════════════════
 
-def evaluate_presence(matching_result: dict,
-                      grid_id: str,
-                      output_dir: Path) -> pd.DataFrame:
-    """Installation-level presence metrics (merge, IoU>=0.1).
-
-    Writes presence_metrics.csv with one row.
-    """
-    row = {
+def _presence_row(matching_result: dict, grid_id: str, *,
+                  iou_caliber: float | None = None,
+                  eval_profile: str | None = None,
+                  merge_mode: str | None = None) -> dict:
+    """单行 presence 指标 + 显式口径字段(evaluation_protocol.md §1)。"""
+    return {
         "grid_id": grid_id,
         "gt_count": matching_result["tp"] + matching_result["fn"],
         "pred_count": matching_result["tp"] + matching_result["fp"],
@@ -1535,12 +1533,51 @@ def evaluate_presence(matching_result: dict,
         "precision": matching_result["precision"],
         "recall": matching_result["recall"],
         "f1": matching_result["f1"],
+        "iou_caliber": iou_caliber,
+        "eval_profile": eval_profile,
+        "merge_mode": merge_mode,
     }
+
+
+def evaluate_presence(matching_result: dict,
+                      grid_id: str,
+                      output_dir: Path,
+                      *,
+                      iou_caliber: float | None = None,
+                      eval_profile: str | None = None,
+                      merge_mode: str | None = None,
+                      secondary: list[tuple[float, dict]] | None = None,
+                      ) -> pd.DataFrame:
+    """Installation-level presence metrics.
+
+    Writes presence_metrics.csv with one row(主口径,数值与历史行为一致)。
+    口径字段(iou_caliber / eval_profile / merge_mode)为 additive 列,
+    由调用方显式提供;不提供时为空(legacy 行为)。
+
+    `secondary` = [(iou_caliber, matching_result), ...]:连同主口径一起写入
+    presence_metrics_dual.csv(每行带显式口径),供双口径协议消费
+    (docs/evaluation_protocol.md §1.1)。presence_metrics.csv 保持单行,
+    既有消费者(run_benchmark.collect_grid_metrics 等)不受影响。
+    """
+    row = _presence_row(matching_result, grid_id, iou_caliber=iou_caliber,
+                        eval_profile=eval_profile, merge_mode=merge_mode)
     df = pd.DataFrame([row])
     csv_path = output_dir / "presence_metrics.csv"
     df.to_csv(csv_path, index=False)
     print(f"\n[INSTALL] Presence metrics → {csv_path}")
     print(f"  P={row['precision']:.4f}  R={row['recall']:.4f}  F1={row['f1']:.4f}")
+
+    if secondary:
+        dual_rows = [row] + [
+            _presence_row(m, grid_id, iou_caliber=cal,
+                          eval_profile=eval_profile, merge_mode=merge_mode)
+            for cal, m in secondary
+        ]
+        dual_df = pd.DataFrame(dual_rows)
+        dual_path = output_dir / "presence_metrics_dual.csv"
+        dual_df.to_csv(dual_path, index=False)
+        calibers = [r["iou_caliber"] for r in dual_rows]
+        print(f"[INSTALL] Dual-caliber presence → {dual_path} (iou_caliber={calibers})")
     return df
 
 
@@ -2150,11 +2187,21 @@ def main(force: bool = False,
     if evaluation_profile == "installation":
         print("\n" + "=" * 60)
         print("Installation-level 三层评估 (presence / footprint / area)...")
+        # 主口径保持 IoU=0.1(legacy 路径历史行为,不翻转);0.3 作为副口径
+        # 一并写入 presence_metrics_dual.csv(evaluation_protocol.md §1:
+        # 0.3 为 2026-06-10 起的 go-forward 标准)。
         install_match = iou_matching(
             gt, pred, iou_threshold=0.1, merge_preds=True,
             return_match_details=True,
         )
-        evaluate_presence(install_match, GRID_ID, OUTPUT_DIR)
+        install_match_03 = iou_matching(
+            gt, pred, iou_threshold=0.3, merge_preds=True,
+        )
+        evaluate_presence(
+            install_match, GRID_ID, OUTPUT_DIR,
+            iou_caliber=0.1, eval_profile="installation",
+            secondary=[(0.3, install_match_03)],
+        )
         evaluate_footprint(install_match, OUTPUT_DIR)
         evaluate_area_error(install_match, gt, OUTPUT_DIR)
 

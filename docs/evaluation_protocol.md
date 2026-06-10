@@ -104,10 +104,17 @@ wave1 实测:排名随 polygon-conf 口径在「固定阈 v3c 赢 / 最优阈 un
 ## 3. 双 merge-mode 输出纪律
 
 - `validate_checkpoint.py` 每 checkpoint 输出 Tier-1 全套 + polygon@0.5,
-  **双 merge-mode**(pixel-or + per-detection,finalize.py 层切换)。
+  **双 merge-mode**(pixel-or + per-detection,finalize.py 层切换;同一份
+  raw_detections.pkl finalize 两次)。
 - summary 两 mode 并排;禁止 max-over-modes 单数字 headline。
 - per channel production mode 预声明:Ch3 = pixel-or + SAM;Ch2 = per-det + SAM
   (2026-05-10 audit)。
+- `configs/postproc/v4_poly_diag.json` 为 **optional gallery**
+  (`validate_checkpoint.py --poly-diag`),diagnostic-only,禁入排名主表。
+  2026-06-10 裁决:harness Ch2 默认 = per-det+SAM(已有 25-grid audit 证据;
+  stage3b hybrid 从未 head-to-head 赢过 per-det+SAM);原计划的 unified_A
+  stage3b re-validate 本地 BLOCKED(clean_gt 三 grid Vexcel tiles 不在本地、
+  Tier A 不开 pod),重开条件见该配置 `_meta`。
 - 新 checkpoint 转产(adoption ≠ experiment)需走完整链:双 mode + SAM-refined
   variant + per-layer poly_conf re-sweep(按 §2 锁定协议)+ solar_cls per-layer
   阈值重校准;动 CT census 须显式重开 2026-06-08 CLS-only 锁定 baseline 决定。

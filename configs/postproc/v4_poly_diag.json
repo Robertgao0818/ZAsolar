@@ -1,0 +1,18 @@
+{
+  "confidence_threshold": 0.3,
+  "mask_threshold": 0.3,
+  "post_conf_threshold": 0.65,
+  "min_object_area": 5,
+  "max_elongation": 8.0,
+  "min_solidity": 0.0,
+  "shadow_rgb_thresh": 60,
+  "merge_mode": "per-detection",
+  "_meta": {
+    "tag": "v4_poly_diag",
+    "task": "Channel 2 polygon diagnostic — sub-array detection / TP-lost gallery",
+    "status": "diagnostic-only / derived-from-V3-C-3-grid-ablation (G0816/G0817/G0925, 2026-05-07)",
+    "source": "docs/experiments/exp_finalizer_pixel_or_vs_per_detection.md production-routing 表",
+    "notes": "诊断专用,禁入 inventory CSV / 模型排名主表。完整 stage3b 链 = per-detection → mutual-IoU 0.3 cluster → SAM hybrid (cluster mask + envelope bbox) → spatial NMS 0.5;cluster→SAM 步骤的脚本 (finalizer_stage3b_sam.py / finalizer_stage3b_postnms.py) 已随 ablation 归档,可从 commit 5d85297 恢复。本配置承载 finalize.py 今天可消费的部分 (merge_mode=per-detection);SAM 步用 sam_refine_maskbox.py mask_box 即得 per-det+SAM。",
+    "ch2_default_decision_2026_06_10": "harness Ch2 默认 = per-det+SAM (与 2026-05-10 25-grid audit 的 production 路由一致: train20 per-det+SAM poly@IoU0.5=79.6%/F1 0.806; stage3b hybrid 从未在任何面上 head-to-head 赢过 per-det+SAM)。原计划的 unified_A 上 stage3b-vs-per-det+SAM 一次性 re-validate 在本地 BLOCKED: clean_gt 三 grid 的 Vexcel tiles 已不在本地、Tier A 约束不开 pod;若日后重开,先恢复 5d85297 两脚本。v4_poly_diag 留作 optional gallery (validate_checkpoint.py --poly-diag)。"
+  }
+}

@@ -427,7 +427,28 @@ def collect_grid_metrics(
         "pred_count": pred,
         "tp": tp, "fp": fp, "fn": fn,
         "precision": p, "recall": rec, "f1": f1,
+        # 显式口径字段(docs/evaluation_protocol.md §1)。legacy 结果没有这些
+        # 列 → 空串 = 口径未知(geoai legacy 链历史上是 presence@0.1)。
+        "iou_caliber": r.get("iou_caliber", "") or "",
+        "eval_profile": r.get("eval_profile", "") or "",
+        "merge_mode": r.get("merge_mode", "") or "",
     }
+
+    # F1@{0.1,0.3,0.5}(merge profile)直接从现成 multi-IoU sweep 读出
+    # (additive、零重算;evaluation_protocol.md §1.2)。
+    iou_csv = result_dir / "iou_threshold_metrics.csv"
+    if iou_csv.exists():
+        try:
+            with open(iou_csv) as f:
+                irows = list(csv.DictReader(f))
+            for ir in irows:
+                thr = float(ir.get("IoU_Threshold", -1))
+                for want in (0.1, 0.3, 0.5):
+                    if abs(thr - want) < 1e-9:
+                        row[f"f1_at_iou{str(want).replace('0.', '0')}"] = float(
+                            ir.get("F1", 0) or 0)
+        except Exception:
+            pass
 
     # Footprint metrics (optional)
     footprint_csv = result_dir / "footprint_metrics.csv"
@@ -490,6 +511,16 @@ def build_suite_summary(grid_rows: list[dict]) -> list[dict]:
         group = list(group_iter)
         model_key, model_tag, suite_id, suite_role, leakage_risk = keys
 
+        # 口径同质性:同一 suite×model 聚合内不得混口径
+        # (docs/evaluation_protocol.md §1.3)。
+        calibers = {(r.get("iou_caliber", ""), r.get("eval_profile", ""))
+                    for r in group}
+        if len(calibers) > 1:
+            raise RuntimeError(
+                f"[CALIBER] suite {suite_id} × {model_tag} 聚合内混口径: "
+                f"{sorted(calibers)} — 拒绝聚合 (evaluation_protocol.md §1.3)")
+        iou_caliber, eval_profile = next(iter(calibers)) if calibers else ("", "")
+
         tp = sum(r["tp"] for r in group)
         fp = sum(r["fp"] for r in group)
         fn = sum(r["fn"] for r in group)
@@ -514,6 +545,14 @@ def build_suite_summary(grid_rows: list[dict]) -> list[dict]:
             "f1_macro": sum(r["f1"] for r in group) / len(group),
             "mean_iou_weighted": _weighted_avg(group, "mean_iou", "n_matches"),
             "iou_ge_0.5_rate_weighted": _weighted_avg(group, "iou_ge_0.5_rate", "n_matches"),
+            "iou_caliber": iou_caliber,
+            "eval_profile": eval_profile,
+            **{
+                f"{col}_macro": sum(r[col] for r in group if col in r)
+                / max(1, sum(1 for r in group if col in r))
+                for col in ("f1_at_iou01", "f1_at_iou03", "f1_at_iou05")
+                if any(col in r for r in group)
+            },
         })
 
     return summaries
@@ -531,6 +570,16 @@ def add_baseline_deltas(suite_rows: list[dict], baseline_key: str) -> list[dict]
     for r in suite_rows:
         base = baseline_by_suite.get(r["suite_id"])
         if base:
+            # 跨口径 diff 拒绝(docs/evaluation_protocol.md §1.3):两侧口径
+            # 已知且不同 → 报错而非静默比较。两侧都为空(legacy 结果)放行。
+            for fld in ("iou_caliber", "eval_profile"):
+                a, b = r.get(fld, ""), base.get(fld, "")
+                if a and b and a != b:
+                    raise RuntimeError(
+                        f"[CALIBER] suite {r['suite_id']}: {r['model_tag']} "
+                        f"({fld}={a}) vs baseline {base['model_tag']} "
+                        f"({fld}={b}) 口径不同 — 拒绝 diff "
+                        f"(evaluation_protocol.md §1.3)")
             for col in delta_cols:
                 r[f"delta_{col}"] = r.get(col, 0) - base.get(col, 0)
         else:

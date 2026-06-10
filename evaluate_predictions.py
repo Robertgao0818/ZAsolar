@@ -53,6 +53,26 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _merge_mode_label(predictions_gpkg: Path) -> str | None:
+    """从预测同目录的 config.json 读 finalize 层 merge_mode(provenance)。
+
+    finalize.py 把 merge_mode 写进 config.json;legacy 管线没有该键 → None。
+    """
+    cfg_path = Path(predictions_gpkg).parent / "config.json"
+    if not cfg_path.exists():
+        return None
+    try:
+        import json
+        payload = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    for container in (payload, payload.get("config") or {},
+                      payload.get("postproc") or {}):
+        if isinstance(container, dict) and container.get("merge_mode"):
+            return str(container["merge_mode"])
+    return None
+
+
 def run(args: argparse.Namespace) -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -93,8 +113,20 @@ def run(args: argparse.Namespace) -> int:
         return_match_details=True,
     )
 
-    # ── Presence (single-row) ────────────────────────────────────────
-    dae.evaluate_presence(matching, args.grid_id, args.output_dir)
+    # ── Presence (single-row 主口径 + dual-caliber 副表) ─────────────
+    # 副口径 = {0.1, 0.3} 中非主口径者(evaluation_protocol.md §1.1)。
+    secondary = []
+    for cal in (0.1, 0.3):
+        if abs(cal - args.iou_threshold) > 1e-9:
+            secondary.append((cal, dae.iou_matching(
+                gt, pred, iou_threshold=cal, merge_preds=merge_preds)))
+    dae.evaluate_presence(
+        matching, args.grid_id, args.output_dir,
+        iou_caliber=args.iou_threshold,
+        eval_profile=args.evaluation_profile,
+        merge_mode=_merge_mode_label(args.predictions_gpkg),
+        secondary=secondary,
+    )
 
     # ── Footprint (per-match IoU/Dice summary) ───────────────────────
     dae.evaluate_footprint(matching, args.output_dir)

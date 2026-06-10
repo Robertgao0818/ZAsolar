@@ -59,7 +59,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from detect_and_evaluate import iou_matching  # noqa: E402
-from scripts.analysis.area_aggregate_eval import _sum_area_m2, summarize  # noqa: E402
+from scripts.analysis.area_aggregate_eval import _read_polys_geom, summarize  # noqa: E402
 
 # ─────────────────────────────────────────────────────────────────────────
 # Defaults
@@ -96,6 +96,8 @@ CT_GT_ROOT = PROJECT_ROOT / "data/annotations/Capetown"
 
 POSTPROC_CANONICAL = PROJECT_ROOT / "configs/postproc/v4_canonical.json"
 POSTPROC_V4_AGG = PROJECT_ROOT / "configs/postproc/v4_agg.json"
+# optional gallery (--poly-diag): diagnostic-only, 禁入排名主表
+POSTPROC_POLY_DIAG = PROJECT_ROOT / "configs/postproc/v4_poly_diag.json"
 
 ALL_STAGES = [
     "detect_jhb",
@@ -116,11 +118,20 @@ ALL_STAGES = [
 # ─────────────────────────────────────────────────────────────────────────
 @dataclass
 class RunPaths:
+    """双 merge-mode 路径约定(evaluation_protocol.md §3)。
+
+    pixel-or 链沿用历史目录名(<run_name> = pixel-or raw,向后兼容);
+    per-detection 链加 `_perdet` 后缀。Ch3 production = pixel-or+SAM
+    (v4_agg);Ch2 production = per-det+SAM(2026-05-10 audit)。
+    """
     run_name: str
-    jhb_raw: Path  # results/johannesburg/<run_name>
-    jhb_sam: Path  # results/johannesburg/<run_name>_sam_maskbox
+    jhb_raw: Path  # results/johannesburg/<run_name>            (pixel-or)
+    jhb_perdet: Path  # results/johannesburg/<run_name>_perdet  (per-detection)
+    jhb_sam: Path  # results/johannesburg/<run_name>_sam_maskbox (SAM on pixel-or)
+    jhb_perdet_sam: Path  # results/johannesburg/<run_name>_perdet_sam_maskbox
     jhb_v4agg: Path  # results/johannesburg/<run_name>_sam_maskbox_v4_agg
-    ct_raw: Path  # results/cape_town/<run_name>
+    ct_raw: Path  # results/cape_town/<run_name>                (pixel-or)
+    ct_perdet: Path  # results/cape_town/<run_name>_perdet
     eval_dir: Path  # results/validation/<run_name>_eval
 
     @classmethod
@@ -128,11 +139,16 @@ class RunPaths:
         return cls(
             run_name=run_name,
             jhb_raw=PROJECT_ROOT / "results/johannesburg" / run_name,
+            jhb_perdet=PROJECT_ROOT / "results/johannesburg" / f"{run_name}_perdet",
             jhb_sam=PROJECT_ROOT / "results/johannesburg" / f"{run_name}_sam_maskbox",
+            jhb_perdet_sam=PROJECT_ROOT
+            / "results/johannesburg"
+            / f"{run_name}_perdet_sam_maskbox",
             jhb_v4agg=PROJECT_ROOT
             / "results/johannesburg"
             / f"{run_name}_sam_maskbox_v4_agg",
             ct_raw=PROJECT_ROOT / "results/cape_town" / run_name,
+            ct_perdet=PROJECT_ROOT / "results/cape_town" / f"{run_name}_perdet",
             eval_dir=PROJECT_ROOT / "results/validation" / f"{run_name}_eval",
         )
 
@@ -169,15 +185,20 @@ def stage_detect(
     model_path: Path,
     run_name: str,
     out_root: Path,
+    out_root_perdet: Path,
     args: argparse.Namespace,
 ) -> bool:
-    banner(f"detect_{region}: {len(grids)} grid(s) → {out_root.relative_to(PROJECT_ROOT)}")
+    """detect_direct 一次,finalize 两次(双 merge-mode,同一份 raw artifact)。
+
+    pixel-or → <out_root>/<g>(历史路径,v4_canonical 自带 merge_mode);
+    per-detection → <out_root_perdet>/<g>(--merge-mode 显式覆盖)。
+    """
+    banner(f"detect_{region}: {len(grids)} grid(s) → {out_root.relative_to(PROJECT_ROOT)} (+_perdet)")
     failed: list[str] = []
     for g in grids:
         out_dir = out_root / g
         ensure_dir(out_dir)
         raw_pkl = out_dir / "raw_detections.pkl"
-        gpkg = out_dir / "predictions_metric.gpkg"
 
         # detect_direct
         if raw_pkl.exists() and not args.force:
@@ -210,26 +231,40 @@ def stage_detect(
                 failed.append(g)
                 continue
 
-        # finalize → predictions_metric.gpkg
-        if gpkg.exists() and not args.force:
-            print(f"[skip-finalize] {g}: predictions_metric.gpkg exists")
-            continue
-        rc = run_cmd(
-            [
-                sys.executable,
-                "finalize.py",
-                "--input",
-                raw_pkl,
-                "--output-dir",
-                out_dir,
-                "--postproc-config",
-                POSTPROC_CANONICAL,
-                "--allow-overwrite-canonical",
-            ],
-            dry_run=args.dry_run,
-        )
-        if rc != 0:
-            failed.append(g)
+        # finalize × 双 merge-mode → predictions_metric.gpkg
+        finalize_targets = [
+            ("pixel-or", out_dir, POSTPROC_CANONICAL, ["--merge-mode", "pixel-or"]),
+            ("per-detection", ensure_dir(out_root_perdet / g), POSTPROC_CANONICAL,
+             ["--merge-mode", "per-detection"]),
+        ]
+        if getattr(args, "poly_diag", False):
+            # optional gallery:v4_poly_diag(diagnostic-only,自带 merge_mode)
+            finalize_targets.append(
+                ("poly_diag",
+                 ensure_dir(out_root.parent / f"{out_root.name}_poly_diag" / g),
+                 POSTPROC_POLY_DIAG, []))
+        for mode, mode_dir, pp_cfg, extra in finalize_targets:
+            gpkg = mode_dir / "predictions_metric.gpkg"
+            if gpkg.exists() and not args.force:
+                print(f"[skip-finalize:{mode}] {g}: predictions_metric.gpkg exists")
+                continue
+            rc = run_cmd(
+                [
+                    sys.executable,
+                    "finalize.py",
+                    "--input",
+                    raw_pkl,
+                    "--output-dir",
+                    mode_dir,
+                    "--postproc-config",
+                    pp_cfg,
+                    *extra,
+                    "--allow-overwrite-canonical",
+                ],
+                dry_run=args.dry_run,
+            )
+            if rc != 0:
+                failed.append(f"{g}:{mode}")
 
     if failed:
         print(f"[FAIL] detect_{region} failed grids: {failed}")
@@ -246,30 +281,38 @@ def stage_sam_jhb(
     paths: RunPaths,
     args: argparse.Namespace,
 ) -> bool:
-    banner(f"sam_jhb: {len(grids)} grid(s) → {paths.jhb_sam.relative_to(PROJECT_ROOT)}")
-    if all((paths.jhb_sam / g / "predictions_metric.gpkg").exists() for g in grids) and not args.force:
-        print("[skip] all SAM outputs already present (use --force to re-run)")
-        return True
-    rc = run_cmd(
-        [
-            sys.executable,
-            "scripts/analysis/sam_refine_maskbox.py",
-            "--region",
-            "jhb",
-            "--src-results-root",
-            paths.jhb_raw,
-            "--tiles-root",
-            JHB_TILES,
-            "--output-root",
-            paths.jhb_sam,
-            "--grids",
-            *grids,
-            "--prompt-mode",
-            "mask_box",
-        ],
-        dry_run=args.dry_run,
-    )
-    return rc == 0
+    banner(f"sam_jhb: {len(grids)} grid(s) → {paths.jhb_sam.relative_to(PROJECT_ROOT)} (+perdet)")
+    ok = True
+    # 双链 SAM:pixel-or+SAM(Ch3 production)与 per-det+SAM(Ch2 production,
+    # 2026-05-10 audit / evaluation_protocol.md §3)。
+    for src_root, out_root in (
+        (paths.jhb_raw, paths.jhb_sam),
+        (paths.jhb_perdet, paths.jhb_perdet_sam),
+    ):
+        if all((out_root / g / "predictions_metric.gpkg").exists() for g in grids) and not args.force:
+            print(f"[skip] {out_root.name}: all SAM outputs present (use --force)")
+            continue
+        rc = run_cmd(
+            [
+                sys.executable,
+                "scripts/analysis/sam_refine_maskbox.py",
+                "--region",
+                "jhb",
+                "--src-results-root",
+                src_root,
+                "--tiles-root",
+                JHB_TILES,
+                "--output-root",
+                out_root,
+                "--grids",
+                *grids,
+                "--prompt-mode",
+                "mask_box",
+            ],
+            dry_run=args.dry_run,
+        )
+        ok = ok and rc == 0
+    return ok
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -313,10 +356,16 @@ def stage_ch2_jhb(
     banner(f"ch2_jhb: exhaustive recall on {grids}")
     eval_dir = ensure_dir(paths.eval_dir)
     ok = True
+    # perdet_sam = Ch2 production 链(per-det+SAM);raw/sam_v4agg 保留对照。
     for label, pred_root in (
         ("raw", paths.jhb_raw),
+        ("raw_perdet", paths.jhb_perdet),
+        ("perdet_sam", paths.jhb_perdet_sam),
         ("sam_v4agg", paths.jhb_v4agg),
     ):
+        if not pred_root.exists():
+            print(f"[skip] ch2 {label}: {pred_root.name} missing")
+            continue
         out_dir = eval_dir / f"ch2_recall_{label}"
         rc = run_cmd(
             [
@@ -340,20 +389,46 @@ def stage_ch2_jhb(
 # ─────────────────────────────────────────────────────────────────────────
 # Stage: Channel 3 area-aggregate (JHB) — inline
 # ─────────────────────────────────────────────────────────────────────────
+CH3_VARIANTS = (
+    # (label, merge_mode_of_chain, RunPaths attr)
+    ("raw", "pixel-or", "jhb_raw"),
+    ("raw_perdet", "per-detection", "jhb_perdet"),
+    ("perdet_sam", "per-detection", "jhb_perdet_sam"),
+    ("sam_v4agg", "pixel-or", "jhb_v4agg"),
+)
+
+
+def _poly_f1_at(gt: gpd.GeoDataFrame, pred: gpd.GeoDataFrame,
+                iou: float) -> dict:
+    if len(gt) == 0 or len(pred) == 0:
+        return {"tp": 0, "fp": len(pred), "fn": len(gt),
+                "precision": 0.0, "recall": 0.0, "f1": 0.0}
+    res = iou_matching(gt, pred, iou_threshold=iou, merge_preds=True)
+    return {k: res[k] for k in ("tp", "fp", "fn", "precision", "recall", "f1")}
+
+
 def stage_ch3_jhb(
     *,
     grids: list[str],
     paths: RunPaths,
     args: argparse.Namespace,
 ) -> bool:
-    banner(f"ch3_jhb: inline area-aggregate on {grids}")
+    """Tier-1 全套(union-based area metrics + polygon@0.5),双 merge-mode。
+
+    2026-06-10 修复:旧实现用 _sum_area_m2(多边形面积和)构造行,缺
+    summarize() 必需的 inter_m2 / area_F1 键(必 KeyError),且与 baseline
+    (area_aggregate_eval union 口径)不可比;现统一为 _read_polys_geom
+    set-theoretic union 口径(feedback_polygon_sum_vs_pixel_area)。
+    """
+    banner(f"ch3_jhb: Tier-1 area-aggregate + poly@0.5 on {grids} (双 merge-mode)")
     eval_dir = ensure_dir(paths.eval_dir)
     rows: list[dict] = []
 
-    for label, pred_root in (
-        ("raw", paths.jhb_raw),
-        ("sam_v4agg", paths.jhb_v4agg),
-    ):
+    for label, merge_mode, attr in CH3_VARIANTS:
+        pred_root = getattr(paths, attr)
+        if not pred_root.exists():
+            print(f"[skip] ch3 {label}: {pred_root.name} missing")
+            continue
         for g in grids:
             pred_path = pred_root / g / "predictions_metric.gpkg"
             gt_path = JHB_CLEAN_GT_ROOT / g / f"{g}_clean_gt.gpkg"
@@ -361,37 +436,69 @@ def stage_ch3_jhb(
                 print(f"[skip] {label}/{g}: pred or GT missing")
                 continue
             try:
-                n_pred, pred_m2, pred_max, _ = _sum_area_m2(
+                n_pred, pred_sum_m2, pred_max, _, pred_u = _read_polys_geom(
                     pred_path, JHB_METRIC_CRS, layer=None
                 )
-                n_gt, gt_m2, gt_max, _ = _sum_area_m2(
+                n_gt, gt_sum_m2, gt_max, _, gt_u = _read_polys_geom(
                     gt_path, JHB_METRIC_CRS, layer=None
                 )
             except Exception as exc:
                 print(f"[warn] {label}/{g}: {exc}")
                 continue
-            if gt_m2 <= 0:
+            if gt_u is None or gt_u.area <= 0:
                 continue
+            gt_m2 = float(gt_u.area)
+            pred_m2 = float(pred_u.area) if pred_u is not None else 0.0
+            inter_m2 = float(pred_u.intersection(gt_u).area) if pred_u is not None else 0.0
+            area_R = inter_m2 / gt_m2
+            area_P = inter_m2 / pred_m2 if pred_m2 > 0 else 0.0
+            area_F1 = (2 * area_R * area_P / (area_R + area_P)
+                       if (area_R + area_P) > 0 else 0.0)
             abs_err = pred_m2 - gt_m2
-            signed_rel = abs_err / gt_m2 if gt_m2 else float("nan")
+            signed_rel = abs_err / gt_m2
+
+            # polygon@0.5(merge profile)— Tier-1 polygon 维度
+            try:
+                pred_gdf = gpd.read_file(pred_path).to_crs(JHB_METRIC_CRS)
+                gt_gdf = gpd.read_file(gt_path).to_crs(JHB_METRIC_CRS)
+                poly = _poly_f1_at(gt_gdf, pred_gdf, 0.5)
+            except Exception as exc:
+                print(f"[warn] {label}/{g} poly@0.5: {exc}")
+                poly = {"tp": None, "fp": None, "fn": None,
+                        "precision": None, "recall": None, "f1": None}
+
             rows.append(
                 {
                     "region": "johannesburg",
                     "model_run": f"{paths.run_name}_{label}",
                     "model_version": paths.run_name,
                     "imagery_layer": JHB_LAYER,
+                    "merge_mode": merge_mode,
+                    "variant": label,
                     "grid_id": g,
                     "gt_source": gt_path.name,
                     "n_pred": n_pred,
                     "pred_total_m2": round(pred_m2, 2),
+                    "pred_sum_m2": round(pred_sum_m2, 2),
                     "pred_max_poly_m2": round(pred_max, 2),
                     "n_gt": n_gt,
                     "gt_total_m2": round(gt_m2, 2),
+                    "gt_sum_m2": round(gt_sum_m2, 2),
                     "gt_max_poly_m2": round(gt_max, 2),
+                    "inter_m2": round(inter_m2, 2),
+                    "area_R": round(area_R, 4),
+                    "area_P": round(area_P, 4),
+                    "area_F1": round(area_F1, 4),
                     "abs_error_m2": round(abs_err, 2),
                     "signed_rel_error": signed_rel,
-                    "abs_rel_error": abs(signed_rel) if gt_m2 else float("nan"),
-                    "pred_gt_ratio": pred_m2 / gt_m2 if gt_m2 else float("nan"),
+                    "abs_rel_error": abs(signed_rel),
+                    "pred_gt_ratio": pred_m2 / gt_m2,
+                    "poly_tp_iou05": poly["tp"],
+                    "poly_fp_iou05": poly["fp"],
+                    "poly_fn_iou05": poly["fn"],
+                    "poly_f1_iou05": (round(poly["f1"], 4)
+                                      if poly["f1"] is not None else None),
+                    "iou_caliber": 0.5,
                 }
             )
 
@@ -402,6 +509,16 @@ def stage_ch3_jhb(
     per_grid_df = pd.DataFrame(rows)
     per_grid_df.to_csv(eval_dir / "ch3_per_grid.csv", index=False)
     summary = summarize(rows)
+    # summarize() 按 model_run 分桶;补回 merge_mode/variant 标签列
+    label_by_run = {f"{paths.run_name}_{lab}": (lab, mm)
+                    for lab, mm, _ in CH3_VARIANTS}
+    for s in summary:
+        lab, mm = label_by_run.get(s["model_run"], ("", ""))
+        s["variant"] = lab
+        s["merge_mode"] = mm
+        sub = per_grid_df[per_grid_df["model_run"] == s["model_run"]]
+        valid = sub["poly_f1_iou05"].dropna()
+        s["mean_poly_f1_iou05"] = round(float(valid.mean()), 4) if len(valid) else None
     pd.DataFrame(summary).to_csv(eval_dir / "ch3_per_run.csv", index=False)
     print(f"[ok] ch3 per-grid → {eval_dir / 'ch3_per_grid.csv'}")
     print(f"[ok] ch3 per-run  → {eval_dir / 'ch3_per_run.csv'}")
@@ -420,7 +537,8 @@ def _find_ct_gt(grid: str) -> Path | None:
     return cands[-1]  # newest
 
 
-def _per_polygon_f1(pred: gpd.GeoDataFrame, gt: gpd.GeoDataFrame) -> dict:
+def _per_polygon_f1(pred: gpd.GeoDataFrame, gt: gpd.GeoDataFrame,
+                    iou_threshold: float = 0.3) -> dict:
     if len(gt) == 0 or len(pred) == 0:
         return {
             "tp": 0,
@@ -429,11 +547,11 @@ def _per_polygon_f1(pred: gpd.GeoDataFrame, gt: gpd.GeoDataFrame) -> dict:
             "precision": 0.0,
             "recall": 0.0,
             "f1": 0.0,
-            "iou_threshold": 0.3,
+            "iou_threshold": iou_threshold,
             "n_pred": len(pred),
             "n_gt": len(gt),
         }
-    res = iou_matching(gt, pred, iou_threshold=0.3, merge_preds=True)
+    res = iou_matching(gt, pred, iou_threshold=iou_threshold, merge_preds=True)
     return {
         "tp": res["tp"],
         "fp": res["fp"],
@@ -441,7 +559,7 @@ def _per_polygon_f1(pred: gpd.GeoDataFrame, gt: gpd.GeoDataFrame) -> dict:
         "precision": res["precision"],
         "recall": res["recall"],
         "f1": res["f1"],
-        "iou_threshold": 0.3,
+        "iou_threshold": iou_threshold,
         "n_pred": len(pred),
         "n_gt": len(gt),
     }
@@ -453,45 +571,62 @@ def stage_f1_ct(
     paths: RunPaths,
     args: argparse.Namespace,
 ) -> bool:
-    banner(f"f1_ct: per-polygon F1 (installation profile, IoU≥0.3) on {grids}")
+    """CT per-polygon F1,双 merge-mode × 双口径(0.3 主 + 0.5)。
+
+    每行带显式 merge_mode / iou_caliber 字段(evaluation_protocol.md §1/§3)。
+    """
+    banner(f"f1_ct: per-polygon F1 (installation profile) on {grids} (双 mode × IoU 0.3/0.5)")
     eval_dir = ensure_dir(paths.eval_dir)
     rows: list[dict] = []
-    for g in grids:
-        pred_path = paths.ct_raw / g / "predictions_metric.gpkg"
-        gt_path = _find_ct_gt(g)
-        baseline_csv = CT_BASELINE_RUN_DIR / g / "presence_metrics.csv"
-
-        if not pred_path.exists():
-            print(f"[skip] {g}: pred missing ({pred_path})")
+    for mode, pred_root in (
+        ("pixel-or", paths.ct_raw),
+        ("per-detection", paths.ct_perdet),
+    ):
+        if not pred_root.exists():
+            print(f"[skip] f1_ct {mode}: {pred_root.name} missing")
             continue
-        if gt_path is None:
-            print(f"[skip] {g}: GT missing under {CT_GT_ROOT}")
-            continue
+        for g in grids:
+            pred_path = pred_root / g / "predictions_metric.gpkg"
+            gt_path = _find_ct_gt(g)
+            baseline_csv = CT_BASELINE_RUN_DIR / g / "presence_metrics.csv"
 
-        pred = gpd.read_file(pred_path)
-        gt = gpd.read_file(gt_path)
-        if pred.crs is None:
-            pred = pred.set_crs(CT_METRIC_CRS)
-        if gt.crs is None:
-            gt = gt.set_crs(CT_METRIC_CRS)
-        if str(pred.crs) != CT_METRIC_CRS:
-            pred = pred.to_crs(CT_METRIC_CRS)
-        if str(gt.crs) != CT_METRIC_CRS:
-            gt = gt.to_crs(CT_METRIC_CRS)
+            if not pred_path.exists():
+                print(f"[skip] {mode}/{g}: pred missing ({pred_path})")
+                continue
+            if gt_path is None:
+                print(f"[skip] {g}: GT missing under {CT_GT_ROOT}")
+                continue
 
-        m = _per_polygon_f1(pred, gt)
-        m["grid_id"] = g
-        m["run_name"] = paths.run_name
-        m["pred_path"] = str(pred_path.relative_to(PROJECT_ROOT))
-        m["gt_path"] = str(gt_path.relative_to(PROJECT_ROOT))
-        m["baseline_presence_csv"] = (
-            str(baseline_csv.relative_to(PROJECT_ROOT)) if baseline_csv.exists() else ""
-        )
-        rows.append(m)
-        print(
-            f"  {g}: P={m['precision']:.3f} R={m['recall']:.3f} F1={m['f1']:.3f}"
-            f" (TP={m['tp']} FP={m['fp']} FN={m['fn']})"
-        )
+            pred = gpd.read_file(pred_path)
+            gt = gpd.read_file(gt_path)
+            if pred.crs is None:
+                pred = pred.set_crs(CT_METRIC_CRS)
+            if gt.crs is None:
+                gt = gt.set_crs(CT_METRIC_CRS)
+            if str(pred.crs) != CT_METRIC_CRS:
+                pred = pred.to_crs(CT_METRIC_CRS)
+            if str(gt.crs) != CT_METRIC_CRS:
+                gt = gt.to_crs(CT_METRIC_CRS)
+
+            for caliber in (0.3, 0.5):
+                m = _per_polygon_f1(pred, gt, iou_threshold=caliber)
+                m["grid_id"] = g
+                m["run_name"] = paths.run_name
+                m["merge_mode"] = mode
+                m["iou_caliber"] = caliber
+                m["eval_profile"] = "installation"
+                m["pred_path"] = str(pred_path.relative_to(PROJECT_ROOT))
+                m["gt_path"] = str(gt_path.relative_to(PROJECT_ROOT))
+                m["baseline_presence_csv"] = (
+                    str(baseline_csv.relative_to(PROJECT_ROOT))
+                    if baseline_csv.exists() else ""
+                )
+                rows.append(m)
+                print(
+                    f"  {mode}/{g}@{caliber}: P={m['precision']:.3f} "
+                    f"R={m['recall']:.3f} F1={m['f1']:.3f}"
+                    f" (TP={m['tp']} FP={m['fp']} FN={m['fn']})"
+                )
 
     if not rows:
         print("[FAIL] f1_ct: no rows produced")
@@ -606,7 +741,7 @@ def _ch3_for_grids(
     }
 
 
-def _ct_baseline_f1(grids: list[str]) -> dict[str, dict]:
+def _ct_baseline_f1(grids: list[str], iou_threshold: float = 0.3) -> dict[str, dict]:
     """Compute V3-C baseline F1 inline by re-running iou_matching on the
     baseline run's predictions_metric.gpkg + the same CT GT file.
 
@@ -633,7 +768,7 @@ def _ct_baseline_f1(grids: list[str]) -> dict[str, dict]:
             pred = pred.to_crs(CT_METRIC_CRS)
         if str(gt.crs) != CT_METRIC_CRS:
             gt = gt.to_crs(CT_METRIC_CRS)
-        m = _per_polygon_f1(pred, gt)
+        m = _per_polygon_f1(pred, gt, iou_threshold=iou_threshold)
         out[g] = m
     return out
 
@@ -671,125 +806,124 @@ def stage_summary(
     )
     lines.append("")
 
+    lines.append(
+        "> 双 merge-mode 并排报告;**禁止 max-over-modes 单数字 headline**"
+        "(evaluation_protocol.md §3)。Ch3 production = pixel-or+SAM(v4_agg),"
+        "Ch2 production = per-det+SAM(2026-05-10 audit)。"
+    )
+    lines.append("")
+
     # ── Channel 2 recall (JHB) ──────────────────────────────────────────
     lines.append("## Channel 2 — JHB exhaustive recall (val grids only)")
     lines.append("")
-    new_raw_ch2 = _ch2_recall_for_grids(
-        eval_dir / "ch2_recall_raw" / f"ch2_recall_per_grid_{paths.run_name}.csv",
-        jhb_grids,
-    )
-    new_v4agg_ch2 = _ch2_recall_for_grids(
-        eval_dir
-        / "ch2_recall_sam_v4agg"
-        / f"ch2_recall_per_grid_{paths.run_name}_sam_maskbox_v4_agg.csv",
-        jhb_grids,
-    )
-    base_ch2 = _ch2_recall_for_grids(
-        JHB_BASELINE_CH2_DIR
-        / "ch2_recall_per_grid_v3c_sam_maskbox_vexcel_2024_v4_agg.csv",
-        jhb_grids,
-    )
-
-    lines.append("| Variant | recall@0.3 | recall@0.5 | n matched / total |")
-    lines.append("|---|---:|---:|---|")
-    for label, m in (
-        ("V3-C+SAM (baseline)", base_ch2),
-        ("new (raw)", new_raw_ch2),
-        ("new (SAM+v4_agg)", new_v4agg_ch2),
-    ):
+    ch2_variants = [
+        ("V3-C+SAM (baseline)", "pixel-or",
+         JHB_BASELINE_CH2_DIR
+         / "ch2_recall_per_grid_v3c_sam_maskbox_vexcel_2024_v4_agg.csv"),
+        ("new raw", "pixel-or",
+         eval_dir / "ch2_recall_raw"
+         / f"ch2_recall_per_grid_{paths.jhb_raw.name}.csv"),
+        ("new raw", "per-detection",
+         eval_dir / "ch2_recall_raw_perdet"
+         / f"ch2_recall_per_grid_{paths.jhb_perdet.name}.csv"),
+        ("new per-det+SAM (Ch2 prod)", "per-detection",
+         eval_dir / "ch2_recall_perdet_sam"
+         / f"ch2_recall_per_grid_{paths.jhb_perdet_sam.name}.csv"),
+        ("new SAM+v4_agg (Ch3 prod)", "pixel-or",
+         eval_dir / "ch2_recall_sam_v4agg"
+         / f"ch2_recall_per_grid_{paths.jhb_v4agg.name}.csv"),
+    ]
+    lines.append("| Variant | merge_mode | recall@0.3 | recall@0.5 | n matched / total |")
+    lines.append("|---|---|---:|---:|---|")
+    for label, mode, csv_path in ch2_variants:
+        m = _ch2_recall_for_grids(csv_path, jhb_grids)
         if m is None:
-            lines.append(f"| {label} | — | — | — |")
+            lines.append(f"| {label} | {mode} | — | — | — |")
             continue
         r03 = m.get("recall@iou0.3", float("nan"))
         r05 = m.get("recall@iou0.5", float("nan"))
         n_m = m.get("n_matched_iou0.3", "?")
         n_t = m.get("n_total", "?")
-        lines.append(f"| {label} | {r03:.3f} | {r05:.3f} | {n_m} / {n_t} |")
+        lines.append(f"| {label} | {mode} | {r03:.3f} | {r05:.3f} | {n_m} / {n_t} |")
     lines.append("")
 
-    # ── Channel 3 area-aggregate (JHB) ──────────────────────────────────
-    lines.append("## Channel 3 — JHB area-aggregate (val grids only)")
+    # ── Channel 3 Tier-1 全套 (JHB) ─────────────────────────────────────
+    lines.append("## Channel 3 — JHB Tier-1 (val grids only, 双 merge-mode 并排)")
     lines.append("")
-    new_ch3_csv = eval_dir / "ch3_per_grid.csv"
-    new_ch3_df = _read_csv_safe(new_ch3_csv)
+    new_run_df = _read_csv_safe(eval_dir / "ch3_per_run.csv")
     base_ch3 = _ch3_for_grids(
         JHB_BASELINE_CH3_CSV,
         jhb_grids,
-        label="V3-C+SAM_v4agg",
+        label="V3-C+SAM_v4agg (baseline)",
         model_run="v3c_sam_maskbox_vexcel_2024_v4_agg",
     )
 
-    lines.append("| Variant | n_grids | Σ pred m² | Σ GT m² | bulk ratio | signed rel err |")
-    lines.append("|---|---:|---:|---:|---:|---:|")
-
+    lines.append(
+        "| Variant | merge_mode | n | agg_F1 | pgF1 | poly@0.5 | bulk | σ_Bw | RMSE m² | thru0 R² |")
+    lines.append("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|")
     if base_ch3:
         lines.append(
-            f"| {base_ch3['label']} | {base_ch3['n_grids']} | "
-            f"{base_ch3['pred_total_m2']:.0f} | {base_ch3['gt_total_m2']:.0f} | "
-            f"{base_ch3['bulk_ratio']:.4f} | {base_ch3['bulk_signed_rel_err']:+.4f} |"
+            f"| {base_ch3['label']} | pixel-or | {base_ch3['n_grids']} | — | — | — | "
+            f"{base_ch3['bulk_ratio']:.4f} | — | — | — |"
         )
-    else:
-        lines.append("| V3-C+SAM_v4agg | — | — | — | — | — |")
 
-    if new_ch3_df is not None and not new_ch3_df.empty:
-        for label_run in new_ch3_df["model_run"].unique():
-            sub = new_ch3_df[new_ch3_df["model_run"] == label_run]
-            pred_total = sub["pred_total_m2"].sum()
-            gt_total = sub["gt_total_m2"].sum()
-            ratio = pred_total / gt_total if gt_total else float("nan")
-            signed = (pred_total - gt_total) / gt_total if gt_total else float("nan")
+    def _cell(v, fmt=".4f"):
+        try:
+            f = float(v)
+            return f"{f:{fmt}}" if not math.isnan(f) else "—"
+        except (TypeError, ValueError):
+            return "—"
+
+    if new_run_df is not None and not new_run_df.empty:
+        for _, s in new_run_df.iterrows():
             lines.append(
-                f"| {label_run} | {len(sub)} | {pred_total:.0f} | "
-                f"{gt_total:.0f} | {ratio:.4f} | {signed:+.4f} |"
+                f"| new {s.get('variant', s['model_run'])} | {s.get('merge_mode', '—')} | "
+                f"{int(s['n_grids'])} | {_cell(s.get('agg_area_F1'))} | "
+                f"{_cell(s.get('mean_per_grid_F1'))} | "
+                f"{_cell(s.get('mean_poly_f1_iou05'))} | "
+                f"{_cell(s.get('bulk_pred_gt_ratio'))} | "
+                f"{_cell(s.get('std_ratio_Bw'))} | "
+                f"{_cell(s.get('rmse_m2'), '.0f')} | {_cell(s.get('thru0_r2'))} |"
             )
     else:
-        lines.append("| new (raw) | — | — | — | — | — |")
-        lines.append("| new (SAM+v4_agg) | — | — | — | — | — |")
+        lines.append("| new (各 variant) | — | — | — | — | — | — | — | — | — |")
     lines.append("")
 
-    # ── CT per-polygon F1 ───────────────────────────────────────────────
-    lines.append("## CT per-polygon F1 (installation profile, IoU≥0.3)")
+    # ── CT per-polygon F1(双 mode × 双口径并排) ────────────────────────
+    lines.append("## CT per-polygon F1 (installation profile, 双 merge-mode × IoU 0.3/0.5)")
     lines.append("")
     new_f1_df = _read_csv_safe(eval_dir / "f1_ct_per_grid.csv")
-    base_f1_lookup = _ct_baseline_f1(ct_grids)
-    lines.append("| Grid | Baseline F1 | New F1 | Baseline (P/R) | New (P/R) | Baseline n_pred / n_gt | New n_pred / n_gt |")
-    lines.append("|---|---:|---:|---|---|---|---|")
-    for g in ct_grids:
-        base = base_f1_lookup.get(g)
-        new_row = None
-        if new_f1_df is not None and not new_f1_df.empty and "grid_id" in new_f1_df.columns:
-            sel = new_f1_df[new_f1_df["grid_id"] == g]
-            if len(sel):
-                new_row = sel.iloc[-1].to_dict()
-        if base is None and new_row is None:
-            lines.append(f"| {g} | — | — | — | — | — | — |")
-            continue
-        b_f1_val = base["f1"] if base else float("nan")
-        b_f1 = f"{b_f1_val:.3f}" if base else "—"
-        if new_row:
-            n_f1_val = float(new_row["f1"])
-            f1_cell = _diff_str(n_f1_val, b_f1_val) if base else f"{n_f1_val:.3f}"
-        else:
-            f1_cell = "—"
-        b_pr = (
-            f"{base['precision']:.3f} / {base['recall']:.3f}" if base else "—"
-        )
-        n_pr = (
-            f"{float(new_row['precision']):.3f} / {float(new_row['recall']):.3f}"
-            if new_row
-            else "—"
-        )
-        b_pred_gt = (
-            f"{int(base['n_pred'])} / {int(base['n_gt'])}" if base else "—"
-        )
-        n_pred_gt = (
-            f"{int(new_row['n_pred'])} / {int(new_row['n_gt'])}"
-            if new_row
-            else "—"
-        )
-        lines.append(
-            f"| {g} | {b_f1} | {f1_cell} | {b_pr} | {n_pr} | {b_pred_gt} | {n_pred_gt} |"
-        )
+    lines.append("| Grid | merge_mode | IoU | Baseline F1 | New F1 | New (P/R) | New n_pred / n_gt |")
+    lines.append("|---|---|---:|---:|---:|---|---|")
+    for caliber in (0.3, 0.5):
+        base_f1_lookup = _ct_baseline_f1(ct_grids, iou_threshold=caliber)
+        for g in ct_grids:
+            base = base_f1_lookup.get(g)
+            b_f1_val = base["f1"] if base else float("nan")
+            b_f1 = f"{b_f1_val:.3f}" if base else "—"
+            sel = pd.DataFrame()
+            if (new_f1_df is not None and not new_f1_df.empty
+                    and "grid_id" in new_f1_df.columns):
+                sel = new_f1_df[new_f1_df["grid_id"] == g]
+                if "iou_caliber" in sel.columns:
+                    sel = sel[sel["iou_caliber"].astype(float).round(3) == caliber]
+            if sel.empty:
+                lines.append(f"| {g} | — | {caliber} | {b_f1} | — | — | — |")
+                continue
+            for _, new_row in sel.iterrows():
+                n_f1_val = float(new_row["f1"])
+                f1_cell = _diff_str(n_f1_val, b_f1_val) if base else f"{n_f1_val:.3f}"
+                n_pr = f"{float(new_row['precision']):.3f} / {float(new_row['recall']):.3f}"
+                n_pred_gt = f"{int(new_row['n_pred'])} / {int(new_row['n_gt'])}"
+                lines.append(
+                    f"| {g} | {new_row.get('merge_mode', '—')} | {caliber} | "
+                    f"{b_f1} | {f1_cell} | {n_pr} | {n_pred_gt} |"
+                )
+    lines.append("")
+    lines.append(
+        "_Baseline = V3-C legacy 管线(merge 语义 pixel-or 同族);"
+        "delta 仅对同 mode 行可比。_"
+    )
     lines.append("")
 
     # ── Plausibility flags ──────────────────────────────────────────────
@@ -832,12 +966,17 @@ def stage_summary(
     lines.append("")
     lines.append("### Artifact locations")
     lines.append("")
-    lines.append(f"- New raw JHB: `{paths.jhb_raw.relative_to(PROJECT_ROOT)}/<grid>/`")
-    lines.append(f"- New SAM JHB: `{paths.jhb_sam.relative_to(PROJECT_ROOT)}/<grid>/`")
+    lines.append(f"- New raw JHB (pixel-or): `{paths.jhb_raw.relative_to(PROJECT_ROOT)}/<grid>/`")
+    lines.append(f"- New raw JHB (per-det): `{paths.jhb_perdet.relative_to(PROJECT_ROOT)}/<grid>/`")
+    lines.append(f"- New SAM JHB (pixel-or): `{paths.jhb_sam.relative_to(PROJECT_ROOT)}/<grid>/`")
     lines.append(
-        f"- New SAM+v4_agg JHB: `{paths.jhb_v4agg.relative_to(PROJECT_ROOT)}/<grid>/`"
+        f"- New per-det+SAM JHB (Ch2 prod): `{paths.jhb_perdet_sam.relative_to(PROJECT_ROOT)}/<grid>/`"
     )
-    lines.append(f"- New raw CT: `{paths.ct_raw.relative_to(PROJECT_ROOT)}/<grid>/`")
+    lines.append(
+        f"- New SAM+v4_agg JHB (Ch3 prod): `{paths.jhb_v4agg.relative_to(PROJECT_ROOT)}/<grid>/`"
+    )
+    lines.append(f"- New raw CT (pixel-or): `{paths.ct_raw.relative_to(PROJECT_ROOT)}/<grid>/`")
+    lines.append(f"- New raw CT (per-det): `{paths.ct_perdet.relative_to(PROJECT_ROOT)}/<grid>/`")
     lines.append(f"- Eval CSVs: `{paths.eval_dir.relative_to(PROJECT_ROOT)}/`")
 
     out_md.write_text("\n".join(lines), encoding="utf-8")
@@ -886,6 +1025,12 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated list of stages to skip",
     )
     p.add_argument("--batch-size", type=int, default=8, help="detect_direct batch size")
+    p.add_argument(
+        "--poly-diag",
+        action="store_true",
+        help="额外用 configs/postproc/v4_poly_diag.json finalize 一份 "
+             "<run>_poly_diag gallery(diagnostic-only,禁入排名主表)",
+    )
     p.add_argument(
         "--num-workers", type=int, default=4, help="detect_direct DataLoader workers"
     )
@@ -957,6 +1102,7 @@ def main() -> int:
             model_path=args.model_path,
             run_name=args.run_name,
             out_root=paths.jhb_raw,
+            out_root_perdet=paths.jhb_perdet,
             args=args,
         )
         if not ok:
@@ -980,6 +1126,7 @@ def main() -> int:
             model_path=args.model_path,
             run_name=args.run_name,
             out_root=paths.ct_raw,
+            out_root_perdet=paths.ct_perdet,
             args=args,
         )
         if not ok:
