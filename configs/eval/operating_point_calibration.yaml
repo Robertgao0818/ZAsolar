@@ -1,0 +1,71 @@
+# Leakage-free operating-point (polygon-conf threshold) calibration registry.
+# F1-gap Tier A2 (C11), 2026-06-10. Protocol: docs/evaluation_protocol.md §2.
+#
+# Rules enforced by scripts/analysis/lock_operating_point.py:
+#   1. calibration_grids MUST be disjoint from every reporting suite registered
+#      below (script errors out on intersection).
+#   2. A locked threshold is per (region, imagery_layer, model lineage).
+#   3. Acceptance: locked-point agg_area_F1 within 0.01 (1pp) of the
+#      oracle-sweep max on EVERY validation suite, else the lock FAILS and
+#      swept numbers may not be reported as headline for that pairing.
+#   4. Reporting suites may be used for *validation* of a lock (read-only,
+#      compare locked vs oracle) but never for *fitting*.
+
+reporting_suites:
+  # All suites of the post-training benchmark preset are reporting surfaces.
+  benchmark_presets:
+    - configs/benchmarks/post_train.yaml
+  # Additional reporting surfaces not in benchmark presets.
+  extra:
+    jhb_cbd25_clean_gt:
+      region: jhb
+      note: "Channel-2/3 locked clean_gt suite (feedback_eval_gt_lock_clean)"
+      grid_ids: [G0772, G0773, G0774, G0775, G0776, G0814, G0815, G0816, G0817,
+                 G0818, G0853, G0854, G0855, G0856, G0857, G0888, G0889, G0890,
+                 G0891, G0892, G0922, G0923, G0924, G0925, G0926]
+    ct_li_heldout_16:
+      region: cape_town
+      note: "Li 16 held-out grids (Path1 vs Path2 decision surface, 2026-06-07)"
+      grid_id_pattern: "^L[0-9]{4}$"
+    xdomain60:
+      regions: [pretoria, bloemfontein, durban, east_london, gqeberha, pietermaritzburg]
+      note: "all Li-annotated xdomain60 grids in these regions are reporting"
+      grid_id_pattern: ".*"
+
+locks:
+  - lock_id: ct_aerial_2025_v3c
+    region: cape_town
+    imagery_layer: aerial_2025
+    model_lineage: v3c
+    fit:
+      model_run: v3c_targeted_hn_aerial_2025
+      # 36 annotated CT grids with local predictions, outside every reporting
+      # suite AND outside V3-C's training batches (001-002 + batch003 HN FPs).
+      calibration_grids: [G1630, G1631, G1632, G1633, G1634, G1855, G1856,
+                          G1862, G1863, G1864, G1909, G1910, G1911, G1917,
+                          G1919, G1920, G1921, G1966, G1970, G1971, G1972,
+                          G1973, G1974, G1975, G1976, G1981, G2025, G2026,
+                          G2027, G2028, G2029, G2030, G2031, G2032, G2037,
+                          G2038]
+      thresholds: [0.85, 0.875, 0.90, 0.925, 0.95, 0.97, 0.99]
+    validate_on:
+      - suite_id: cape_town_independent_26
+        region: cape_town
+        model_run: v3c_wave1_perdet
+        merge_mode: per-detection
+      - suite_id: cape_town_independent_26
+        region: cape_town
+        model_run: v3c_wave1_pixelor
+        merge_mode: pixel-or
+
+  # ── Documented gaps (fail-closed; no lock can be fitted leakage-free) ──
+  # unified_reviewall_A × cape_town/aerial_2025: the unified reviewall training
+  #   set consumes all reviewed CT annotation batches, so every annotated CT
+  #   grid outside the reporting suites is in-train for this lineage. The only
+  #   train-free CT surfaces (independent_26, Li held-out 16) are reporting.
+  #   → No leakage-free calibration set exists today. Options (user decision,
+  #   see docs/evaluation_protocol.md §2.5): (a) split Li held-out into
+  #   calibration/reporting halves going forward; (b) annotate new
+  #   non-suite grids for calibration.
+  # jhb/vexcel_2024 (any lineage): the only exhaustive JHB GT is the locked
+  #   clean_gt CBD25 reporting suite. Same fail-closed status.
