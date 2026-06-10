@@ -3,14 +3,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-06-08: docs(architecture): register Capetown_Li annotation scheme + data/analysis dirs
-- 2026-06-08: fix(progress): make ROADMAP recently-completed amend/rebase-safe
-- 2026-06-08: chore: roll ROADMAP recently-completed + add watch-pull-and-stop-pod helper
-- 2026-06-08: feat(backdating): Vexcel /ortho/dates capture-date probe + descriptive stats
-- 2026-06-08: docs(cls): adaptive-chip upgrade plan + validated results
-- 2026-06-08: feat(ct-census): Li independent GT scheme + registry plumbing + lock v2_all baseline
-- 2026-06-01: feat(gemini): --resume for multiscale FP-review + JHB full-inventory FP-cut delivery
-- 2026-05-31: docs(handoff): require --routing-salt-mode target for flash FP-cut runs
+- 2026-06-10: fix(annotations): dedup G1238 T1 manifest rows + correct census_mid_date test
+- 2026-06-10: docs(plans): F1-gap review 计划入库 + Tier A 执行回写与报告
+- 2026-06-10: feat(eval): gtnoise_t1_ceiling 战役包(抽样+RA协议+paired评分harness+种子先行版)
+- 2026-06-10: feat(eval): installation_sym 诊断 profile(GT 侧 dissolve)+ Step0/sweep 实测
+- 2026-06-10: feat(eval): validate_checkpoint 双 merge-mode + Tier-1 全套 + v4_poly_diag gallery
+- 2026-06-10: feat(eval): presence 双口径输出 + 显式口径字段 + run_benchmark 跨口径拒绝
+- 2026-06-10: feat(eval): leakage-free 工作点锁定协议(脚本+注册+协议文档)
+- 2026-06-10: fix(eval): legacy 路径 honor --postproc-config 的 conf_tiered + re-pin batch003 presets
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
