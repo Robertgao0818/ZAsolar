@@ -141,6 +141,7 @@ docs/
 | `core/region_registry.py` | 加载 regions.yaml 提供 region/grid 查询 API |
 | `scripts/validate_registry.py` | 注册表交叉验证（manifest ↔ training_sets ↔ model_registry ↔ regions） |
 | `scripts/analysis/lock_operating_point.py` | leakage-free 工作点锁定（拟合+迁移验收+Platt ablation，见 docs/evaluation_protocol.md §2） |
+| `scripts/analysis/installation_sym_eval.py` | installation_sym 诊断 profile（GT 侧兄弟碎片 dissolve + flip counters，docs/evaluation_protocol.md §4；仅诊断 channel） |
 | `scripts/progress_tracker.py` | ROADMAP.md 自动更新 |
 
 ## CRS 约定

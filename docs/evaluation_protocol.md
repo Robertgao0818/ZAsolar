@@ -119,11 +119,52 @@ wave1 实测:排名随 polygon-conf 口径在「固定阈 v3c 赢 / 最优阈 un
   variant + per-layer poly_conf re-sweep(按 §2 锁定协议)+ solar_cls per-layer
   阈值重校准;动 CT census 须显式重开 2026-06-08 CLS-only 锁定 baseline 决定。
 
-## 4. 指针
+## 4. installation_sym 诊断 profile(GT 侧兄弟碎片 dissolve)
+
+> 仅诊断 channel,禁入模型排名主表(全局规则 3)。
+> 实现:`scripts/analysis/installation_sym_eval.py`(step0 / sweep / sym)。
+
+- **语义**:GT polygons 以 buffer(+gap/2)→union→buffer(−gap/2) dissolve 成
+  cluster 后,用现有 installation merge profile(pred 侧 many-to-one)@IoU0.5
+  重匹配。`installation` profile 本身**仍然不是** GT-side clustering
+  (`.claude/rules/07-annotation-semantics.md` 的例外注记)。
+- **gap = 1.0 m**(2026-06-10 sweep 选定):clean_gt25 曲线在 1→2 m 出现最大
+  跳变(fragments/cluster 1.44→1.92,2 m 起跨屋顶);Li module 级 over-merge
+  audit @1 m 干净(PTA0292:287→275 cluster,最大 cluster 3 成员 / 9.6 m²,
+  全部为同屋顶模块兄弟)。SolarMapper 3 m 仅为「proximity 定义评估单元」的
+  先例锚(对**预测**像素分组),不是 GT-side merge 先例;3 m 在 clean_gt 上
+  产生 47 成员 cluster,过并。
+- **实测 fragments-per-cluster @1 m**:clean_gt25 = 1.44;CT SAM2(97 grid,
+  3 grid 因 layer 名漂移跳过)= 1.25;xdomain60 Li = 1.34。
+  (旧引用「1.49 fragments/installation」无出处,已废,以本表为准。)
+- **输出**:installation_sym F1@0.5 + 两个 flip counter
+  (`flip_fn_cluster_to_tp` = 切分 artifact 回收;`flip_tp_to_fn` = 部分检出
+  installation 暴露),行带 `eval_profile=installation_sym` + `iou_caliber`。
+- **GT-merge 不动结构性 FP**:xdomain60 strict FP=3,002(P=0.288);pred 侧
+  merge 吸收后剩 ~1.3k;GT dissolve 进一步只把邻接兄弟旁的少量 pred 并入
+  match(1,289→1,018),lookalike FP 主体不动 —— precision 修复仍归
+  solar_cls,与本 profile 正交。
+
+### 4.1 与 `cluster_level_eval.py` 的和解
+
+两套语义**并存且分工**,不引入第三套:
+
+| | `installation_sym_eval.py` | `cluster_level_eval.py` |
+|---|---|---|
+| 评估单元 | **pred-independent** GT-side dissolve(固定 gap) | prediction-bridged 连通分量(GT+pred 互桥) |
+| 适用 | 「GT 切分 artifact 吃掉多少 F1」诊断;跨模型可比(单元不随预测变) | split/merge 容忍的整体一致性巡检 |
+| 风险 | gap 选择需 over-merge audit(§4) | 过涂预测会桥接出大 cluster 而被奖励(单元随预测漂移) |
+
+模型间诊断对比一律用 installation_sym(单元固定);cluster_level_eval 保留
+为单模型形态巡检工具,不用于跨模型 delta。
+
+## 5. 指针
 
 - 工作点锁定脚本:`scripts/analysis/lock_operating_point.py`
 - 校准集注册:`configs/eval/operating_point_calibration.yaml`
 - 锁定注册表:`configs/eval/locked_operating_points.json`
+- installation_sym 诊断:`scripts/analysis/installation_sym_eval.py`
+  (结果:`results/analysis/installation_sym/`)
 - 四通道框架:[`validation_strategy.md`](validation_strategy.md)
 - legacy conf 过滤语义(fall-through vs first-match)的 pin:
   `tests/postproc/test_legacy_conf_filter.py`
