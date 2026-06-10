@@ -1,5 +1,6 @@
 {
   "post_conf_threshold": 0.89,
+  "conf_tiered": [[200, 0.70], [100, 0.65], [0, 0.85]],
   "min_object_area": 5.0,
   "max_elongation": 8.0,
   "_meta": {
@@ -11,6 +12,7 @@
     "n_tp": 1626,
     "n_fp": 884,
     "n_seg_error_excluded": 32,
+    "repin_2026_06_10": "F1-gap Tier A2 (C11): 同 batch003_best_f1.json 的 re-pin 说明 —— legacy 路径修复前 post_conf_threshold 在带 area_m2 的预测上是死配置, 实际生效的一直是 hardcoded CONF_TIERED 分层阈值, 现写成显式 conf_tiered 以保全行为。",
     "grids": [
       "G1682",
       "G1683",

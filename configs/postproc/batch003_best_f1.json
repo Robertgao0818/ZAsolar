@@ -1,5 +1,6 @@
 {
   "post_conf_threshold": 0.92,
+  "conf_tiered": [[200, 0.70], [100, 0.65], [0, 0.85]],
   "min_object_area": 5.0,
   "max_elongation": 8.0,
   "_meta": {
@@ -11,6 +12,7 @@
     "n_tp": 1626,
     "n_fp": 884,
     "n_seg_error_excluded": 32,
+    "repin_2026_06_10": "F1-gap Tier A2 (C11): legacy 路径修复前 conf_tiered 无法从配置注入、hardcoded CONF_TIERED 无条件生效, post_conf_threshold=0.92 在带 area_m2 的预测上是死配置。本次把此前实际生效的分层阈值写成显式 conf_tiered, 使修复后行为 = 修复前行为(逐多边形一致)。post_conf_threshold 保留: 仅在无 area_m2 列的 fallback 分支生效(legacy 与 core/postproc 同语义)。注意 legacy 路径 tier 迭代是 fall-through(area≥200 有效阈值 0.65), direct 路径是 first-match-wins(0.70), 见 detect_and_evaluate.apply_conf_filter docstring。",
     "grids": [
       "G1682",
       "G1683",
