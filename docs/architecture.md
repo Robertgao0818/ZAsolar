@@ -101,6 +101,9 @@ configs/
     imagery_sources.yaml       — 影像源参数（分辨率、CRS、下载脚本）
   benchmarks/
     post_train.yaml            — Benchmark preset (grid suites, verdict 规则)
+  eval/
+    operating_point_calibration.yaml — leakage-free 工作点校准集注册（报告 suite 防火墙）
+    locked_operating_points.json     — 锁定工作点注册表（lock_operating_point.py 写入）
   model_registry.yaml          — 模型注册表 (V1/V2/V3-C 等权重路径与元数据)
   postproc/                    — 后处理阈值配置 (calibration sweep 产物)
 scripts/
@@ -111,6 +114,7 @@ cloud_setup.sh                 — RunPod 训练启动器（stage COCO → local
 docs/
   architecture.md              — 本文件（目录结构、路径映射）
   workflows.md                 — 工作流命令序列
+  evaluation_protocol.md       — 口径与工作点纪律（IoU 双口径、merge-mode、leakage-free 锁定）
   governance/repo-rules.md     — 仓库规则（Git 大文件保护、目录治理）
   runbook/                     — 操作 SOP（RunPod 会话启动 checklist 等）
   handoffs/                    — 外部协作者交付文档（如 Li Review GUI setup）
@@ -136,6 +140,7 @@ docs/
 | `core/grid_utils.py` | Grid 路径/坐标工具函数（共享模块，内部委托 region_registry） |
 | `core/region_registry.py` | 加载 regions.yaml 提供 region/grid 查询 API |
 | `scripts/validate_registry.py` | 注册表交叉验证（manifest ↔ training_sets ↔ model_registry ↔ regions） |
+| `scripts/analysis/lock_operating_point.py` | leakage-free 工作点锁定（拟合+迁移验收+Platt ablation，见 docs/evaluation_protocol.md §2） |
 | `scripts/progress_tracker.py` | ROADMAP.md 自动更新 |
 
 ## CRS 约定

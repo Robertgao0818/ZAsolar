@@ -223,8 +223,12 @@ def _json_ready(value):
 def load_postproc_config(config_path: str | Path) -> dict:
     """从 JSON 文件加载后处理参数，返回可用于覆盖默认值的 dict。
 
-    支持的键: post_conf_threshold, min_object_area, max_elongation
+    支持的键: post_conf_threshold, conf_tiered, min_object_area, max_elongation
     (未来扩展: classifier_model, nms_strategy, dual_elongation 等)
+
+    语义与 core/postproc.py 的 apply_postproc_filters 对齐:
+    预测带 area_m2 列时生效的是 conf_tiered(缺省 = 模块级 CONF_TIERED);
+    post_conf_threshold 只在无 area_m2 列的 fallback 分支生效。
     """
     path = Path(config_path)
     if not path.exists():
@@ -232,14 +236,55 @@ def load_postproc_config(config_path: str | Path) -> dict:
     with open(path, encoding="utf-8") as f:
         cfg = json.load(f)
     known_keys = {
-        "post_conf_threshold", "min_object_area", "max_elongation",
+        "post_conf_threshold", "conf_tiered", "min_object_area", "max_elongation",
     }
     params = {k: v for k, v in cfg.items() if k in known_keys}
+    if "conf_tiered" in params:
+        params["conf_tiered"] = [
+            (float(min_area), float(thresh))
+            for min_area, thresh in params["conf_tiered"]
+        ]
     extra = set(cfg.keys()) - known_keys - {"_meta"}
     if extra:
         print(f"  [INFO] 后处理配置中忽略未知键: {extra}")
     print(f"  [POSTPROC] 从 {path.name} 加载: {params}")
     return params
+
+
+def apply_conf_filter(pred_gdf, conf_tiered=None, post_conf_threshold=None):
+    """置信度过滤(legacy 路径),配置键语义对齐 core/postproc.apply_postproc_filters:
+    带 area_m2 列 → 分面积段阈值(conf_tiered,缺省模块级 CONF_TIERED;
+    大面积商业板 confidence 系统性偏低);无 area_m2 列 → 平阈值
+    post_conf_threshold(缺省模块级 POST_CONF_THRESHOLD)。
+
+    2026-06-10 之前本过滤内联在 detect_solar_panels 中且 conf_tiered 无法
+    从 --postproc-config 注入(hardcoded CONF_TIERED 无条件生效,配置里的
+    post_conf_threshold 在带 area_m2 的预测上是死配置)。
+
+    ⚠️ tier 迭代语义保留 legacy **fall-through**(`~keep_mask`:一行可被任何
+    min_area≤area 的 tier 放行),与 core/postproc._apply_tiered_keep 的
+    first-match-wins(`~matched`)不同——对默认 tiers 而言差异仅在
+    area≥200 & conf∈[0.65,0.70):legacy 放行(有效阈值 0.65),direct 拒绝。
+    保留 fall-through 是行为保全(修复前后逐多边形一致);统一两路径语义
+    属于口径翻转,须另立显式决定,不在本修复范围。
+
+    返回 (filtered_gdf, description_str);description 供调用方打印日志。
+    """
+    if "area_m2" in pred_gdf.columns:
+        tiers = conf_tiered if conf_tiered is not None else CONF_TIERED
+        keep_mask = pd.Series(False, index=pred_gdf.index)
+        for min_area, thresh in tiers:
+            tier_mask = (pred_gdf["area_m2"] >= min_area) & ~keep_mask
+            keep_mask |= tier_mask & (pred_gdf["confidence"] >= thresh)
+        filtered = pred_gdf[keep_mask].copy()
+        tier_desc = ", ".join(f"≥{a}m²→{t}" for a, t in tiers)
+        return filtered, f"分段:{tier_desc}"
+    threshold = (
+        post_conf_threshold
+        if post_conf_threshold is not None else POST_CONF_THRESHOLD
+    )
+    filtered = pred_gdf[pred_gdf["confidence"] >= threshold].copy()
+    return filtered, f"confidence>={threshold}"
 
 
 def build_detection_config(
@@ -249,12 +294,17 @@ def build_detection_config(
     confidence_threshold=None,
     mask_threshold=None,
     post_conf_threshold=None,
+    conf_tiered=None,
     max_elongation=None,
     output_dir=None,
     model_path=None,
 ) -> dict:
-    """构建检测阶段配置快照，用于结果复用校验。"""
-    return {
+    """构建检测阶段配置快照，用于结果复用校验。
+
+    conf_tiered 仅在显式提供时写入快照(避免使 2026-06-10 之前的全部
+    config.json 缓存失效);为 None 时行为 = 模块级 CONF_TIERED,与历史一致。
+    """
+    config = {
         "grid_id": GRID_ID,
         "region": GRID_REGION,
         "imagery_layer_id": IMAGERY_LAYER_ID,
@@ -289,6 +339,11 @@ def build_detection_config(
         "metric_crs": METRIC_CRS,
         "export_crs": EXPORT_CRS,
     }
+    if conf_tiered is not None:
+        config["conf_tiered"] = [
+            [float(a), float(t)] for a, t in conf_tiered
+        ]
+    return config
 
 
 def write_run_config(
@@ -461,6 +516,7 @@ def detect_solar_panels(
     confidence_threshold=None,
     mask_threshold=None,
     post_conf_threshold=None,
+    conf_tiered=None,
     max_elongation=None,
     output_dir=None,
     save_config=True,
@@ -493,6 +549,7 @@ def detect_solar_panels(
         confidence_threshold=_confidence_threshold,
         mask_threshold=_mask_threshold,
         post_conf_threshold=_post_conf_threshold,
+        conf_tiered=conf_tiered,
         max_elongation=_max_elongation,
         output_dir=_output_dir,
         model_path=model_path,
@@ -793,19 +850,13 @@ def detect_solar_panels(
 
         # 置信度过滤：分面积段阈值（大面积商业板 confidence 系统性偏低）
         pre_conf_count = len(pred_gdf)
-        if "area_m2" in pred_gdf.columns:
-            keep_mask = pd.Series(False, index=pred_gdf.index)
-            for min_area, thresh in CONF_TIERED:
-                tier_mask = (pred_gdf["area_m2"] >= min_area) & ~keep_mask
-                keep_mask |= tier_mask & (pred_gdf["confidence"] >= thresh)
-            pred_gdf = pred_gdf[keep_mask].copy()
-            tier_desc = ", ".join(f"≥{a}m²→{t}" for a, t in CONF_TIERED)
-            print(f"置信度过滤(分段): {len(pred_gdf)} / {pre_conf_count} 个多边形保留"
-                  f"（{tier_desc}）")
-        else:
-            pred_gdf = pred_gdf[pred_gdf["confidence"] >= _post_conf_threshold].copy()
-            print(f"置信度过滤: {len(pred_gdf)} / {pre_conf_count} 个多边形保留"
-                  f"（confidence>={_post_conf_threshold}）")
+        pred_gdf, conf_desc = apply_conf_filter(
+            pred_gdf,
+            conf_tiered=conf_tiered,
+            post_conf_threshold=_post_conf_threshold,
+        )
+        print(f"置信度过滤: {len(pred_gdf)} / {pre_conf_count} 个多边形保留"
+              f"（{conf_desc}）")
 
         pred_gdf.to_file(str(_predictions_metric_path), driver="GPKG")
         export_gdf = to_export_crs(
@@ -1908,7 +1959,7 @@ def parse_args():
         "--postproc-config",
         default=None,
         help="后处理参数 JSON 文件路径（由 calibration_sweep 生成），"
-             "覆盖 post_conf_threshold / min_object_area / max_elongation",
+             "覆盖 post_conf_threshold / conf_tiered / min_object_area / max_elongation",
     )
     parser.add_argument(
         "--classifier-filtered-gpkg",
@@ -1949,6 +2000,7 @@ def main(force: bool = False,
          confidence_threshold: float | None = None,
          mask_threshold: float | None = None,
          post_conf_threshold: float | None = None,
+         conf_tiered: list | None = None,
          max_elongation: float | None = None,
          model_path: str | None = None,
          evaluation_profile: str = "installation",  # V1.3: name preserved for compatibility; evaluates reviewed predictions vs installation-level GT
@@ -1963,6 +2015,8 @@ def main(force: bool = False,
         pp = load_postproc_config(postproc_config)
         if post_conf_threshold is None and "post_conf_threshold" in pp:
             post_conf_threshold = pp["post_conf_threshold"]
+        if conf_tiered is None and "conf_tiered" in pp:
+            conf_tiered = pp["conf_tiered"]
         if min_object_area is None and "min_object_area" in pp:
             min_object_area = pp["min_object_area"]
         if max_elongation is None and "max_elongation" in pp:
@@ -2003,6 +2057,7 @@ def main(force: bool = False,
         confidence_threshold=confidence_threshold,
         mask_threshold=mask_threshold,
         post_conf_threshold=post_conf_threshold,
+        conf_tiered=conf_tiered,
         max_elongation=max_elongation,
         output_dir=OUTPUT_DIR,
         model_path=model_path,
@@ -2029,6 +2084,7 @@ def main(force: bool = False,
             confidence_threshold=confidence_threshold,
             mask_threshold=mask_threshold,
             post_conf_threshold=post_conf_threshold,
+            conf_tiered=conf_tiered,
             max_elongation=max_elongation,
             output_dir=str(OUTPUT_DIR),
             model_path=model_path,
