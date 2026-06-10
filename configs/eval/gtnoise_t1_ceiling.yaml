@@ -1,0 +1,72 @@
+# gtnoise_t1_ceiling — T1 gold paired re-score 战役配置 (F1-gap Tier A4 / C9)
+#
+# 独立诊断 channel:不叫 ch2_*,所有输出带 gt_source=t1_gold,禁入模型
+# 排名主表,不触 compute_ch2_recall / area_aggregate_eval 默认行为
+# (feedback_eval_gt_lock_clean / evaluation_protocol.md 全局规则 3)。
+#
+# 评分语义:同一份冻结预测、换 GT 重打分。headline = 代表性池(stratum=
+# representative)的 per-window paired delta + bootstrap CI;archetype 池
+# 只出分层诊断行。绝不报独立 F1 CI(per-window delta 的 paired CI only)。
+
+channel: gtnoise_t1_ceiling
+gt_source_field: t1_gold
+
+# 冻结预测(pin 死;换预测源 = 新战役)
+frozen_predictions:
+  jhb:
+    root: results/johannesburg/unified_reviewall_A_perdet_sam_maskbox_vexcel_2024_full382_sam_maskbox
+    file: predictions_metric_nms01_c0925.gpkg     # production @c=0.925
+    chain: "unified_reviewall_A per-det + SAM mask_box @0.925 (2026-05-14 production)"
+    merge_mode: per-detection
+    metric_crs: EPSG:32735
+  ct:
+    root: results/cape_town/unifiedA_wave1_perdet
+    file: predictions_metric.gpkg
+    chain: "unified_reviewall_A per-det (detector side of 2026-06-08 CLS-only locked chain)"
+    merge_mode: per-detection
+    metric_crs: EPSG:32734
+    # CT production 链含 solar_cls 过滤;若提供 cls-filtered gpkg,可在
+    # score 脚本用 --ct-variant cls_filtered 加一行对照(不替换 detector 行)。
+
+# 旧 GT(paired delta 的另一侧):A2 现行标注
+old_gt:
+  jhb:
+    root: data/annotations_channel2_clean
+    pattern: "{grid}/{grid}_clean_gt.gpkg"
+  ct:
+    root: data/annotations/Capetown
+    pattern: auto    # area_aggregate_eval._gt_spec_for 自动发现(SAM2 优先)
+
+# 抽样(scripts/analysis/gtnoise_t1_sampling.py 产物)
+sampling:
+  windows_csv: results/analysis/gtnoise_t1_ceiling/sampling/windows_selected.csv
+  windows_gpkg:
+    jhb: results/analysis/gtnoise_t1_ceiling/sampling/windows_candidates_jhb.gpkg
+    ct: results/analysis/gtnoise_t1_ceiling/sampling/windows_candidates_ct.gpkg
+  seed: 20260610
+  headline_strata: [representative]     # 天花板 headline 只从这一池
+  diagnostic_strata: [arch_large, arch_dense, arch_wobble,
+                      arch_shadow_MANUAL, arch_lightroof_MANUAL]
+
+# RA 交付(T1 标注)期望落点
+t1_annotations:
+  inbox: /mnt/d/ZAsolar/annotations_inbox/gtnoise_t1_ceiling/
+  schema:
+    required_fields: [window_id, label_source, a1_checked,
+                      boundary_audit, geometry]
+    label_source_allowed: [human_manual, human_manual_sam_assisted]
+    a1_checked: "true 当且仅当按 ANNOTATION_SPEC.md merge/boundary 规则逐项复核"
+    boundary_audit: "sam_halo | sam_undersize | clean | uncertain — D1 (PointRend) Gate① 解锁字段"
+
+# 种子(复用并重审,不是从零)
+seed_t1:
+  grid: G1238
+  manifest_claim: "248 × T1/A1 (annotation_manifest.csv, source_file=G1238_detailed.gpkg)"
+  on_disk_candidates:
+    - {path: data/annotations/Capetown/G1238.gpkg, n: 124, source: qgis_aerial,
+       note: "human;中位 26.1 m²,installation 形态"}
+    - {path: data/annotations/Capetown/G1238_SAM2_260320.gpkg, n: 242, source: sam2,
+       note: "SAM2 sub-array;中位 10.6 m²"}
+  discrepancy: "G1238_detailed.gpkg 不在盘上;manifest 248 ≠ 盘上 124/242。
+    种子重审第一项 = 对账 manifest ↔ 盘面,确认 124 行 human 文件是否即 T1
+    re-export(缺 124 行)或 detailed 文件需从 Dropbox/RA_Solar 备份找回。"
