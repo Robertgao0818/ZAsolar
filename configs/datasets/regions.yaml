@@ -40,8 +40,8 @@ regions:
         grid_id_pattern: "L\\d{4}"
         task_grid: "data/task_grid_li.gpkg"
         task_kml: "/mnt/c/Users/gaosh/Dropbox/RA_Solar/Li/capetown/cape_town_grid_Li_G0029_G1841.kml"
-        grid_count: 17
-        grid_id_range: "L1842..L1954"
+        grid_count: 73          # cells in task_grid_li.gpkg; GT grids = 74 (L1520 has GT but no KML cell)
+        grid_id_range: "L0208..L1954"
         annotations_dir: "data/annotations/Capetown_Li"
         notes: |
           Li Yang's independent CT GT scheme (registered 2026-06-04, Phase 0.5 of
@@ -60,6 +60,15 @@ regions:
           NOTE: aerial_2025 tiles for L1895 are physically at
           tiles/cape_town/aerial_2025/G1895/ (downloaded under the source Gao ID);
           the other 16 Li grids still need WMS download (Phase 0.5 step 3).
+
+          KML batch (2026-06-10 ingest, extract_li_kml_gt.py): +57 GT grids
+          L0208..L1841 (2,108 panels) from the bulk KML, same semantics
+          (SAM2 sub-array, A2/T2). +56 cells added to task_grid_li.gpkg
+          (L1520 has GT but no cell in the KML task grid). 53 of the 57 are
+          the unified_A x aerial_2025 operating-point CALIBRATION set
+          (protocol §2.5 option (b), 2026-06-11; roster + exclusions in
+          configs/eval/operating_point_calibration.yaml). Calibration tiles
+          not downloaded yet (WMS, ~53 km²).
 
     imagery_layers:
       aerial_2025:
