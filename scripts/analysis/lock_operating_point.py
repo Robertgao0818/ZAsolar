@@ -263,6 +263,22 @@ def main() -> None:
     fit = lock_spec["fit"]
     calib_grids = list(fit["calibration_grids"])
     thresholds = [float(t) for t in fit["thresholds"]]
+    lock_merge_mode = lock_spec.get("merge_mode")
+
+    # 0) merge-mode consistency check (protocol §2.2 rule 5). If the lock
+    # declares a merge_mode, every validation suite must report in that same
+    # merge_mode — calibrating on one mode and validating on another is the
+    # exact cross-mode leak that produced the 5.22pp per-det FAIL (2026-06-10).
+    if lock_merge_mode is not None:
+        bad = [v for v in lock_spec.get("validate_on", [])
+               if v.get("merge_mode") not in (None, lock_merge_mode)]
+        if bad:
+            raise SystemExit(
+                f"[MERGE-MODE MISMATCH] lock merge_mode={lock_merge_mode!r} but "
+                f"validate_on declares: "
+                f"{[(v['suite_id'], v.get('merge_mode')) for v in bad]} "
+                f"(protocol §2.2 rule 5: calibration chain must share merge-mode "
+                f"with the reporting chain)")
 
     # 1) leakage check
     reporting = load_reporting_grids(cfg)
@@ -346,6 +362,10 @@ def main() -> None:
         "region": region,
         "imagery_layer": lock_spec["imagery_layer"],
         "model_lineage": lock_spec["model_lineage"],
+        # merge_mode is a first-class caliber dimension (protocol §2.2 rule 5):
+        # the calibration chain must share merge-mode with the reporting chain,
+        # so the lock entry declares which merge-mode it is valid for.
+        "merge_mode": lock_spec.get("merge_mode"),
         "locked_conf_threshold": t_star,
         "fitted_on": {"model_run": fit["model_run"],
                       "calibration_grids": calib_grids,

@@ -4,9 +4,90 @@
     "region": "cape_town",
     "imagery_layer": "aerial_2025",
     "model_lineage": "v3c",
+    "merge_mode": "pixel-or",
     "locked_conf_threshold": 0.97,
     "fitted_on": {
       "model_run": "v3c_targeted_hn_aerial_2025",
+      "calibration_grids": [
+        "G1630",
+        "G1631",
+        "G1632",
+        "G1633",
+        "G1634",
+        "G1855",
+        "G1856",
+        "G1862",
+        "G1863",
+        "G1864",
+        "G1909",
+        "G1910",
+        "G1911",
+        "G1917",
+        "G1919",
+        "G1920",
+        "G1921",
+        "G1966",
+        "G1970",
+        "G1971",
+        "G1972",
+        "G1973",
+        "G1974",
+        "G1975",
+        "G1976",
+        "G1981",
+        "G2025",
+        "G2026",
+        "G2027",
+        "G2028",
+        "G2029",
+        "G2030",
+        "G2031",
+        "G2032",
+        "G2037",
+        "G2038"
+      ],
+      "thresholds": [
+        0.85,
+        0.875,
+        0.9,
+        0.925,
+        0.95,
+        0.97,
+        0.99
+      ]
+    },
+    "ranking_rule": "min std_ratio_Bw + rmse_m2/1e5 s.t. bulk in [0.5,2.0]",
+    "acceptance": "agg_area_F1 within 1pp of oracle per suite",
+    "validation": [
+      {
+        "suite_id": "cape_town_independent_26",
+        "model_run": "v3c_wave1_pixelor",
+        "merge_mode": "pixel-or",
+        "locked_t": 0.97,
+        "locked_agg_F1": 0.7505,
+        "oracle_t": 0.97,
+        "oracle_agg_F1": 0.7505,
+        "gap_pp": 0.0,
+        "pass_le_1pp": true,
+        "locked_sigma_Bw": 0.3074,
+        "locked_bulk": 1.202,
+        "locked_pg_F1": 0.7357,
+        "oracle_pg_F1": 0.7357
+      }
+    ],
+    "all_suites_pass": true,
+    "locked_date": "2026-06-11",
+    "git_head": "2c18b41"
+  },
+  "ct_aerial_2025_v3c_perdet": {
+    "lock_id": "ct_aerial_2025_v3c_perdet",
+    "region": "cape_town",
+    "imagery_layer": "aerial_2025",
+    "model_lineage": "v3c",
+    "merge_mode": "per-detection",
+    "locked_conf_threshold": 0.97,
+    "fitted_on": {
+      "model_run": "v3c_targeted_hn_aerial_2025_perdet",
       "calibration_grids": [
         "G1630",
         "G1631",
@@ -72,25 +153,10 @@
         "locked_bulk": 0.894,
         "locked_pg_F1": 0.6983,
         "oracle_pg_F1": 0.7467
-      },
-      {
-        "suite_id": "cape_town_independent_26",
-        "model_run": "v3c_wave1_pixelor",
-        "merge_mode": "pixel-or",
-        "locked_t": 0.97,
-        "locked_agg_F1": 0.7505,
-        "oracle_t": 0.97,
-        "oracle_agg_F1": 0.7505,
-        "gap_pp": 0.0,
-        "pass_le_1pp": true,
-        "locked_sigma_Bw": 0.3074,
-        "locked_bulk": 1.202,
-        "locked_pg_F1": 0.7357,
-        "oracle_pg_F1": 0.7357
       }
     ],
     "all_suites_pass": false,
-    "locked_date": "2026-06-10",
-    "git_head": "d356724"
+    "locked_date": "2026-06-11",
+    "git_head": "2c18b41"
   }
 }

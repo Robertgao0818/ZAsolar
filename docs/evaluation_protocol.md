@@ -67,18 +67,26 @@ wave1 实测:排名随 polygon-conf 口径在「固定阈 v3c 赢 / 最优阈 un
 4. **验收**:锁定点 agg_area_F1 距 oracle-sweep 最大值 ≤1pp,对**每个**声明的
    报告 suite 成立;否则该 (lock × suite) 组合 FAIL,**禁止把 swept 数字当
    headline 报**(fail-closed)。
-5. **校准链与报告链必须同 merge-mode**(2026-06-10 首次锁定实测:
-   ct_aerial_2025_v3c 在 pixel-or 报告链上 gap=0.00pp PASS,在 per-detection
-   报告链上 gap=5.22pp FAIL —— 校准预测来自 legacy 管线,其 merge 语义与
-   pixel-or 同族。merge-mode 是 first-class 口径维度,锁定条目必须声明)。
+5. **校准链与报告链必须同 merge-mode**(merge-mode 是 first-class 口径维度,
+   锁定条目必须声明 `merge_mode`;`lock_operating_point.py` 在 lock 声明了
+   `merge_mode` 时强制 `validate_on[].merge_mode` 全部一致,否则报错退出)。
+   2026-06-10 首次锁定把 pixel-or 校准预测同时验收 pixel-or + per-det 两个
+   报告链,per-det 链 gap=5.22pp FAIL —— 当时归因为 merge-mode 不匹配。
+   **2026-06-11 决策2 执行更正**:把 36 个校准 grid 用 finalize
+   `--merge-mode per-detection` 重推
+   (`v3c_targeted_hn_aerial_2025_perdet`),拆出独立 per-det 锁
+   `ct_aerial_2025_v3c_perdet`(校准链=报告链=per-det,完全合规)。
+   **重推后 gap 仍 = 5.22pp**:merge-mode 修复是必要的合规步,但**不是** gap
+   的根因。详见 §2.3 诊断行与 §2.6。
 
-### 2.3 现有锁与已声明缺口(2026-06-10)
+### 2.3 现有锁与已声明缺口(2026-06-11)
 
-| lock_id | 状态 |
-|---|---|
-| `ct_aerial_2025_v3c` | 锁定 t*=0.97;pixel-or 链 PASS(0.00pp);per-det 链 FAIL(5.22pp,merge-mode 不匹配,需 per-det 校准预测后重拟合) |
-| unified_A × CT aerial_2025 | **缺口 fail-closed**:reviewall 训练集吞掉全部非 suite 标注 grid,不存在 leakage-free 校准集。选项(待用户决定):(a) Li held-out 16 拆 校准/报告 两半;(b) 新标校准 grid |
-| JHB vexcel_2024(任何 lineage) | **缺口 fail-closed**:唯一 exhaustive GT = clean_gt CBD25(报告锁) |
+| lock_id | merge_mode | 状态 |
+|---|---|---|
+| `ct_aerial_2025_v3c` | pixel-or | 锁定 t*=0.97;pixel-or 报告链 PASS(0.00pp)。校准链=报告链=pixel-or,合规。 |
+| `ct_aerial_2025_v3c_perdet` | per-detection | 锁定 t*=0.97;per-det 报告链 **FAIL(5.22pp)**。校准链已用 per-det 重推(`v3c_targeted_hn_aerial_2025_perdet`),merge-mode 完全合规 —— **gap 不是 merge-mode artifact,是结构性**(§2.6)。fail-closed:per-det 链不得用 swept headline。**2026-06-11 已裁决走 lever (iii)(§2.5):fail-closed 为正式处置,报数用预声明阈值。** |
+| `ct_aerial_2025_unifiedA_perdet` | per-detection | **校准集已登记(2026-06-11,选项 b)**:53 个 Li KML grid(`_ct_unifiedA_li_calibration_grids`),物理泄漏审计通过(距全部 Gao 标注格 ≥23.5 km,与 Li held-out 报告格 cell 重叠 0 m²)。**fit 待推理**(L-cell tiles 未下载);fit 完成前 unified_A 报告维持 fail-closed/预声明阈值。 |
+| JHB vexcel_2024(任何 lineage) | — | **缺口 fail-closed**:唯一 exhaustive GT = clean_gt CBD25(报告锁) |
 
 ### 2.4 Platt / 温度缩放的定位
 
@@ -95,11 +103,72 @@ wave1 实测:排名随 polygon-conf 口径在「固定阈 v3c 赢 / 最优阈 un
   solar_cls per-layer 阈值(下游);**禁止在 cls 过滤之后回头在报告 suite 上
   重调 detector 阈值**。报告的链配置(有无 cls attach)必须与锁定时声明一致。
 
-### 2.5 待用户决定
+### 2.5 用户裁决状态
 
-- unified_A 的 CT 校准缺口走 (a) Li16 拆半 还是 (b) 新标校准 grid。
-- per-det 校准预测(36 个校准 grid 的 direct+finalize per-det 重推,约 2–3h
-  本地 GPU)是否排期,以解锁 per-det 链的合规锁定点。
+- **已裁决(2026-06-11):unified_A 的 CT 校准缺口走选项 (b)**,校准集从 Li KML
+  批次(L0208..L1841,57 grid,2026-06-10 入库)中拆出 **53 个 grid**
+  (`configs/eval/operating_point_calibration.yaml`
+  `_ct_unifiedA_li_calibration_grids`,lock `ct_aerial_2025_unifiedA_perdet`)。
+  - **泄漏审计**(`scripts/analysis/_li_kml_calib_overlap_check.py`,证据
+    `results/analysis/operating_point_lock/li_kml_calib_split/`):全部候选距
+    Gao 标注格 ≥23.5 km(一次性排除 unified_A 训练泄漏 + G 侧报告面);真
+    cell 几何(`data/task_grid_li.gpkg`,已扩至 73 cell)与 Li held-out 报告格
+    重叠恰好 0 m²。namespace 论证(`project_li_grid_namespace`)由此获得物理
+    实证。
+  - **排除 4 个**:L1787(890 m² GT 越界进报告格 L1843 + installation 级口径
+    异常)、L1841(41 m² GT 越界进报告格 L1897)、L0264(唯一 GT polygon 72%
+    在自身 cell 外,测量无效)、L1520(KML 无 cell 几何,无法定义推理面)。
+  - **不留 reserve**:新 GT 按全局规则 3 禁入排名主表,校准是唯一消费方,
+    53 全划校准以最大化拟合样本。`ct_li_heldout_16` 同步从 pattern 改为显式
+    16 名单(L1895 维持 unassigned)。
+  - **fit 待推理**:53 个 L-cell 的 aerial_2025 tiles 未下载(WMS);步骤与
+    contingency 见 calibration yaml 该 lock 条目注释。若 fit 后 per-det 链
+    同样触发 §2.6 的结构性 FAIL,按 lever (iii) 回退(预声明阈值)。
+- **已裁决(2026-06-11):per-det 链 5.22pp gap 走 lever (iii)** —— 接受
+  fail-closed 为**正式处置**(不再是临时状态):
+  - **CT census per-det 报告永不带 swept headline**;报数用**预声明阈值**,
+    出处 = 2026-06-07 threshold-tradeoff 分析(unified_A per-det:下界 0.85 /
+    拐点 0.90–0.92)。v3c per-det 本次 sweep 的 oracle t=0.925 落在同一拐点
+    区间,互为佐证。报告必须显式标注「阈值为预声明,非报告 suite sweep 所得」,
+    且链配置(有无 cls attach)与 2026-06-08 CLS-only 锁定声明一致(§2.4)。
+  - **lever (i) 正式否决**(per-det 链单独换 aggF1-consistent ranking rule):
+    即便 aggF1-argmax-on-calib,calib↔reporting bulk 漂移仍留 ≥1.55pp > 1pp
+    bar —— 治标且不达标。
+  - **lever (ii) 标为原则性长期修法**(验收 bar 改 σ_Bw,与 ranking rule 同轴,
+    亦即与 Tier-1 主裁判 σ_Bw+RMSE 对齐):属验收语义变更,须专门 session
+    重审全 §2 后才可执行;在此之前 aggF1 验收 bar 维持现状。
+  - **重开条件**:若 unified_A 校准缺口走选项 (b) 新标校准 grid,应同时修
+    校准集 bulk 代表性(对齐 CT census 全量分布;**禁止**照报告 suite 挑
+    校准 grid —— 构成间接泄漏),届时可重开 per-det 锁定尝试。
+
+### 2.6 per-det 链 5.22pp gap 的结构性诊断(2026-06-11 决策2)
+
+决策2 已执行「校准链=报告链同 merge-mode」的合规修复(36 grid per-det 重推
+→ 独立 per-det 锁),**gap 仍 = 5.22pp**。逐阈值 sweep(两链均跑
+[0.85…0.99] + [0.90…0.95] 细网格)定位根因 —— **不是 merge-mode artifact,
+而是 ranking rule 与验收 metric 在 per-det 链上系统性反向**:
+
+1. **ranking rule(σ_Bw+RMSE)在 per-det 报告链上单调偏好高阈值**:
+   rank 从 t=0.85 的 0.670 单调降到 t=0.97 的 0.311,**无内部极小**;细网格
+   [0.90,0.95] 同样单调。锁因此选 t*=0.97。
+2. **但验收 metric aggF1 在 per-det 报告链上 t=0.925 见顶(0.7441)**,
+   0.925→0.97 区间 σ_Bw 几乎平(0.394→0.308)而 aggF1 掉 5.2pp ——
+   过了 0.925 再抬阈值是在删 TP 面积,不是修过涂。
+3. **机制 = pixel-or 有过涂、per-det 没有**。pixel-or 报告链 bulk 1.58→0.86,
+   抬阈值同时改善 σ_Bw 和 aggF1,两者在 t=0.97 共同见底/见顶 ⇒ 0.00pp PASS。
+   per-det 报告链 bulk 在 t=0.85 已是 1.36,预测体积已接近 GT,σ_Bw 的「越紧
+   越好」与 aggF1 的「适中最好」从此分道。
+4. **叠加 calib↔reporting 的 bulk 分布漂移**:同一阈值下 36 个校准 grid
+   bulk≈0.93–0.99,26 个报告 grid bulk≈1.16–1.24(报告 suite 比校准集系统性
+   多过涂 ~25%)。即便把 ranking rule 换成 aggF1-argmax-on-calib(t≈0.85–0.90),
+   迁移到报告链仍有 1.55pp+ gap > 1pp。校准集本身比报告集「更紧」。
+
+**结论**:per-det 链的 ≤1pp 锁定在「σ_Bw+RMSE ranking rule + aggF1 验收 bar +
+当前 36 grid 校准集」三者组合下不可达,且与 merge-mode 无关。证据矩阵(两链
+全阈值 + 细网格 sweep)在
+`results/analysis/operating_point_lock/ct_aerial_2025_v3c_perdet/`。处置已裁决
+(2026-06-11,lever (iii),见 §2.5);lever (ii) 的协议语义改动留待专门 session
+重审,在那之前不变更 ranking rule 或验收 metric。
 
 ## 3. 双 merge-mode 输出纪律
 

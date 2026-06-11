@@ -109,6 +109,22 @@ regions:
         inference_date: "2026-03-29"
         grid_count: 45
         notes: "V3-C on CT aerial 2025 (incl. 8 grids rescued from results_joburg/ misplacement)"
+      v3c_targeted_hn_aerial_2025_perdet:
+        model_version: "exp003_C_targeted_hn"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/v3c_targeted_hn_aerial_2025_perdet"
+        inference_date: "2026-06-10"
+        grid_count: 36
+        notes: |
+          Per-detection merge-mode re-run of the 36 V3-C calibration grids
+          (operating-point lock, F1-gap Tier A 决策2). Same checkpoint /
+          v4_canonical postproc / aerial_2025 tiles as
+          v3c_targeted_hn_aerial_2025 (pixel-or), but finalize.py
+          --merge-mode per-detection so the calibration chain matches the
+          per-detection reporting chain (v3c_wave1_perdet). Built via
+          detect_direct.py -> finalize.py (raw_detections.pkl not previously
+          on disk). Consumed by lock ct_aerial_2025_v3c_perdet. Does NOT
+          replace the pixel-or run; pixel-or lock stays as-is.
       v3c_geid_experiment:
         model_version: "exp003_C_targeted_hn"
         imagery_layer: "geid_2024_02"            # cross-region experiment

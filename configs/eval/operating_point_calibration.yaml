@@ -25,47 +25,136 @@ reporting_suites:
                  G0891, G0892, G0922, G0923, G0924, G0925, G0926]
     ct_li_heldout_16:
       region: cape_town
-      note: "Li 16 held-out grids (Path1 vs Path2 decision surface, 2026-06-07)"
-      grid_id_pattern: "^L[0-9]{4}$"
+      note: |
+        Li 16 held-out grids (Path1 vs Path2 decision surface, 2026-06-07).
+        2026-06-11: was grid_id_pattern ^L[0-9]{4}$, made EXPLICIT because the
+        L-namespace now also hosts the unified_A calibration set (KML batch,
+        see _ct_unifiedA_li_calibration_grids below) — the pattern would have
+        swallowed it and broken the disjointness check. Suite membership
+        unchanged (L1842..L1954 minus L1895, which stays unassigned).
+      grid_ids: [L1842, L1843, L1844, L1846, L1896, L1897, L1898, L1899,
+                 L1900, L1901, L1902, L1950, L1951, L1952, L1953, L1954]
     xdomain60:
       regions: [pretoria, bloemfontein, durban, east_london, gqeberha, pietermaritzburg]
       note: "all Li-annotated xdomain60 grids in these regions are reporting"
       grid_id_pattern: ".*"
 
+# Shared 36-grid V3-C calibration set (anchor; both pixel-or and per-det locks
+# reuse this exact grid list — disjoint from every reporting suite AND outside
+# V3-C's training batches 001-002 + batch003 HN FPs).
+_ct_v3c_calibration_grids: &ct_v3c_calibration_grids
+  [G1630, G1631, G1632, G1633, G1634, G1855, G1856,
+   G1862, G1863, G1864, G1909, G1910, G1911, G1917,
+   G1919, G1920, G1921, G1966, G1970, G1971, G1972,
+   G1973, G1974, G1975, G1976, G1981, G2025, G2026,
+   G2027, G2028, G2029, G2030, G2031, G2032, G2037,
+   G2038]
+_ct_v3c_thresholds: &ct_v3c_thresholds
+  [0.85, 0.875, 0.90, 0.925, 0.95, 0.97, 0.99]
+
+# unified_A × CT calibration set (protocol §2.5 option (b), user ruling
+# 2026-06-11): 53 of the 57 Li KML-batch grids (L0208..L1841, Li GT staged
+# 2026-06-10 from cape_town_grid_Li_G0029_G1841.kml). Leakage evidence
+# (scripts/analysis/_li_kml_calib_overlap_check.py; CSV under
+# results/analysis/operating_point_lock/li_kml_calib_split/): every candidate
+# cell is >=23.5 km from ALL Gao-annotated cells (unified_A trains on every
+# annotated non-suite Gao grid, so this clears training AND G-side reporting
+# at once), and true KML cell geometry (data/task_grid_li.gpkg) overlaps the
+# Li held-out reporting cells by exactly 0 m². Exclusions (4):
+#   L1787 — one 890 m² GT polygon crosses into reporting cell L1843; also a
+#           GT-caliber outlier (median 415 m², installation-scale, not the
+#           sub-array caliber of the rest of the Li corpus).
+#   L1841 — one GT polygon crosses 41 m² into reporting cell L1897.
+#   L0264 — its only GT polygon lies 72% outside its own cell (GT/cell
+#           mismatch; the cell-clipped measurement would be meaningless).
+#   L1520 — no cell geometry in the KML task grid (cannot define the
+#           inference surface); only 2 panels, negligible loss.
+_ct_unifiedA_li_calibration_grids: &ct_unifiedA_li_calibration_grids
+  [L0208, L0209, L0263, L0267, L0268, L0269, L0270, L0271,
+   L0324, L0325, L0326, L0327, L0436, L0437, L0492, L0549,
+   L0605, L0606, L0608, L0662, L0663, L0664, L0665, L0719,
+   L1114, L1505, L1506, L1562, L1563, L1564, L1565, L1618,
+   L1619, L1620, L1621, L1622, L1674, L1675, L1676, L1677,
+   L1678, L1729, L1730, L1731, L1732, L1733, L1734, L1784,
+   L1785, L1786, L1790, L1839, L1840]
+
 locks:
+  # ── pixel-or chain ── (calibration merge-mode = reporting merge-mode = pixel-or)
   - lock_id: ct_aerial_2025_v3c
     region: cape_town
     imagery_layer: aerial_2025
     model_lineage: v3c
+    merge_mode: pixel-or
     fit:
-      model_run: v3c_targeted_hn_aerial_2025
-      # 36 annotated CT grids with local predictions, outside every reporting
-      # suite AND outside V3-C's training batches (001-002 + batch003 HN FPs).
-      calibration_grids: [G1630, G1631, G1632, G1633, G1634, G1855, G1856,
-                          G1862, G1863, G1864, G1909, G1910, G1911, G1917,
-                          G1919, G1920, G1921, G1966, G1970, G1971, G1972,
-                          G1973, G1974, G1975, G1976, G1981, G2025, G2026,
-                          G2027, G2028, G2029, G2030, G2031, G2032, G2037,
-                          G2038]
-      thresholds: [0.85, 0.875, 0.90, 0.925, 0.95, 0.97, 0.99]
+      model_run: v3c_targeted_hn_aerial_2025          # pixel-or predictions
+      calibration_grids: *ct_v3c_calibration_grids
+      thresholds: *ct_v3c_thresholds
     validate_on:
-      - suite_id: cape_town_independent_26
-        region: cape_town
-        model_run: v3c_wave1_perdet
-        merge_mode: per-detection
       - suite_id: cape_town_independent_26
         region: cape_town
         model_run: v3c_wave1_pixelor
         merge_mode: pixel-or
 
+  # ── per-detection chain ── (calibration merge-mode = reporting merge-mode = per-det)
+  # Protocol §2.2 rule 5: the calibration chain MUST share merge-mode with the
+  # reporting chain. The pixel-or lock above transferred at 0.00pp on the
+  # pixel-or suite but FAILED (5.22pp) on the per-det suite because its
+  # calibration predictions are pixel-or. This lock fits on a per-detection
+  # re-run of the same 36 grids (v3c_targeted_hn_aerial_2025_perdet) so the
+  # chain is merge-mode-consistent. The re-run did NOT close the gap (still
+  # 5.22pp — structural, see protocol §2.6). 2026-06-11 user ruling: lever
+  # (iii) — fail-closed is the FINAL disposition; per-det reporting uses
+  # pre-declared thresholds, never swept headlines (protocol §2.5).
+  - lock_id: ct_aerial_2025_v3c_perdet
+    region: cape_town
+    imagery_layer: aerial_2025
+    model_lineage: v3c
+    merge_mode: per-detection
+    fit:
+      model_run: v3c_targeted_hn_aerial_2025_perdet   # per-detection predictions
+      calibration_grids: *ct_v3c_calibration_grids
+      thresholds: *ct_v3c_thresholds
+    validate_on:
+      - suite_id: cape_town_independent_26
+        region: cape_town
+        model_run: v3c_wave1_perdet
+        merge_mode: per-detection
+
+  # ── unified_A per-detection chain ── (gap closed by option (b), 2026-06-11)
+  # Calibration = 53 Li KML grids (anchor above). FIT IS PENDING INFERENCE:
+  # the L-cells' aerial_2025 tiles are not downloaded yet (WMS, ~53 km²) and
+  # the calibration model_run below does not exist on disk. Steps to fit:
+  #   1. download tiles for the 53 cells (cell geometry: data/task_grid_li.gpkg)
+  #   2. detect_direct.py + finalize.py --merge-mode per-detection
+  #      → results/cape_town/unifiedA_li_kml_calib_perdet/<L>/
+  #   3. lock_operating_point.py --lock-id ct_aerial_2025_unifiedA_perdet
+  # Contingency: §2.6 showed σ_Bw+RMSE ranking vs aggF1 acceptance can diverge
+  # structurally on per-det chains (no over-paint to trim). If this lock FAILs
+  # acceptance the same way, the lever-(iii) fallback applies (pre-declared
+  # thresholds, no swept headline) — see protocol §2.5.
+  - lock_id: ct_aerial_2025_unifiedA_perdet
+    region: cape_town
+    imagery_layer: aerial_2025
+    model_lineage: unified_reviewall_A
+    merge_mode: per-detection
+    fit:
+      model_run: unifiedA_li_kml_calib_perdet        # pending inference (see above)
+      calibration_grids: *ct_unifiedA_li_calibration_grids
+      thresholds: *ct_v3c_thresholds
+    validate_on:
+      - suite_id: cape_town_independent_26
+        region: cape_town
+        model_run: unifiedA_wave1_perdet
+        merge_mode: per-detection
+      - suite_id: ct_li_heldout_16
+        region: cape_town
+        model_run: unifiedA_li_perdet
+        merge_mode: per-detection
+
   # ── Documented gaps (fail-closed; no lock can be fitted leakage-free) ──
-  # unified_reviewall_A × cape_town/aerial_2025: the unified reviewall training
-  #   set consumes all reviewed CT annotation batches, so every annotated CT
-  #   grid outside the reporting suites is in-train for this lineage. The only
-  #   train-free CT surfaces (independent_26, Li held-out 16) are reporting.
-  #   → No leakage-free calibration set exists today. Options (user decision,
-  #   see docs/evaluation_protocol.md §2.5): (a) split Li held-out into
-  #   calibration/reporting halves going forward; (b) annotate new
-  #   non-suite grids for calibration.
+  # unified_reviewall_A × cape_town/aerial_2025: RESOLVED 2026-06-11 via
+  #   option (b) — Li KML calibration set above (the reviewall training set
+  #   consumes every annotated non-suite GAO grid, but Li's L-scheme cells
+  #   are >=23.5 km from all of them). Lock fit still pending inference.
   # jhb/vexcel_2024 (any lineage): the only exhaustive JHB GT is the locked
   #   clean_gt CBD25 reporting suite. Same fail-closed status.
