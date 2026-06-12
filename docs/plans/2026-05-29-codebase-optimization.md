@@ -1,5 +1,7 @@
 # ZAsolar 代码库优化方案
 
+> 校对于 2026-06-12(下次随状态页周校对)— 开放 N / 已做 N / 否决 N / 移交 N
+
 **日期**: 2026-05-29
 **方法**: 9 个子系统并行代码评审 (覆盖全部 ~52K LOC / 154 个 Python 文件) → 20 条高严重度 finding 全部经对抗式复核 (0 条被推翻) → 综合排序。头部 7 条结论已由主 agent 亲自回读源码二次确认。
 **统计**: 85 条 finding 存活 (复核后 severity: high 2 / medium 50 / low 33)。
@@ -92,7 +94,7 @@ legacy 写 `{config, artifacts, evaluation_config}`，direct 写扁平 `{pipelin
 - **P1** 加 `pytest.ini` `testpaths = tests`，jhb_phaseA 测试移入或 mark slow (S) — `xhealth-9`
 
 ### 配置 / 可复现性
-- **P0** 重生成 `requirements.lock.txt`(cu126→cu128、补 pytest、加硬件 header) (S，已核实仍 cu126) — `xhealth-2`
+- **P0** 重生成 `requirements.lock.txt`(cu126→cu128、补 pytest、加硬件 header) (S) — `xhealth-2` ✅ 2026-06-12 done
 - **P0** `train.py` seed (S) — `train-1`
 - **P1** postproc JSON 加 `extends` 继承（4 个 v4_canonical 变体只留 delta）(M) — `xhealth-5`
 - **P1** 删 `building_filter.py`(368L 孤儿，零 importer) + monolith 内 buildings.gpkg dead block (S) — `infeval-3` / `xhealth-4`
@@ -138,18 +140,18 @@ legacy 写 `{config, artifacts, evaluation_config}`，direct 写扁平 `{pipelin
 ## 附录 A — 分阶段 Checklist
 
 ### Phase 0 — 零风险快赢
-- [ ] `train-1` train.py 加 `--seed` + determinism (S)
-- [ ] `core-1` dissolve_hairline_gaps NaN `max()` guard (S)
-- [ ] `xhealth-2` 重生成 requirements.lock.txt (cu128 + pytest) (S)
-- [ ] `infeval-3` / `xhealth-4` 删 building_filter.py + monolith dead load block (S)
+- [x] `train-1` train.py 加 `--seed` + determinism (S)
+- [x] `core-1` dissolve_hairline_gaps NaN `max()` guard (S)
+- [x] `xhealth-2` 重生成 requirements.lock.txt (cu128 + pytest) (S)（2026-06-12：torch/torchvision +cu128 + nvidia-* 12.8 真装后手术式重生成，补 pytest/iniconfig/pluggy，加硬件 header + 内嵌 cu128 extra-index；bootstrap_env.sh 默认 index、runbook §4/§4.5、runpod-ops skill 同步；本地 4070 CUDA 冒烟通过。注意共享 venv 已漂移，重生成禁止盲 freeze——见 lock header）
+- [x] `infeval-3` / `xhealth-4` 删 building_filter.py + monolith dead load block (S)
 - [ ] `anno-gui-7` _arcgis_fetch f-string 截断修复 (S)
-- [ ] `xhealth-8` start-*.sh/.bat 加 .gitignore (S)
+- [x] `xhealth-8` start-*.sh/.bat 加 .gitignore (S)
 
 ### Phase 1 — 测试安全网
-- [ ] `xhealth-1` CI / pre-push gate: pytest + validate_registry (S)
+- [x] `xhealth-1` pre-push gate: validate_registry + pytest (tests/) — `.githooks/pre-push`, ~12s CPU (S)
 - [ ] `xhealth-3` get_metric_crs table-driven 测试 (S)
 - [ ] characterization test: config.json 双 schema 读写
-- [ ] characterization test: postproc spatial_nms 数值 parity
+- [x] characterization test: postproc spatial_nms 数值 parity
 
 ### Phase 2 — multi-city 正确性 + 解耦
 - [ ] `infeval-4` 抽 core/inference/run_config.py 统一 config.json (M)
@@ -159,21 +161,21 @@ legacy 写 `{config, artifacts, evaluation_config}`，direct 写扁平 `{pipelin
 - [ ] `anno-gui-1/4/5` review/clean 脚本去 region 推断 (S/M)
 - [ ] `pipeline-3` hn_ops 线程 region 替代 lookup_region (M)
 - [ ] `core-2/3` 收敛 region-alias + 弃用 lookup_region (M)
-- [ ] `cls-3` 分类器去硬编码 CRS（抽出已完成 2026-05-29 → `solar_cls`；CRS 去硬编码留作子仓内后续）
+- [>] `cls-3` 分类器去硬编码 CRS（抽出已完成 2026-05-29 → `solar_cls`；CRS 去硬编码留作子仓内后续）
 
 ### Phase 3 — 去重整合
 - [ ] `infeval-1` + `analysis-postproc-1` spatial_nms 收敛到 core/postproc (M)
 - [ ] `analysis-postproc-4` + `anlyeval-4` posthoc union-merge 收敛 + 合成单 CLI (M)
-- [ ] `pipeline-2` HN merge + chip 抽取合一 (M)
+- [x] `pipeline-2` HN merge + chip 抽取合一 (M)
 - [ ] `anlyeval-7` + `analysis-postproc-5` 抽 core/eval_stats.py (S)
 - [ ] `train-2` 抽 core/training/transforms.py (M)
-- [ ] `core-4` / `cls-6` 收敛 sliding-window chip 逻辑 (M)
+- [ ] `core-4` / `cls-6` 收敛 sliding-window chip 逻辑（大半已收 2026-06-12：crop/write/resolve → `core/chip_extraction.py`(ADR 0001 #9)，推理滑窗 → `core/inference/tile_dataset.py`；`cls-6` 已关——分类器侧由 `solar_cls` adaptive_v1 解决，与 detector 侧明确不合并。残余仅 `core-4` 窗口枚举 stride 数学 2 份：`export_coco_dataset.scan_chips_from_tile` + `core/training/c3a_phase0.py` 镜像副本，抽共享 helper 即关。注意：推理 zero-pad vs 训练 skip<½ 边缘语义是有意分叉，不在收敛范围）(M→S)
 - [ ] `anno-gui-2` 抽 core/sam_segmenter.py (M)
 - [ ] `xhealth-5` postproc JSON extends 继承 (M)
 - [ ] `xhealth-6` / `anlyeval-1` 删 imagery_sources.yaml + 退役 benchmark_weights.py (S)
 
 ### Phase 4 — 性能 + 收尾
-- [ ] `infeval-5` 评估 IoU matching 复用 (M)
+- [x] `infeval-5` 评估 IoU matching 复用 (M)
 - [ ] `analysis-postproc-7` greedy_nms 持久 sindex (S)
 - [ ] `export-3` assign_annotations_to_tiles STRtree (S)
 - [ ] `infeval-2` set_grid_context module-global 解耦 (M)
