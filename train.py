@@ -17,6 +17,7 @@ Requires CUDA GPU.
 import argparse
 import json
 import time
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -109,7 +110,8 @@ class CocoSolarDataset(torch.utils.data.Dataset):
 
     def __init__(self, coco_json: Path, root_dir: Path, transforms=None,
                  per_source_mask_weight: bool = False, boundary_band_iters: int = 2,
-                 per_instance_mask_trusted: bool = False):
+                 per_instance_mask_trusted: bool = False,
+                 boundary_ignore_band: bool = False, band_config=None):
         with open(coco_json, "r") as f:
             data = json.load(f)
 
@@ -118,6 +120,13 @@ class CocoSolarDataset(torch.utils.data.Dataset):
         self.per_source_mask_weight = per_source_mask_weight
         self.boundary_band_iters = boundary_band_iters
         self.per_instance_mask_trusted = per_instance_mask_trusted
+        # C-3(b): area-adaptive ignore band. When on, supersedes the fixed
+        # boundary_band_iters for the per-source band-weight construction.
+        self.boundary_ignore_band = boundary_ignore_band
+        self.band_config = band_config
+        if boundary_ignore_band and per_source_mask_weight:
+            print(f"[DATASET] boundary_ignore_band ON (area-adaptive band width); "
+                  f"config={band_config}")
 
         self.images = {img["id"]: img for img in data["images"]}
         self.image_ids = [img["id"] for img in data["images"]]
@@ -187,11 +196,22 @@ class CocoSolarDataset(torch.utils.data.Dataset):
             masks.append(mask)
 
             if self.per_source_mask_weight:
-                pix_weights.append(
-                    _boundary_pixel_weights(
-                        mask, ann.get("label_source"), self.boundary_band_iters
+                if self.boundary_ignore_band:
+                    from core.training.boundary_ignore_band import (
+                        adaptive_boundary_pixel_weights,
                     )
-                )
+                    pix_weights.append(
+                        adaptive_boundary_pixel_weights(
+                            mask, ann.get("label_source"),
+                            config=self.band_config,
+                        )
+                    )
+                else:
+                    pix_weights.append(
+                        _boundary_pixel_weights(
+                            mask, ann.get("label_source"), self.boundary_band_iters
+                        )
+                    )
 
             if self.per_instance_mask_trusted:
                 per_instance_weights.append(
@@ -678,11 +698,14 @@ def collate_fn(batch):
 
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch,
-                    lr_scheduler=None, scaler=None, profiler=None):
+                    lr_scheduler=None, scaler=None, profiler=None, ema=None):
     """Train for one epoch, return average loss. Supports AMP via scaler.
 
     If `profiler` is a StageProfiler, per-stage wall/GPU times are accumulated
     into it (stages: data_wait, to_device, forward, backward, step).
+
+    If `ema` is a ModelEMA, its shadow weights are updated after every optimizer
+    step (C-2 recipe lever; None = no EMA, legacy behavior).
     """
     model.train()
     total_loss = 0.0
@@ -767,6 +790,11 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch,
         if lr_scheduler is not None:
             lr_scheduler.step()
 
+        # EMA update after the online weights have been stepped (all branches
+        # above have run optimizer/scaler.step by here). No-op when ema is None.
+        if ema is not None:
+            ema.update(model)
+
         total_loss += losses.item()
         n_batches += 1
 
@@ -844,7 +872,27 @@ def main():
         "--boundary-band-iters", type=int, default=2,
         help="Boundary-band width for --per-source-mask-weight: dilate XOR "
              "erode with this many 3x3 iterations gives a ~2*iters px ring "
-             "around polygon edge.",
+             "around polygon edge. Fixed width; superseded by "
+             "--boundary-ignore-band when that flag is set.",
+    )
+    parser.add_argument(
+        "--boundary-ignore-band", action="store_true",
+        help="C-3(b) recipe lever: replace the FIXED --boundary-band-iters band "
+             "with an AREA-ADAPTIVE ignore band (small target 1 px / medium 2 px "
+             "/ large or S-class 3 px), per "
+             "docs/plans/2026-05-09-training-supervision-layering.md action 5. "
+             "Requires --per-source-mask-weight (it is the band-width policy for "
+             "that per-source weighting; on its own it does nothing). OFF by "
+             "default → fixed band_iters behavior (already-run configs "
+             "reproduce). See core/training/boundary_ignore_band.py for the "
+             "retrain gate (bulk/σ_Bw/area_F1; do NOT book polygon-recall).",
+    )
+    parser.add_argument(
+        "--boundary-ignore-band-thresholds", default=None,
+        help="Override the area tier thresholds for --boundary-ignore-band as "
+             "'small_max,medium_max' in mask-pixel area (default '400,2500'). "
+             "Instances with area < small_max → 1 px band, < medium_max → 2 px, "
+             "else 3 px. Only used when --boundary-ignore-band is set.",
     )
     parser.add_argument(
         "--per-instance-mask-trusted", action="store_true",
@@ -944,6 +992,40 @@ def main():
              "configs/model_registry.yaml under this model key as "
              "training_set_id (opt-in; the registry is NOT mutated otherwise).",
     )
+    # ── C-2 recipe levers (warmup + EMA). Both OFF by default → byte-for-byte
+    #    equivalent to the legacy schedule/checkpointing. See
+    #    docs/handoffs/2026-06-11-c2-warmup-ema-c3b-ignore-band.md.
+    parser.add_argument(
+        "--warmup-iters", type=int, default=0,
+        help="Stage-2 linear LR warmup length in optimizer steps. 0 (default) "
+             "disables warmup → the Stage-2 scheduler is the bare CosineAnnealingLR "
+             "exactly as before. Typical: 500–1000. The warmup ramps LR from "
+             "--warmup-start-factor*lr2 up to lr2 over the first warmup_iters "
+             "steps, then cosine-anneals over the remaining budget (warmup eats "
+             "into, not adds to, the total step budget). Applies to Stage 2 only "
+             "(smooths the cosine cold-start after the optimizer hot-swap); "
+             "Stage 1's flat LR is unchanged.",
+    )
+    parser.add_argument(
+        "--warmup-start-factor", type=float, default=0.01,
+        help="LR at warmup step 0 as a fraction of lr2 (default 0.01 = 1%% of "
+             "base LR). Only used when --warmup-iters > 0.",
+    )
+    parser.add_argument(
+        "--ema", action="store_true",
+        help="Maintain an exponential moving average of model weights "
+             "(decay --ema-decay) updated after every optimizer step in BOTH "
+             "stages. The EMA weights become an additional checkpoint-selection "
+             "candidate: the loop evaluates both the raw (online) and EMA "
+             "weights each eval epoch and writes a parallel best_model_ema.pth / "
+             "best_ap50_model_ema.pth / final_model_ema.pth family. A single job "
+             "thus emits raw-best AND EMA-best for attribution. OFF by default → "
+             "no EMA tensors, no *_ema.pth files (legacy behavior).",
+    )
+    parser.add_argument(
+        "--ema-decay", type=float, default=0.999,
+        help="EMA decay (default 0.999). Only used when --ema is set.",
+    )
     args = parser.parse_args()
 
     # ── Seed all RNGs (before any dataset/model construction) ─────────────
@@ -1000,17 +1082,30 @@ def main():
         # Setting this flag drives install_transform_aux_resize(model) below.
         _install_aux_resize = True
     else:
+        # C-3(b): parse the area-adaptive band config once (None when off).
+        _band_config = None
+        if args.boundary_ignore_band:
+            from core.training.boundary_ignore_band import parse_band_thresholds
+            _band_config = parse_band_thresholds(args.boundary_ignore_band_thresholds)
+            if not args.per_source_mask_weight:
+                print("[WARN] --boundary-ignore-band has no effect without "
+                      "--per-source-mask-weight (it is that lever's band-width "
+                      "policy). The fixed band code is unused either way.")
         train_ds = CocoSolarDataset(
             coco_dir / "train.json", coco_dir, transforms=TrainTransforms(args.chip_size),
             per_source_mask_weight=args.per_source_mask_weight,
             boundary_band_iters=args.boundary_band_iters,
             per_instance_mask_trusted=args.per_instance_mask_trusted,
+            boundary_ignore_band=args.boundary_ignore_band,
+            band_config=_band_config,
         )
         val_ds = CocoSolarDataset(
             coco_dir / "val.json", coco_dir, transforms=ValTransforms(),
             per_source_mask_weight=args.per_source_mask_weight,
             boundary_band_iters=args.boundary_band_iters,
             per_instance_mask_trusted=args.per_instance_mask_trusted,
+            boundary_ignore_band=args.boundary_ignore_band,
+            band_config=_band_config,
         )
         _install_aux_resize = (
             args.per_source_mask_weight or args.per_instance_mask_trusted
@@ -1125,6 +1220,50 @@ def main():
     history = []
     box_gap_streak = 0  # consecutive eval epochs with gap_HR > 0.25
 
+    # ── EMA (C-2 recipe lever; off by default → no EMA tensors / files) ───
+    ema = None
+    ema_best = {"f1": 0.0, "ap50": 0.0}  # mutable so stage loops can update it
+    best_ema_path = output_dir / "best_model_ema.pth"
+    best_ap50_ema_path = output_dir / "best_ap50_model_ema.pth"
+    if args.ema:
+        from core.training.warmup_ema import ModelEMA
+        ema = ModelEMA(model, decay=args.ema_decay)
+        print(f"[EMA] weight EMA on (decay={args.ema_decay}); raw-best → "
+              f"{best_path.name}, EMA-best → {best_ema_path.name}")
+
+    def _eval_and_select_ema(stage: int, epoch: int, hist_entry: dict) -> None:
+        """Evaluate the EMA shadow weights and update the EMA-best checkpoints.
+
+        Swaps EMA weights into the model, runs evaluate_coco, restores the online
+        weights, then writes best_model_ema.pth / best_ap50_model_ema.pth on
+        improvement. No-op when EMA is off. The raw (online) selection path is
+        unchanged — this is purely additive (dual checkpoint family).
+        """
+        if ema is None:
+            return
+        online_sd = {k: v.detach().clone() for k, v in model.state_dict().items()}
+        ema.copy_to(model)
+        try:
+            m_ema = evaluate_coco(model, val_loader, device)
+        finally:
+            model.load_state_dict(online_sd)
+        f1_ema = m_ema["f1@85"]
+        ap50_ema = m_ema["ap50"]
+        hist_entry.update({
+            "ema_val_ap50": ap50_ema, "ema_val_f1_85": f1_ema,
+            "ema_val_p_85": m_ema["p@85"], "ema_val_r_85": m_ema["r@85"],
+        })
+        print(f"  [EMA] stage{stage} epoch {epoch}  "
+              f"val_AP50={ap50_ema:.4f}  val_F1@85={f1_ema:.4f} "
+              f"(P={m_ema['p@85']:.3f} R={m_ema['r@85']:.3f})")
+        if f1_ema > ema_best["f1"]:
+            ema_best["f1"] = f1_ema
+            torch.save(ema.state_dict(), best_ema_path)
+            print(f"  >> [EMA] New best EMA F1@85={f1_ema:.4f}, saved to {best_ema_path}")
+        if ap50_ema > ema_best["ap50"]:
+            ema_best["ap50"] = ap50_ema
+            torch.save(ema.state_dict(), best_ap50_ema_path)
+
     # ── Early stopping + uneven eval schedule ─────────────────────────
     def _parse_eval_schedule(spec: str | None) -> set | None:
         if spec is None:
@@ -1229,6 +1368,18 @@ def main():
         best_f1 = ckpt.get("best_f1", best_f1)
         if "scaler" in ckpt and scaler is not None:
             scaler.load_state_dict(ckpt["scaler"])
+        # Restore the EMA shadow so a resumed --ema run keeps its accumulated
+        # momentum (ModelEMA was constructed from the resumed online weights
+        # above; this overwrites that re-seed with the saved shadow). Older
+        # checkpoints have no "ema" key — fall back to the online-weight seed.
+        if ema is not None:
+            if "ema" in ckpt:
+                ema.load_state_dict(ckpt["ema"])
+                print("[RESUME] EMA shadow restored from checkpoint.")
+            else:
+                print("[RESUME] WARNING: --ema set but checkpoint has no EMA "
+                      "shadow; EMA re-seeded from resumed online weights "
+                      "(momentum before the interruption is lost).")
         print(f"[RESUME] Stage {resume_stage}, epoch {resume_epoch}, "
               f"best_ap50={best_ap50:.4f}, best_f1={best_f1:.4f}")
 
@@ -1245,6 +1396,11 @@ def main():
         }
         if scaler is not None:
             state["scaler"] = scaler.state_dict()
+        # Persist the EMA shadow so a resumed --ema run keeps its accumulated
+        # momentum instead of re-seeding from the online weights. No-op when EMA
+        # is off (legacy checkpoints carry no "ema" key).
+        if ema is not None:
+            state["ema"] = ema.state_dict()
         torch.save(state, ckpt_path)
         # Keep only last 2 checkpoints per stage to save disk
         old = sorted(scratch_dir.glob(f"stage{stage}_epoch*.pth"))
@@ -1284,7 +1440,7 @@ def main():
             epoch_prof = StageProfiler(cuda=True) if args.profile else None
             avg_loss = train_one_epoch(
                 model, optimizer1, train_loader, device, epoch,
-                scaler=scaler, profiler=epoch_prof,
+                scaler=scaler, profiler=epoch_prof, ema=ema,
             )
             dt = time.time() - t0
             if epoch_prof is not None:
@@ -1340,6 +1496,9 @@ def main():
                 if ap50 > best_ap50:
                     best_ap50 = ap50
                     torch.save(model.state_dict(), best_ap50_path)
+
+                # EMA-best selection (additive; no-op when --ema is off)
+                _eval_and_select_ema(1, epoch, hist_entry)
 
                 if early_stop is not None:
                     es_input = _metrics_for_earlystop(metrics)
@@ -1418,14 +1577,39 @@ def main():
             model.parameters(), lr=args.lr2, momentum=0.9, weight_decay=1e-4
         )
     total_steps = args.epochs2 * len(train_loader)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer2, T_max=total_steps, eta_min=1e-6
+    # C-2 lever: linear warmup → cosine. --warmup-iters 0 (default) returns the
+    # bare CosineAnnealingLR(T_max=total_steps) unchanged (byte-for-byte legacy).
+    # The warmup applies to Stage 2 ONLY — it smooths the cosine cold-start that
+    # follows the Stage-2 optimizer hot-swap; Stage 1 keeps its flat LR.
+    from core.training.warmup_ema import build_warmup_cosine_scheduler
+    scheduler = build_warmup_cosine_scheduler(
+        optimizer2,
+        total_steps=total_steps,
+        warmup_iters=args.warmup_iters,
+        warmup_start_factor=args.warmup_start_factor,
+        eta_min=1e-6,
     )
+    if args.warmup_iters > 0:
+        print(f"[WARMUP] Stage-2 linear warmup {args.warmup_iters} iters "
+              f"(start_factor={args.warmup_start_factor}) → cosine over "
+              f"{total_steps - args.warmup_iters} steps (total budget {total_steps})")
 
     if args.resume and resume_stage == 2 and ckpt and "optimizer" in ckpt:
         optimizer2.load_state_dict(ckpt["optimizer"])
-        for _ in range(stage2_start * len(train_loader)):
-            scheduler.step()
+        # Fast-forward the LR scheduler to the resumed epoch by stepping it in a
+        # bare loop (no optimizer.step() — the LR value is what we want, not a
+        # parameter update). PyTorch emits a benign "Detected call of
+        # lr_scheduler.step() before optimizer.step()" warning here (twice for the
+        # SequentialLR warmup path, once for bare cosine); the LR is still correct.
+        # Suppress only that specific message so real warnings are unaffected.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r".*lr_scheduler\.step\(\).*before.*optimizer\.step\(\).*",
+                category=UserWarning,
+            )
+            for _ in range(stage2_start * len(train_loader)):
+                scheduler.step()
         print(f"[RESUME] Stage 2 optimizer restored, scheduler advanced to epoch {stage2_start}")
 
     stage2_stopped_early = False
@@ -1434,7 +1618,7 @@ def main():
         epoch_prof = StageProfiler(cuda=True) if args.profile else None
         avg_loss = train_one_epoch(
             model, optimizer2, train_loader, device, epoch,
-            lr_scheduler=scheduler, scaler=scaler, profiler=epoch_prof,
+            lr_scheduler=scheduler, scaler=scaler, profiler=epoch_prof, ema=ema,
         )
         dt = time.time() - t0
         if epoch_prof is not None:
@@ -1492,6 +1676,9 @@ def main():
                 best_ap50 = ap50
                 torch.save(model.state_dict(), best_ap50_path)
 
+            # EMA-best selection (additive; no-op when --ema is off)
+            _eval_and_select_ema(2, epoch, hist_entry)
+
             if early_stop is not None:
                 es_input = _metrics_for_earlystop(metrics)
                 if early_stop.step(es_input):
@@ -1509,6 +1696,17 @@ def main():
     # ── Save final outputs ────────────────────────────────────────────
     final_path = output_dir / "final_model.pth"
     torch.save(model.state_dict(), final_path)
+
+    # EMA final + checkpoint list (only when --ema). Raw + EMA emitted from the
+    # same job → attribution preserved (same dataset manifest + seed, recipe is
+    # the only delta).
+    final_ema_path = output_dir / "final_model_ema.pth"
+    ema_output_checkpoints: list[str] = []
+    if ema is not None:
+        torch.save(ema.state_dict(), final_ema_path)
+        ema_output_checkpoints = [
+            str(best_ema_path), str(best_ap50_ema_path), str(final_ema_path),
+        ]
 
     history_path = output_dir / "training_history.json"
     history_payload = {
@@ -1530,6 +1728,15 @@ def main():
         "per_source_mask_weight": args.per_source_mask_weight,
         "freeze_mask_head": args.freeze_mask_head,
         "log_per_source_box_reg_loss": args.log_per_source_box_reg_loss,
+        # C-2 recipe levers
+        "warmup_iters": args.warmup_iters,
+        "warmup_start_factor": args.warmup_start_factor,
+        "ema": args.ema,
+        "ema_decay": args.ema_decay if args.ema else None,
+        "ema_best": dict(ema_best) if ema is not None else None,
+        # C-3(b) recipe lever
+        "boundary_ignore_band": args.boundary_ignore_band,
+        "boundary_ignore_band_thresholds": args.boundary_ignore_band_thresholds,
     }
     history_path.write_text(json.dumps(history_payload, indent=2) + "\n")
 
@@ -1562,6 +1769,13 @@ def main():
                 "early_stop_min_delta": args.early_stop_min_delta,
                 "early_stop_patience": args.early_stop_patience,
                 "best_ckpt_bulk_range": args.best_ckpt_bulk_range,
+                # C-2 recipe levers (warmup + EMA)
+                "warmup_iters": args.warmup_iters,
+                "warmup_start_factor": args.warmup_start_factor,
+                "ema": args.ema,
+                "ema_decay": args.ema_decay if args.ema else None,
+                # C-3(b) recipe lever (boundary ignore band)
+                "boundary_ignore_band": args.boundary_ignore_band,
             },
             boundary_aware={
                 "per_instance_mask_trusted": args.per_instance_mask_trusted,
@@ -1576,6 +1790,7 @@ def main():
             },
             output_checkpoints=[
                 str(best_path), str(best_ap50_path), str(final_path),
+                *ema_output_checkpoints,
             ],
             register_as=args.register_as,
         )

@@ -183,6 +183,14 @@ HYPERPARAM_KEYS = (
     "early_stop_min_delta",
     "early_stop_patience",
     "best_ckpt_bulk_range",
+    # C-2 recipe levers (warmup + EMA) — recorded so the manifest fingerprint
+    # distinguishes a warmup/EMA run from its legacy-recipe sibling.
+    "warmup_iters",
+    "warmup_start_factor",
+    "ema",
+    "ema_decay",
+    # C-3(b) recipe lever (boundary ignore band).
+    "boundary_ignore_band",
 )
 
 
