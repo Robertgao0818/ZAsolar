@@ -6,7 +6,7 @@ VENV_PATH="$PROJECT_ROOT/.venv"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 LOCK_FILE="$PROJECT_ROOT/requirements.lock.txt"
 REQ_FILE="$PROJECT_ROOT/requirements.txt"
-PYTORCH_INDEX_URL="${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu126}"
+PYTORCH_INDEX_URL="${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}"
 PIP_LOCK_ARGS=()
 
 if [[ -n "$PYTORCH_INDEX_URL" ]]; then
