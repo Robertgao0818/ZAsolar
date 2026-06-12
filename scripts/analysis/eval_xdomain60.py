@@ -37,6 +37,7 @@ from scripts.analysis.area_aggregate_eval import (  # noqa: E402
     summarize,
 )
 from core.region_registry import get_region_config  # noqa: E402
+from core.negative_pool_leakage import mined_grids_for_region  # noqa: E402
 
 CITIES = [
     "pretoria", "bloemfontein", "durban",
@@ -118,13 +119,28 @@ def _polygon_prf(preds: list, gts: list, iou_thr: float = 0.5) -> dict:
             "R": round(R, 4), "F1": round(F1, 4)}
 
 
-def eval_city(city: str, pred_root: Path, gt_root: Path):
+def eval_city(city: str, pred_root: Path, gt_root: Path,
+              exclude_mined_hn: bool = True):
     region_cfg = get_region_config(city)
     metric_crs = region_cfg.crs_metric
     rows, empties = [], []
     if not pred_root.exists():
         return rows, empties
     grids = sorted(p.name for p in pred_root.iterdir() if p.is_dir())
+    # eval-leakage guard: drop grids mined into the HN pool with at least one
+    # training_eligible row (a retrain that saw those HN chips makes any
+    # cross-domain claim on them contaminated). Provenance-only rows
+    # (training_eligible=false, e.g. the xdomain empty-probe FPs) are NOT
+    # excluded — no model trains on them, so those grids stay clean eval
+    # surfaces (consistent with the training_eligible gate; see
+    # core.negative_pool_leakage.mined_grid_keys).
+    if exclude_mined_hn:
+        mined = mined_grids_for_region(city)
+        excluded = [g for g in grids if g in mined]
+        if excluded:
+            print(f"[{city}] excluding {len(excluded)} HN-mined grid(s) from "
+                  f"eval surface: {excluded}")
+        grids = [g for g in grids if g not in mined]
     for g in grids:
         pred_path = pred_root / g / "predictions_metric.gpkg"
         gt_path = gt_root / f"{g}.gpkg"
@@ -186,13 +202,17 @@ def main():
                     help="per-city subdir under results-root/<city>/ holding <grid>/predictions_metric.gpkg")
     ap.add_argument("--output-dir", type=Path, default=REPO / "results" / "analysis" / "xdomain60")
     ap.add_argument("--cities", nargs="+", default=CITIES)
+    ap.add_argument("--include-mined-hn", action="store_true",
+                    help="do NOT exclude HN-mined grids (default: exclude them "
+                         "to keep the cross-domain eval surface leakage-free)")
     args = ap.parse_args()
 
     all_rows, all_empty = [], []
     for city in args.cities:
         pred_root = args.results_root / city / args.run_subdir
         gt_root = args.gt_root / city
-        rows, empties = eval_city(city, pred_root, gt_root)
+        rows, empties = eval_city(city, pred_root, gt_root,
+                                  exclude_mined_hn=not args.include_mined_hn)
         all_rows.extend(rows)
         all_empty.extend(empties)
         print(f"[{city}] non-empty grids={len(rows)} empty-GT grids={len(empties)}")

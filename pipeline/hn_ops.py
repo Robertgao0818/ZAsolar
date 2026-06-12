@@ -152,6 +152,7 @@ def extract_negative_pool_hn(
     tiles_root: Path | None = None,
     img_id_start: int = 960000,
     manifest_csv: Path | None = None,
+    require_training_eligible: bool = True,
 ) -> HNResult:
     """Extract HN chips from the project-level negative pool.
 
@@ -163,12 +164,17 @@ def extract_negative_pool_hn(
     Rows tagged ``actually_pv_mislabeled`` are always excluded (per the pool
     README: deprecation trail, never trained on).
 
+    ``require_training_eligible`` (default True) honours the manifest's
+    ``training_eligible`` column (written by ``backfill_geometry.py``): rows
+    flagged ``false`` are provenance-only (e.g. geid_2024_02 chips gated out by
+    the imagery-layer balance rule — see the F1-gap plan C-1) and are skipped
+    so the GEID appearance domain cannot silently monopolise the HN stream.
+    Pass ``False`` only for diagnostics / breadth audits over the full pool.
+
     NOTE: the pool is a provenance manifest — chips are derived on demand
     (rule 08-runpod-large-files).  Rows without a populated ``bbox_geo_wkt``
     cannot be cropped and are skipped with a logged count; if no row carries
-    geometry this returns ``n_chips=0`` (the manifest seeded 2026-05-13 from
-    cls_pv_thermal_v2 has no bbox geometry yet — backfill via
-    ingest_fp_audit.py before this HN stream yields chips).
+    geometry this returns ``n_chips=0``.
     """
     import csv as _csv
     from pathlib import Path as _Path
@@ -187,6 +193,7 @@ def extract_negative_pool_hn(
 
     rows: list[dict] = []
     skipped_no_geom = 0
+    skipped_not_eligible = 0
     with open(manifest_csv, newline="") as f:
         for row in _csv.DictReader(f):
             if row.get("archetype") == "actually_pv_mislabeled":
@@ -197,12 +204,19 @@ def extract_negative_pool_hn(
                 continue
             if floor and conf_rank.get(row.get("archetype_confidence"), 0) < floor:
                 continue
+            if require_training_eligible and not _is_training_eligible(row):
+                skipped_not_eligible += 1
+                continue
             wkt = (row.get("bbox_geo_wkt") or "").strip()
             if not wkt:
                 skipped_no_geom += 1
                 continue
             rows.append(row)
 
+    if skipped_not_eligible:
+        print(f"[negative_pool] {skipped_not_eligible} matching rows are "
+              f"provenance-only (training_eligible=false) — skipped "
+              f"(imagery-layer balance gate)")
     if skipped_no_geom:
         print(f"[negative_pool] {skipped_no_geom} matching rows lack "
               f"bbox_geo_wkt — cannot crop, skipped (backfill geometry to "
@@ -213,11 +227,13 @@ def extract_negative_pool_hn(
         return HNResult(source_type="negative_pool", n_grids=0, n_chips=0)
 
     # Crop a chip per row, centred on the bbox centroid.
-    import rasterio
     import numpy as np
+    import rasterio
     from rasterio.windows import Window
     from shapely import wkt as _wkt
-    from core.grid_utils import resolve_tiles_dir
+
+    chip_dir = output_dir / "train"
+    chip_dir.mkdir(parents=True, exist_ok=True)
 
     images: list[dict] = []
     provenance: list[dict] = []
@@ -229,17 +245,88 @@ def extract_negative_pool_hn(
         layer = row.get("imagery_layer") or None
         try:
             geom = _wkt.loads(row["bbox_geo_wkt"])
-        except Exception:
+        except Exception:  # noqa: BLE001
             continue
-        try:
-            tiles_dir = (tiles_root if tiles_root is not None
-                         else resolve_tiles_dir(grid_id, region=region,
-                                                imagery_layer=layer))
-        except Exception as exc:  # noqa: BLE001
-            print(f"[negative_pool] {grid_id}: tile resolve failed ({exc}); skip")
+
+        tile_path = _resolve_tile_for_geom(
+            geom, grid_id, region, layer, tiles_root
+        )
+        if tile_path is None:
+            print(f"[negative_pool] {grid_id}: no tile for chip "
+                  f"{row.get('chip_id')}; skip")
             continue
-        # (geometry crop omitted here — wired but only reachable once the pool
-        # carries bbox geometry; kept minimal to avoid silent partial chips.)
+
+        with rasterio.open(tile_path) as src:
+            # bbox_geo_wkt is stored in EPSG:4326 (backfill_geometry.py); the
+            # tile may be in any native CRS (e.g. vexcel_2024 / aerial_legacy
+            # are EPSG:3857). Reproject the centroid into the tile's CRS before
+            # indexing pixels — never assume lon/lat == raster units
+            # (rule 06-multi-city: branch/look up CRS, do not assume EPSG).
+            x_native, y_native = _geom_xy_in_crs(geom, src.crs)
+            py, px = src.index(x_native, y_native)
+            x0 = max(0, int(px - chip_size // 2))
+            y0 = max(0, int(py - chip_size // 2))
+            x0 = min(x0, max(0, src.width - chip_size))
+            y0 = min(y0, max(0, src.height - chip_size))
+            w = min(chip_size, src.width - x0)
+            h = min(chip_size, src.height - y0)
+            if w < chip_size * 0.5 or h < chip_size * 0.5:
+                continue
+            window = Window(x0, y0, w, h)
+            data = src.read(window=window)
+            if w < chip_size or h < chip_size:
+                padded = np.zeros(
+                    (data.shape[0], chip_size, chip_size), dtype=data.dtype
+                )
+                padded[:, :h, :w] = data
+                data = padded
+            if np.all(data >= 245):
+                continue  # blank tile margin
+
+            chip_name = (
+                f"np_{region}_{grid_id}_{row.get('archetype', 'na')}"
+                f"_{img_id}.tif"
+            )
+            chip_path = chip_dir / chip_name
+            profile = src.profile.copy()
+            for key in ("photometric", "compress", "jpeg_quality",
+                        "jpegtablesmode"):
+                profile.pop(key, None)
+            profile.update(
+                driver="GTiff",
+                width=chip_size,
+                height=chip_size,
+                transform=src.window_transform(window),
+                compress="lzw",
+            )
+            with rasterio.open(str(chip_path), "w", **profile) as dst:
+                dst.write(data)
+
+        images.append({
+            "id": img_id,
+            "file_name": f"train/{chip_name}",
+            "width": chip_size,
+            "height": chip_size,
+            "positive": False,
+            "fp_source": grid_id,
+        })
+        provenance.append({
+            "image_id": img_id,
+            "chip_file": chip_name,
+            "source_tile": tile_path.stem,
+            "x0": x0,
+            "y0": y0,
+            "width": w,
+            "height": h,
+            "n_annotations": 0,
+            "split": "train",
+            "source_type": "negative_pool",
+            "archetype": row.get("archetype", ""),
+            "region": region,
+            "imagery_layer": layer or "",
+            "chip_id": row.get("chip_id", ""),
+        })
+        img_id += 1
         grids_seen.add(grid_id)
 
     return HNResult(
@@ -249,6 +336,96 @@ def extract_negative_pool_hn(
         n_grids=len(grids_seen),
         n_chips=len(images),
     )
+
+
+def _is_training_eligible(row: dict) -> bool:
+    """True if the manifest row may enter a training bundle.
+
+    Honours the ``training_eligible`` column when present (``true``/``false``);
+    rows that predate that column (no value) default to eligible so the gate is
+    purely additive.  See ``backfill_geometry.py`` for who writes it.
+    """
+    val = (row.get("training_eligible") or "").strip().lower()
+    if val == "false":
+        return False
+    return True  # "true" or absent (legacy rows)
+
+
+def _geom_xy_in_crs(geom, dst_crs):
+    """Return the geometry centroid (x, y) reprojected into ``dst_crs``.
+
+    ``bbox_geo_wkt`` rows are stored in EPSG:4326 (see ``backfill_geometry.py``).
+    Tiles may be in any native CRS (vexcel_2024 / aerial_legacy are EPSG:3857),
+    so the centroid must be reprojected before it can be compared against tile
+    bounds or fed to ``src.index`` — comparing lon/lat against metre-scale
+    bounds silently resolves nothing (rule 06-multi-city: never assume EPSG).
+
+    When ``dst_crs`` is already geographic / EPSG:4326 (CT aerial layers) the
+    transform is a no-op and the original lon/lat is returned unchanged.
+    """
+    centroid = geom.centroid
+    lon, lat = centroid.x, centroid.y
+    if dst_crs is None:
+        return lon, lat
+    try:
+        from rasterio.crs import CRS as _CRS
+        if _CRS.from_epsg(4326) == dst_crs:
+            return lon, lat
+    except Exception:  # noqa: BLE001
+        pass
+    from rasterio.warp import transform as _warp_transform
+    xs, ys = _warp_transform("EPSG:4326", dst_crs, [lon], [lat])
+    return xs[0], ys[0]
+
+
+def _resolve_tile_for_geom(geom, grid_id, region, layer, tiles_root):
+    """Return the GeoTIFF that contains ``geom`` for a negative-pool row.
+
+    Branches on ``chunked`` vs ``mosaic`` file layout (rule 06-multi-city): a
+    mosaic resolves to a single file; a chunked layer is a directory of geo
+    chips and we pick the chunk whose bounds contain the geometry centroid.
+
+    The geometry is stored in EPSG:4326; each candidate tile's bounds are in
+    that tile's native CRS, so the centroid is reprojected per-tile via
+    ``src.crs`` before the contains-check (do not assume lon/lat == tile units).
+    """
+    from pathlib import Path as _Path
+
+    import rasterio
+
+    from core.grid_utils import resolve_tiles_dir
+
+    try:
+        base = (tiles_root if tiles_root is not None
+                else resolve_tiles_dir(grid_id, region=region,
+                                       imagery_layer=layer))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[negative_pool] {grid_id}: tile resolve failed ({exc})")
+        return None
+
+    base = _Path(base)
+    if base.is_file():
+        return base  # mosaic layout
+
+    if tiles_root is not None and base.is_dir():
+        # tiles_root override may point one level above the grid subdir
+        cand = base / grid_id
+        if cand.is_dir():
+            base = cand
+
+    if not base.is_dir():
+        return None
+
+    for tif in sorted(base.glob("*.tif")):
+        try:
+            with rasterio.open(tif) as src:
+                left, bottom, right, top = src.bounds
+                x_native, y_native = _geom_xy_in_crs(geom, src.crs)
+                if left <= x_native <= right and bottom <= y_native <= top:
+                    return tif
+        except Exception:  # noqa: BLE001
+            continue
+    return None
 
 
 def merge_hn_into_coco(
