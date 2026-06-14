@@ -211,24 +211,36 @@ def resolve_tiles_dir(
 
     ``SOLAR_TILES_ROOT`` env var overrides **only** when the resulting
     ``<env>/<grid_id>/`` directory actually exists (for RunPod /dev/shm).
+
+    Tile paths are keyed by the **source** grid ID
+    (``region_registry.resolve_source_grid_id``): the CPT regrid (ADR-0002 §5)
+    renamed Cape Town census cells G#### -> CPT#### digit-preserving but left
+    every on-disk tile under its source Gao ID, so a logical ``CPT1240`` must
+    resolve to ``aerial_2025/G1240/`` (not a non-existent ``tiles_root/CPT1240``).
+    Non-renamed IDs map to themselves.
     """
     grid_id = normalize_grid_id(grid_id)
     region = normalize_region(region)
     rkey = _region_key(region)
 
+    if rkey is None:
+        rkey = region_registry.lookup_region(grid_id)
+
+    # On-disk tiles stay keyed under the source grid ID (CPT1240 -> G1240).
+    source_id = grid_id
+    if rkey is not None:
+        source_id = region_registry.resolve_source_grid_id(grid_id, rkey)
+
     # RunPod /dev/shm fast path: only if the legacy layout exists there.
     env_root = os.environ.get("SOLAR_TILES_ROOT")
     if env_root:
         env_path = Path(env_root)
-        candidate = env_path / grid_id
+        candidate = env_path / source_id
         if candidate.exists():
             return candidate
-        mosaic_candidate = env_path / f"{grid_id}_mosaic.tif"
+        mosaic_candidate = env_path / f"{source_id}_mosaic.tif"
         if mosaic_candidate.exists():
             return mosaic_candidate
-
-    if rkey is None:
-        rkey = region_registry.lookup_region(grid_id)
 
     if rkey is not None:
         try:
@@ -238,13 +250,13 @@ def resolve_tiles_dir(
             layer = region_registry.get_imagery_layer(rkey, layer_id)
             layer_path = region_registry.get_imagery_layer_path(rkey, layer_id)
             if layer.file_layout == "mosaic":
-                return layer_path / f"{grid_id}_mosaic.tif"
-            return layer_path / grid_id
+                return layer_path / f"{source_id}_mosaic.tif"
+            return layer_path / source_id
         except KeyError:
             pass
 
     # Fallback: legacy behavior (may return non-existent path; caller errors)
-    return _preferred_tiles_root(region) / grid_id
+    return _preferred_tiles_root(region) / source_id
 
 
 def get_grid_paths(
@@ -306,8 +318,19 @@ def get_grid_record(grid_id: str, *, region: str | None = None):
     grid_id = normalize_grid_id(grid_id)
     region = normalize_region(region)
 
-    # Try region-specific task grid first
+    # Try region-specific task grid first.
     rkey = _region_key(region)
+    # ADR-0002 / CPT regrid: when no region is passed, infer one so the
+    # region-specific task grid AND its annotation-scheme fallback below get
+    # consulted. This is what keeps a RETIRED bare G-ID resolving to its source
+    # cell geometry: CT's primary task_grid is now the CPT census grid (no
+    # G-cells), but the gao scheme's data/task_grid.gpkg still carries them.
+    # It also fixes the overlap trap — lookup_region('G1189') returns cape_town
+    # (regions.yaml order; ADR-0002), so a bare overlapping G-ID resolves to the
+    # CAPE TOWN cell (lon<18.7), never JHB's same-named-but-different cell. JHB
+    # legacy flows must still pass region='jhb' explicitly (rule 06-multi-city).
+    if rkey is None:
+        rkey = region_registry.lookup_region(grid_id)
     if rkey:
         try:
             tg_path = region_registry.get_task_grid_path(rkey)
@@ -320,8 +343,9 @@ def get_grid_record(grid_id: str, *, region: str | None = None):
             pass
 
         # Fall back to the matching annotation-scheme task grid. L-prefix Li
-        # grids live in the `li` scheme's data/task_grid_li.gpkg, not the
-        # region's primary (gao) task_grid, so get_metric_crs/get_grid_spec
+        # grids live in the `li` scheme's data/task_grid_li.gpkg, and RETIRED
+        # G-cells live in the `gao` scheme's data/task_grid.gpkg — neither is the
+        # region's primary (CPT census) task_grid, so get_metric_crs/get_grid_spec
         # must consult the scheme grid before the aggregate fallback.
         try:
             scheme = region_registry.resolve_annotation_scheme(rkey, grid_id)

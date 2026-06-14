@@ -2201,8 +2201,18 @@ def main():
                 grid_region = hits[0]
                 print(f"[INFO] Auto-inferred region={grid_region} for {gid} from grid_id pattern")
             elif len(hits) > 1:
-                print(f"[ERROR] {gid} matches multiple regions {hits}; pass --region explicitly")
-                sys.exit(1)
+                # ADR-0002 / CPT regrid: a bare overlap G-ID (G1189 etc.) is now
+                # claimed by BOTH cape_town and johannesburg via their RETIRED
+                # G\d{4} tier (neither holds it as active). Resolve to the first
+                # hit (cape_town, regions.yaml order) — matching lookup_region()
+                # singular semantics — rather than hard-exiting a legitimate CT
+                # census flow. JHB-historical exhaustive runs must pass --region.
+                grid_region = hits[0]
+                print(
+                    f"[WARN] {gid} matches multiple retired namespaces {hits}; "
+                    f"defaulting to region={grid_region} (ADR-0002 order). "
+                    f"Pass --region explicitly to override (e.g. JHB-historical)."
+                )
 
         tiles_dir = resolve_tiles_dir(gid, region=grid_region, imagery_layer=args.imagery_layer)
         if not tiles_dir.exists():

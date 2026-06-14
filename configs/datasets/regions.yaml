@@ -21,11 +21,37 @@ regions:
       tiles_root: "/home/gaosh/zasolar_data/tiles/cape_town"
       results_root: "results"
       annotations_dir: "data/annotations/Capetown"
-      task_grid: "data/task_grid.gpkg"
-    # Region pattern accepts both the primary Gao scheme (G\d{4}) and Li's
-    # independent L-prefix scheme (L\d{4}); per-scheme routing is in
-    # annotation_schemes[*].grid_id_pattern.
-    grid_id_pattern: "(G\\d{4}|L\\d{4})"
+      # CPT regrid (2026-06-12, ADR-0002 §5): the region's primary task grid is
+      # now the CPT-numbered census grid. The RETIRED Gao G-cells stay resolvable
+      # via annotation_schemes.gao.task_grid (data/task_grid.gpkg) below — that
+      # scheme fallback is what keeps bare G-IDs returning cell geometry through
+      # core/grid_utils.py get_grid_record/get_grid_spec.
+      task_grid: "data/task_grid_cpt.gpkg"
+    # Region pattern accepts the canonical CPT\d{4} census scheme (CPT regrid,
+    # 2026-06-12), the RETIRED primary Gao scheme (G\d{4}, kept resolvable for
+    # annotation/training provenance), and Li's independent L-prefix scheme
+    # (L\d{4}); per-scheme routing is in annotation_schemes[*].grid_id_pattern.
+    grid_id_pattern: "(CPT\\d{4}|G\\d{4}|L\\d{4})"
+    # 2026-06-12 CT regrid (ADR-0002 decision #5): the census grid is renumbered
+    # CPT\d{4}, DIGIT-PRESERVING from the source Gao G-IDs (G1240 -> CPT1240;
+    # geometry is NOT re-cut — each CPT cell is the identical 1km source G cell).
+    # Ocean cells with no City-of-Cape-Town WMS aerial coverage are simply
+    # dropped (they get no CPT counterpart): 2214 source G cells -> 1103 CPT
+    # cells kept / 1111 dropped. Coverage was probed per-cell against the
+    # "Aerial Imagery_Aerial Imagery 2025Jan" WMS layer
+    # (cityimg.capetown.gov.za ERDAS IWS); the per-cell probe results are at
+    # results/analysis/ct_wms_coverage_probe/probe.csv. The G->CPT crosswalk
+    # (2214 rows, kept flag + coverage_fraction + drop reason) lives at
+    # data/ct_grid_crosswalk_g_to_cpt.csv and the new task grid (1103 cells,
+    # vexcel 7-city column convention, legacy_gao_id back-reference) at
+    # data/task_grid_cpt.gpkg.
+    # G\d{4} is now a RETIRED namespace — kept fully resolvable for historical
+    # artifacts (data/task_grid.gpkg via the gao scheme, aerial_2025
+    # coverage_grids, training provenance, Li calibration mapping) but excluded
+    # from default ambiguous lookup: lookup_regions() falls back to retired
+    # namespaces only when no active-namespace region claims the ID. Li's L\d{4}
+    # stays ACTIVE. See ADR-0002.
+    retired_grid_id_patterns: ["G\\d{4}"]
 
     annotation_schemes:
       gao:
@@ -315,11 +341,20 @@ regions:
       annotations_dir: "data/annotations/Joburg"
       task_grid: "data/jhb_task_grid_unified.gpkg"  # 106 legacy (JHB01-06 + 100 G*) + 382 JNB Vexcel 1km cells
     grid_id_pattern: "(JHB\\d{2}|G\\d{4}|JNB\\d{4})"
+    # 2026-06-03 decision: JNB Vexcel-382 is the canonical JHB grid scheme.
+    # Gxxxx / JHBnn are RETIRED namespaces — kept fully resolvable for
+    # historical artifacts (JHB CBD 25-grid clean_gt eval suite, batch
+    # results, training provenance) but excluded from default ambiguous
+    # lookup: lookup_regions() only falls back to retired namespaces when
+    # no active-namespace region claims the ID. See ADR-0002.
+    retired_grid_id_patterns: ["G\\d{4}", "JHB\\d{2}"]
 
     # WARNING: Grid IDs (G\d{4}) can overlap with cape_town. E.g. G1189, G1190,
     # G1293, G1513, G1570, G1630 are VALID in both regions but cover different
-    # physical areas. Always resolve via (region, imagery_layer) — never by
-    # grid_id alone.
+    # physical areas. Since the G-namespace is retired here, a bare overlapping
+    # G-ID now resolves to cape_town (the active owner); JHB legacy flows must
+    # pass region explicitly. Always resolve via (region, imagery_layer) for
+    # anything JHB-historical.
     imagery_layers:
       aerial_2023:
         path: "/home/gaosh/zasolar_data/tiles/johannesburg/aerial_2023"

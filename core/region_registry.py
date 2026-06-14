@@ -9,6 +9,7 @@ resolution should continue using grid_utils.
 from __future__ import annotations
 
 import re
+import warnings
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -66,6 +67,7 @@ class ModelRunConfig:
     inference_date: str | None = None
     grid_count: int | None = None
     notes: str | None = None
+    deprecated: bool = False
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,11 @@ class RegionConfig:
     crs_exchange: str
     paths: RegionPaths
     grid_id_pattern: str
+    # Retired grid namespaces (regex, fullmatch): IDs the region can still
+    # resolve for historical artifacts but no longer claims in default
+    # ambiguous lookup. lookup_regions() returns active-namespace hits first
+    # and falls back to retired ones only when no active hit exists (ADR-0002).
+    retired_grid_id_patterns: tuple[str, ...] = ()
     grids: dict[str, dict[str, Any]] = field(default_factory=dict)
     imagery_layers: dict[str, ImageryLayerConfig] = field(default_factory=dict)
     model_runs: dict[str, ModelRunConfig] = field(default_factory=dict)
@@ -156,6 +163,7 @@ def _load_registry() -> dict[str, RegionConfig]:
                 inference_date=run_data.get("inference_date"),
                 grid_count=run_data.get("grid_count"),
                 notes=run_data.get("notes"),
+                deprecated=bool(run_data.get("deprecated", False)),
             )
 
         annotation_schemes: dict[str, AnnotationSchemeConfig] = {}
@@ -181,6 +189,7 @@ def _load_registry() -> dict[str, RegionConfig]:
             crs_exchange=data.get("crs_exchange", "EPSG:4326"),
             paths=paths,
             grid_id_pattern=data.get("grid_id_pattern", ""),
+            retired_grid_id_patterns=tuple(data.get("retired_grid_id_patterns", [])),
             grids=data.get("grids", {}),
             imagery_layers=imagery_layers,
             model_runs=model_runs,
@@ -220,22 +229,49 @@ def get_region_config(region_key: str) -> RegionConfig:
 def lookup_region(grid_id: str) -> str | None:
     """Given a grid ID, find which region it belongs to.
 
-    WARNING: unreliable when grid IDs overlap between regions (e.g. G1189
-    exists in both cape_town and johannesburg task grids). Returns the
-    first match. Prefer lookup_regions() for multi-region awareness.
+    Resolution is namespace-aware (ADR-0002): regions whose
+    ``retired_grid_id_patterns`` match the ID only count when no
+    active-namespace region claims it. If multiple active regions still
+    claim the same ID (a registry invariant violation), returns the first
+    match — prefer lookup_regions() and disambiguate explicitly.
     """
     hits = lookup_regions(grid_id)
     return hits[0] if hits else None
 
 
-def lookup_regions(grid_id: str) -> list[str]:
-    """Return ALL region keys whose imagery_layers cover this grid ID.
+@lru_cache(maxsize=None)
+def _retired_patterns(region_key: str) -> tuple[re.Pattern[str], ...]:
+    config = _get_registry().get(region_key)
+    if config is None:
+        return ()
+    return tuple(re.compile(p) for p in config.retired_grid_id_patterns)
 
-    Falls back to the legacy `grids` section if no imagery_layers declare
-    coverage. An empty list means the grid is not registered anywhere.
+
+def _is_retired_grid(region_key: str, grid_id: str) -> bool:
+    """True if grid_id belongs to one of the region's retired namespaces."""
+    return any(p.fullmatch(grid_id) for p in _retired_patterns(region_key))
+
+
+def lookup_regions(grid_id: str, include_retired: bool = False) -> list[str]:
+    """Return region keys that claim this grid ID, active namespaces first.
+
+    A region claims an ID via imagery_layer coverage, the legacy ``grids``
+    section, or its task grids. Hits are split into two tiers by the
+    region's ``retired_grid_id_patterns`` (ADR-0002):
+
+    - default: return active-namespace hits; fall back to retired-namespace
+      hits only when no active region claims the ID (keeps historical IDs
+      like JHB's G0816 resolvable while killing CT/JHB G-overlap ambiguity).
+    - ``include_retired=True``: return both tiers (active first) — the
+      pre-ADR-0002 behavior, for tools that need every possible owner.
+
+    An empty list means the grid is not registered anywhere. Multiple
+    active hits violate the active-namespace disjointness invariant and
+    emit a UserWarning.
     """
     grid_id = grid_id.strip().upper()
-    hits: list[str] = []
+    active: list[str] = []
+    retired: list[str] = []
     for key, config in _get_registry().items():
         covered = any(
             grid_id in layer.coverage_grids for layer in config.imagery_layers.values()
@@ -246,8 +282,17 @@ def lookup_regions(grid_id: str) -> list[str]:
             or grid_id in _task_grid_ids(key)
             or grid_id in _scheme_task_grid_ids(key)
         ):
-            hits.append(key)
-    return hits
+            (retired if _is_retired_grid(key, grid_id) else active).append(key)
+    if len(active) > 1:
+        warnings.warn(
+            f"Grid '{grid_id}' is claimed by multiple ACTIVE namespaces {active}; "
+            f"active grid namespaces must be disjoint (ADR-0002) — fix "
+            f"regions.yaml (retire one side) or pass region explicitly.",
+            stacklevel=2,
+        )
+    if include_retired:
+        return active + retired
+    return active if active else retired
 
 
 def list_grids(region_key: str) -> list[str]:
@@ -356,6 +401,59 @@ def _scheme_task_grid_ids(region_key: str) -> frozenset[str]:
     return frozenset(ids)
 
 
+@lru_cache(maxsize=None)
+def _legacy_source_grid_map(region_key: str) -> dict[str, str]:
+    """Map a region's *logical* grid IDs to the *on-disk source* grid IDs.
+
+    The CPT regrid (ADR-0002 §5, 2026-06-12) renamed Cape Town's census cells
+    G#### -> CPT#### **digit-preserving** but did NOT move any on-disk artifact:
+    tiles, results and annotation gpkgs all stay keyed under the source G-ID
+    (``aerial_2025/G1240/``). The region's primary task grid records that back-
+    reference in a ``legacy_gao_id`` column (CPT1240 -> G1240). Imagery/coverage
+    resolution must follow that column so a logical CPT id reaches its real
+    on-disk tiles instead of a non-existent ``tiles_root/CPT1240``.
+
+    Returns ``{logical_id: source_id}`` (both upper-cased) for every cell whose
+    ``legacy_gao_id`` differs from its own ``gridcell_id``. Empty for regions
+    whose primary task grid lacks a ``legacy_gao_id`` column (no rename in play).
+    """
+    try:
+        path = get_task_grid_path(region_key)
+    except KeyError:
+        return {}
+    if not path.exists():
+        return {}
+    try:
+        import geopandas as gpd
+
+        gdf = gpd.read_file(path, columns=["gridcell_id", "legacy_gao_id"])
+    except Exception:
+        return {}
+    if "gridcell_id" not in gdf.columns or "legacy_gao_id" not in gdf.columns:
+        return {}
+    mapping: dict[str, str] = {}
+    for _, row in gdf[["gridcell_id", "legacy_gao_id"]].dropna().iterrows():
+        logical = str(row["gridcell_id"]).strip().upper()
+        source = str(row["legacy_gao_id"]).strip().upper()
+        if logical and source and logical != source:
+            mapping[logical] = source
+    return mapping
+
+
+def resolve_source_grid_id(grid_id: str, region_key: str) -> str:
+    """Map a logical grid ID to the grid ID its imagery/tiles are keyed under.
+
+    For the Cape Town CPT census scheme this returns the digit-preserving source
+    Gao ID (CPT1240 -> G1240) recorded in the primary task grid's
+    ``legacy_gao_id`` column; on-disk tiles, imagery coverage_grids and results
+    all live under that source ID. For every other ID (already-source G-IDs, Li
+    L-IDs, JHB grids, Vexcel CPT-native cells, …) there is no rename, so the
+    input is returned unchanged.
+    """
+    grid_id = grid_id.strip().upper()
+    return _legacy_source_grid_map(region_key).get(grid_id, grid_id)
+
+
 def get_all_grid_id_patterns() -> list[str]:
     """Return compiled grid_id_pattern strings for all regions."""
     return [c.grid_id_pattern for c in _get_registry().values() if c.grid_id_pattern]
@@ -445,27 +543,36 @@ def resolve_imagery_layer_for_grid(
       2. region's default_imagery_layer if it covers the grid.
       3. first imagery layer whose coverage_grids contains grid_id.
     Raises KeyError if no layer covers the grid.
+
+    Coverage is matched against the **source** grid ID
+    (``resolve_source_grid_id``) so a logical CPT census ID resolves through its
+    digit-preserving Gao source (CPT1240 -> G1240), which is what the imagery
+    ``coverage_grids`` and on-disk tiles are keyed under (ADR-0002 §5). When the
+    grid is not present in any coverage list, an imagery layer whose
+    ``coverage_grids`` is empty is still claimed if the source ID is in the
+    region's primary task grid (Vexcel-style task-grid-as-coverage regions).
     """
     grid_id = grid_id.strip().upper()
     config = get_region_config(region_key)
+    source_id = resolve_source_grid_id(grid_id, region_key)
 
     if prefer is not None:
         layer = get_imagery_layer(region_key, prefer)
-        if grid_id in layer.coverage_grids:
+        if source_id in layer.coverage_grids:
             return prefer
 
     default_id = config.default_imagery_layer
     if default_id is not None and default_id in config.imagery_layers:
         default_layer = config.imagery_layers[default_id]
         if (
-            grid_id in default_layer.coverage_grids
-            or (not default_layer.coverage_grids and grid_id in _task_grid_ids(region_key))
+            source_id in default_layer.coverage_grids
+            or (not default_layer.coverage_grids and source_id in _task_grid_ids(region_key))
         ):
             return default_id
 
     for layer_id, layer in config.imagery_layers.items():
-        if grid_id in layer.coverage_grids or (
-            not layer.coverage_grids and grid_id in _task_grid_ids(region_key)
+        if source_id in layer.coverage_grids or (
+            not layer.coverage_grids and source_id in _task_grid_ids(region_key)
         ):
             return layer_id
 

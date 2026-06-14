@@ -3,6 +3,8 @@
 Verifies the field declared in regions.yaml is exposed via the typed registry
 API. Subrepo (solar_backdating) reads this through ImageryLayerConfig, so a
 silent drop at the dataclass boundary would break Task G consumers.
+
+Also covers ModelRunConfig.deprecated wiring (step 5 of 2026-06-12 arch review).
 """
 
 from __future__ import annotations
@@ -15,7 +17,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.region_registry import (  # noqa: E402
     ImageryLayerConfig,
+    ModelRunConfig,
     get_imagery_layer,
+    get_model_run,
     get_region_config,
 )
 
@@ -68,4 +72,61 @@ def test_layers_without_field_are_none() -> None:
         for layer_id, layer in config.imagery_layers.items():
             assert layer.census_imagery_mid_date is None or isinstance(layer.census_imagery_mid_date, str), (
                 f"{region_key}/{layer_id} census_imagery_mid_date must be str|None"
+            )
+
+
+# ---------------------------------------------------------------------------
+# ModelRunConfig.deprecated wiring tests (2026-06-12 step 5)
+# ---------------------------------------------------------------------------
+
+def test_model_run_config_deprecated_default_false() -> None:
+    """ModelRunConfig.deprecated defaults to False when not passed."""
+    run = ModelRunConfig(
+        region_key="x",
+        run_id="r",
+        model_version="v1",
+        imagery_layer="l",
+        results_path="p",
+    )
+    assert run.deprecated is False
+
+
+def test_model_run_config_deprecated_explicit_true() -> None:
+    """ModelRunConfig.deprecated accepts True."""
+    run = ModelRunConfig(
+        region_key="x",
+        run_id="r",
+        model_version="v1",
+        imagery_layer="l",
+        results_path="p",
+        deprecated=True,
+    )
+    assert run.deprecated is True
+
+
+def test_jhb_v3c_geid_deprecated_flag_is_true() -> None:
+    """regions.yaml v3c_geid_2024_02 has deprecated:true — must surface via typed API."""
+    run = get_model_run("johannesburg", "v3c_geid_2024_02")
+    assert run.deprecated is True, (
+        "v3c_geid_2024_02 must be marked deprecated=True via ModelRunConfig"
+    )
+
+
+def test_jhb_v3c_geid_rerun_deprecated_flag_is_false() -> None:
+    """v3c_geid_2024_02_rerun does NOT have deprecated:true — must default False."""
+    run = get_model_run("johannesburg", "v3c_geid_2024_02_rerun")
+    assert run.deprecated is False, (
+        "v3c_geid_2024_02_rerun must not be marked deprecated"
+    )
+
+
+def test_all_non_deprecated_runs_default_false() -> None:
+    """Every model_run without explicit deprecated:true must surface as False."""
+    config = get_region_config("johannesburg")
+    for run_id, run in config.model_runs.items():
+        if run_id == "v3c_geid_2024_02":
+            assert run.deprecated is True
+        else:
+            assert run.deprecated is False, (
+                f"{run_id} unexpectedly has deprecated=True"
             )

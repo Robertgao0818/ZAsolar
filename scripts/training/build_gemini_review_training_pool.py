@@ -114,8 +114,16 @@ def _row_region_key(row: pd.Series | dict[str, Any], grid_id: str) -> str:
     # Last-resort compatibility path for older manifests.  Unified JNB/national
     # grid IDs should carry region_key explicitly because a bare grid_id is not
     # a reliable city key.
+    #
+    # ADR-0002 / CPT regrid: after CT retired its G\d{4} namespace, a bare
+    # overlap G-ID (G1189 etc.) has NO active owner and lookup_regions() returns
+    # BOTH retired claimants (cape_town first, by regions.yaml order). Treat that
+    # tie the same way lookup_region() (singular) does — take the first hit —
+    # instead of dropping to "" and losing the row's region key. CT census is the
+    # only flow that feeds bare G-IDs here; JHB-historical flows carry region_key
+    # in the manifest (handled by the loop above) or pass --region.
     hits = region_registry.lookup_regions(grid_id)
-    if len(hits) == 1:
+    if hits:
         return hits[0]
     return ""
 
