@@ -187,6 +187,15 @@ wave1 实测:排名随 polygon-conf 口径在「固定阈 v3c 赢 / 最优阈 un
 - 新 checkpoint 转产(adoption ≠ experiment)需走完整链:双 mode + SAM-refined
   variant + per-layer poly_conf re-sweep(按 §2 锁定协议)+ solar_cls per-layer
   阈值重校准;动 CT census 须显式重开 2026-06-08 CLS-only 锁定 baseline 决定。
+- **merge-mode provenance 机械可执行(2026-06-12 架构落地 step 6 + 用户裁决)**:
+  (a) legacy 链(`detect_and_evaluate.py`)config.json 现写
+  `merge_mode='per_detection_geoai'`,该字段经 `_CACHE_IGNORE_KEYS` 排除在缓存
+  比对外 —— 仅作 provenance,历史结果不受影响;
+  (b) `finalize.py` 对 CLI-vs-JSON merge_mode 不一致显式 raise(不再静默 CLI
+  压 JSON);
+  (c) `v4_canonical.json` **不再携带 merge_mode** —— direct 链调用方必须 CLI
+  显式 `--merge-mode`(裁决:overnight/production 走 per-detection)。
+  `v4_poly_diag.json` 自带 merge_mode 是 diagnostic 设计例外,维持无-CLI 调用。
 
 ## 4. installation_sym 诊断 profile(GT 侧兄弟碎片 dissolve)
 

@@ -29,7 +29,20 @@ label_source derivation
 The discovered annotation gpkgs do not carry a ``label_source`` column; they
 carry a per-polygon ``source`` column (or none). We derive ``label_source``
 from ``source`` using the same enum mapping as the production builder
-``scripts/training/build_unified_reviewall.py::_ct_source_to_label_source``,
+``core.training.positive_sources._ct_source_to_label_source`` (extracted
+2026-06-12 from build_unified_reviewall), **extended and intentionally
+DIVERGENT** to cover all observed values across both regions:
+
+  DIVERGENCE (do NOT unify — verified 2026-06-12 architecture review step 8):
+  this pool builder is fail-closed (unknown / empty / google_earth source →
+  ``None`` or ``legacy_weak_supervision`` → untrusted, keeping the pool a
+  complete provenance record), whereas the detector-train loader
+  ``_ct_source_to_label_source`` is fail-fast (raises ValueError on unknown).
+  This builder also takes ``(schema_type, has_source_column)`` to apply
+  schema-aware column-absent defaults, a responsibility the train-loader
+  partitions into ``_load_ct_grid_annotations`` instead. The two derivations
+  have different output domains by design and are kept separate.
+
 extended to cover all observed values across both regions:
 
   source value      -> label_source                 -> bucket
@@ -111,7 +124,10 @@ MANIFEST_COLUMNS = [
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# label_source derivation (mirrors build_unified_reviewall._ct_source_to_label_source)
+# label_source derivation — a deliberate FORK of
+# core.training.positive_sources._ct_source_to_label_source (do NOT unify; see
+# the module docstring DIVERGENCE note). This variant is fail-closed (returns
+# None on unknown) + schema-aware; the train-loader variant is fail-fast.
 # ──────────────────────────────────────────────────────────────────────────
 
 def _source_to_label_source(src, schema_type: str, has_source_column: bool) -> str | None:
@@ -119,7 +135,9 @@ def _source_to_label_source(src, schema_type: str, has_source_column: bool) -> s
 
     Returns None when provenance cannot be determined (→ fail-closed untrusted).
 
-    Critical distinction (matches build_unified_reviewall exactly):
+    Critical distinction (matches the known ``source`` values of
+    core.training.positive_sources._ct_source_to_label_source, but diverges on
+    the unknown/empty/google_earth tail — see module docstring):
       - ``source`` column PRESENT but null  → V3-C accepted reviewed prediction
         → ``reviewed_prediction`` (untrusted). Many CT batch003/004 ``_SAM2_``
         files carry a null ``source`` column for this reason.

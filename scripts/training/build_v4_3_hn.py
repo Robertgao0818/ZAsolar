@@ -34,15 +34,17 @@ import sys
 from pathlib import Path
 
 import geopandas as gpd
-import numpy as np
 import pandas as pd
 import rasterio
-from rasterio.windows import Window
 from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from core.grid_utils import resolve_tiles_dir
 from core import region_registry
+from core.chip_extraction import (
+    crop_chip,
+    resolve_tile_for_point,
+    write_chip_geotiff,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -52,19 +54,6 @@ ID_OFFSET_SANDTON = 920000
 ID_OFFSET_CT = 930000
 
 JHB_REVIEWED_DIR = PROJECT_ROOT / "data/annotations/Joburg"
-
-
-def _find_tile(lon: float, lat: float, grid_id: str,
-               region: str, imagery_layer: str | None) -> Path | None:
-    grid_dir = resolve_tiles_dir(grid_id, region=region, imagery_layer=imagery_layer)
-    if grid_dir is None or not grid_dir.exists():
-        return None
-    for tif in grid_dir.glob(f"{grid_id}_*_*_geo.tif"):
-        with rasterio.open(tif) as src:
-            left, bottom, right, top = src.bounds
-            if left <= lon <= right and bottom <= lat <= top:
-                return tif
-    return None
 
 
 def load_jhb_reviewed_tp(grid_id: str) -> gpd.GeoDataFrame | None:
@@ -88,30 +77,6 @@ def chip_overlaps_tp(window_bounds, tp_gdf_4326) -> bool:
     return bool(tp_gdf_4326.intersects(chip_poly).any())
 
 
-def extract_chip(src: rasterio.DatasetReader, lon: float, lat: float,
-                 chip_size: int) -> tuple[np.ndarray, Window, tuple] | None:
-    py, px = src.index(lon, lat)
-    x0 = max(0, int(px - chip_size // 2))
-    y0 = max(0, int(py - chip_size // 2))
-    x0 = min(x0, max(0, src.width - chip_size))
-    y0 = min(y0, max(0, src.height - chip_size))
-    w = min(chip_size, src.width - x0)
-    h = min(chip_size, src.height - y0)
-    if w < chip_size * 0.5 or h < chip_size * 0.5:
-        return None
-    window = Window(x0, y0, w, h)
-    data = src.read(window=window)
-    if w < chip_size or h < chip_size:
-        padded = np.zeros((data.shape[0], chip_size, chip_size), dtype=data.dtype)
-        padded[:, :h, :w] = data
-        data = padded
-    if np.all(data >= 245):
-        return None
-    # Window bounds in source CRS (tile is EPSG:4326 for both CT + JHB aerial)
-    win_bounds = rasterio.windows.bounds(window, src.transform)
-    return data, window, win_bounds
-
-
 def extract_hn_for_grid(grid_id: str, fp_points_4326: list[tuple[float, float]],
                         region: str, imagery_layer: str | None,
                         chip_dir: Path, prefix: str, id_start: int,
@@ -124,8 +89,9 @@ def extract_hn_for_grid(grid_id: str, fp_points_4326: list[tuple[float, float]],
     cur_id = id_start
     try:
         for (lon, lat) in fp_points_4326:
-            tile_path = _find_tile(lon, lat, grid_id, region=region,
-                                   imagery_layer=imagery_layer)
+            tile_path = resolve_tile_for_point(
+                lon, lat, grid_id, region=region, imagery_layer=imagery_layer
+            )
             if tile_path is None:
                 continue
             tile_key = tile_path.stem
@@ -134,30 +100,23 @@ def extract_hn_for_grid(grid_id: str, fp_points_4326: list[tuple[float, float]],
                 tile_cache[tile_key] = h
                 tile_handles.append(h)
             src = tile_cache[tile_key]
-            result = extract_chip(src, lon, lat, chip_size)
-            if result is None:
+            cropped = crop_chip(src, lon, lat, chip_size)
+            if cropped is None:
                 continue
-            data, window, win_bounds = result
+            data, window, x0, y0, w, hh = cropped
+            # Window bounds in the source CRS (tile is EPSG:4326 for CT + JHB
+            # aerial); used for the reviewed-TP overlap audit below.
+            win_bounds = rasterio.windows.bounds(window, src.transform)
             # Audit: drop if chip overlaps any reviewed TP
             if chip_overlaps_tp(win_bounds, tp_filter_gdf):
                 continue
 
-            x0, y0 = int(window.col_off), int(window.row_off)
             if (tile_key, x0, y0) in seen_windows:
                 continue  # same chip window already extracted for another FP
             seen_windows.add((tile_key, x0, y0))
             chip_name = f"{prefix}_{grid_id}_{tile_key}__{x0}_{y0}.tif"
             chip_path = chip_dir / chip_name
-
-            profile = src.profile.copy()
-            for key in ("photometric", "compress", "jpeg_quality", "jpegtablesmode"):
-                profile.pop(key, None)
-            profile.update(
-                driver="GTiff", width=chip_size, height=chip_size,
-                transform=src.window_transform(window), compress="lzw",
-            )
-            with rasterio.open(str(chip_path), "w", **profile) as dst:
-                dst.write(data)
+            write_chip_geotiff(src, data, window, chip_path, chip_size)
             images.append({
                 "id": cur_id,
                 "file_name": f"train/{chip_name}",

@@ -21,7 +21,9 @@
 
 ```
 data/
-  task_grid.gpkg              — Grid 编号集合
+  task_grid.gpkg              — CT legacy grid（gao annotation scheme, 2214 cells, G-prefix, EPSG:4326; digit-preserving source of CPT grid; retired namespace, kept for annotation provenance lookup）
+  task_grid_cpt.gpkg          — CT canonical task grid（CPT namespace, 1103 covered cells, digit-preserving G→CPT rename, WMS blank-probe coverage-filtered 2026-06-12; 7-city column schema）
+  ct_grid_crosswalk_g_to_cpt.csv  — G→CPT crosswalk（1103 rows, columns g_id/cpt_id, digit-preserving; provenance for label migration and retired-namespace lookup）
   annotations/                — 标注数据（详见 annotations/README.md）
     Capetown/                 — Cape Town 标注（{GridID}_SAM2_{YYMMDD}.gpkg），COCO export 主数据源
                                 包含 SAM2 cleaned, 早期 legacy（G1023/G1134 等）, all_annotations_cleaned.gpkg
@@ -58,6 +60,9 @@ tiles/                        — 项目目录占位符（实际数据禁止放 
 #   G1630 等在 CT 和 JHB 都有真实、独立的地理覆盖。**永远** 用
 #   (region, imagery_layer) 定位,不要靠 grid_id 猜 region。
 
+results/
+  analysis/
+    ct_wms_coverage_probe/    — CT WMS blank-probe 结果（probe.csv: grid_id, covered, blank_fraction 等; threshold=0.05, 2026-06-12）
 results/<region>/<model_run>/<GridID>/  — 检测结果按 region × model_run 分组
                                          每层 RUN_MANIFEST.json 记录 model_version/imagery_layer/inference_date
 # 已注册的 model_runs (configs/datasets/regions.yaml):
@@ -78,11 +83,17 @@ results/<region>/<model_run>/<GridID>/  — 检测结果按 region × model_run 
 checkpoints/                  — 微调模型权重（数据目录，禁止放源码）
 core/
   grid_utils.py               — Grid 路径/坐标工具函数（共享模块，内部委托 region_registry）
-  region_registry.py           — 加载 regions.yaml 提供 lookup_region/get_region_config 等 API
+  region_registry.py           — 加载 regions.yaml 提供 lookup_region/get_region_config 等 API（ADR-0002：active/retired namespace 两级解析）
+  eval_matching.py            — IoU 匹配内核（compute_iou + iou_matching，V1.3 F1 主裁判，纯函数）
+  area_metrics.py             — Tier-1 面积聚合指标内核（summarize：σ_Bw/RMSE/agg_F1/thru0_β/R²/bootstrap）
+  chip_extraction.py          — chip 裁切 + tile resolve 单一实现（chunked/mosaic 双布局，region 显式入参）
+  training/
+    positive_sources.py       — CT/JHB 正样本 loader + label_source 派生（dataset_builder / build_unified_reviewall 共用）
 scripts/
   analysis/
     param_search.py            — 检测参数网格搜索
     calibration_sweep.py       — 后处理阈值校准扫描
+    build_cpt_task_grid.py     — 从 probe.csv + legacy task_grid.gpkg 生成 data/task_grid_cpt.gpkg + data/ct_grid_crosswalk_g_to_cpt.csv（digit-preserving G→CPT, 7-city column schema）
     multi_grid_baseline.py     — 多 grid baseline/泛化对比
     benchmark_weights.py       — 训练后多权重 benchmark / delta 对比
     build_gt_heater_audit.py   — GT 加热器污染审计队列构建 + chip 导出
@@ -91,6 +102,7 @@ scripts/
     download_tiles.py          — WMS 瓦片下载 + 地理配准
     grid_preview_batch.py      — 低分辨率 grid 预览批量生成
     review_grid_previews.py    — 浏览器交互式 grid 预览审查
+    probe_ct_wms_coverage.py   — CT WMS blank-probe: 每 grid 请求 City of CT aerial WMS 样本瓦片,判断 covered vs ocean（threshold=0.05, method=blank_probe）；输出 results/analysis/ct_wms_coverage_probe/probe.csv
   annotations/
     bootstrap_manifest.py      — 从 GPKG 生成初始 annotation manifest
     prepare_jhb_grids.py       — JHB grid 准备
@@ -116,6 +128,7 @@ docs/
   architecture.md              — 本文件（目录结构、路径映射）
   workflows.md                 — 工作流命令序列
   evaluation_protocol.md       — 口径与工作点纪律（IoU 双口径、merge-mode、leakage-free 锁定）
+  adr/                         — 架构决策记录 + living tracker（0001 = 代码库优化追踪；0002 = grid namespace 政策 Accepted，JHB + CT CPT regrid 全部落地 2026-06-12）
   governance/repo-rules.md     — 仓库规则（Git 大文件保护、目录治理）
   runbook/                     — 操作 SOP（RunPod 会话启动 checklist 等）
   handoffs/                    — 外部协作者交付文档（如 Li Review GUI setup）
@@ -137,9 +150,12 @@ docs/
 | `configs/postproc/v4_canonical.json` | 标准后处理参数（post_conf=0.85 + tiered），确保跨实验可比 |
 | `scripts/analysis/batch_inference.sh` | 并行批量推理 (canonical 入口，支持任意 grid list + 并行度) |
 | `train.py` | Mask R-CNN 微调训练（两阶段：heads-only → full fine-tune），需要 CUDA GPU |
-| `building_filter.py` | OSM+Microsoft 建筑轮廓 → buildings.gpkg + tile_manifest.csv |
 | `core/grid_utils.py` | Grid 路径/坐标工具函数（共享模块，内部委托 region_registry） |
-| `core/region_registry.py` | 加载 regions.yaml 提供 region/grid 查询 API |
+| `core/region_registry.py` | 加载 regions.yaml 提供 region/grid 查询 API（含 `ModelRunConfig.deprecated`，2026-06-12 起为 deprecated 标记唯一权威） |
+| `core/eval_matching.py` | IoU 匹配内核（`compute_iou` + `iou_matching`）— V1.3 F1 主裁判，纯函数；`detect_and_evaluate.py` 经 shim 复用（2026-06-12 提取） |
+| `core/area_metrics.py` | Tier-1 面积聚合指标内核（`summarize`：σ_Bw/RMSE/agg_F1/thru0_β/R²/bootstrap CI）— Ch3 主裁判（2026-06-12 提取） |
+| `core/chip_extraction.py` | chip 裁切 + tile resolve 单一实现（chunked/mosaic 双布局；HN/COCO 导出共用；2026-06-12 收编 4 份副本并修 mosaic 静默丢 HN bug） |
+| `core/training/positive_sources.py` | CT/JHB 正样本 loader + label_source 派生（`review_root` 显式参数；dataset_builder / build_unified_reviewall 共用，2026-06-12 收编） |
 | `scripts/validate_registry.py` | 注册表交叉验证（manifest ↔ training_sets ↔ model_registry ↔ regions） |
 | `scripts/analysis/lock_operating_point.py` | leakage-free 工作点锁定（拟合+迁移验收+Platt ablation，见 docs/evaluation_protocol.md §2） |
 | `scripts/analysis/installation_sym_eval.py` | installation_sym 诊断 profile（GT 侧兄弟碎片 dissolve + flip counters，docs/evaluation_protocol.md §4；仅诊断 channel） |

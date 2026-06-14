@@ -34,6 +34,7 @@ from shapely.ops import unary_union
 from core.grid_utils import get_grid_paths, normalize_grid_id, TILES_ROOT, resolve_tiles_dir
 from core.annotation_loader import discover_annotations, load_annotation_gdf, AnnotationEntry
 from core.boundary_trust import mask_trusted_map
+from core.chip_extraction import write_chip_geotiff
 
 BASE_DIR = Path(__file__).parent
 
@@ -393,18 +394,12 @@ def write_selected_chips(
                 chip_path = output_dir / img["file_name"]
                 chip_path.parent.mkdir(parents=True, exist_ok=True)
 
-                profile = src.profile.copy()
-                for key in ("photometric", "compress", "jpeg_quality", "jpegtablesmode"):
-                    profile.pop(key, None)
-                profile.update(
-                    driver="GTiff",
-                    width=chip_size,
-                    height=chip_size,
-                    transform=src.window_transform(window),
-                    compress="lzw",
-                )
-                with rasterio.open(str(chip_path), "w", **profile) as dst:
-                    dst.write(data)
+                # Shared LZW GeoTIFF writer (core.chip_extraction): identical
+                # profile-strip + window transform + compress="lzw" as the HN
+                # exporters. The chip-grid path keeps its own pad above because
+                # it intentionally retains empty chips as hard negatives (no
+                # blank-skip), unlike the centroid-crop path.
+                write_chip_geotiff(src, data, window, chip_path, chip_size)
 
     # Clean up internal fields from image dicts
     for img in images:

@@ -521,8 +521,20 @@ def _resolve_mask_shape_options(args: argparse.Namespace, postproc_cfg: dict[str
 
 
 def _resolve_vectorization_options(args: argparse.Namespace, postproc_cfg: dict[str, Any]) -> None:
+    json_merge_mode = postproc_cfg.get("merge_mode")
     if args.merge_mode is None:
-        args.merge_mode = str(postproc_cfg.get("merge_mode", "per-detection"))
+        # Only JSON gave a value (or neither); use JSON value or default.
+        args.merge_mode = str(json_merge_mode) if json_merge_mode is not None else "per-detection"
+    elif json_merge_mode is not None and str(json_merge_mode) != args.merge_mode:
+        # Both CLI and JSON gave merge_mode, but they disagree — refuse to proceed
+        # rather than silently discard the JSON value.
+        raise ValueError(
+            f"merge_mode conflict: --merge-mode CLI={args.merge_mode!r} "
+            f"but postproc JSON merge_mode={json_merge_mode!r}. "
+            "Remove merge_mode from the postproc JSON or omit --merge-mode from the CLI "
+            "so that only one source specifies it."
+        )
+    # else: CLI gave a value and JSON is absent or agrees — keep CLI value as-is.
     if args.merge_mode not in {"pixel-or", "per-detection"}:
         raise ValueError(f"unsupported merge_mode: {args.merge_mode!r}")
 

@@ -23,14 +23,17 @@ import sys
 from pathlib import Path
 
 import geopandas as gpd
-import numpy as np
 import pandas as pd
 import rasterio
-from rasterio.windows import Window
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from core.grid_utils import resolve_tiles_dir, get_results_root
+from core.grid_utils import get_results_root
 from core import region_registry
+from core.chip_extraction import (
+    crop_chip,
+    resolve_tile_for_point,
+    write_chip_geotiff,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -76,12 +79,17 @@ def stratified_sample(df: pd.DataFrame, sample_rate: float,
 
 def load_fp_geometries(
     sampled: pd.DataFrame,
-) -> dict[str, gpd.GeoDataFrame]:
+) -> tuple[dict[str, gpd.GeoDataFrame], dict[str, str | None]]:
     """Load FP polygon geometries from predictions_metric.gpkg for sampled FPs.
 
-    Returns dict: grid_id -> GeoDataFrame with geometry in EPSG:4326.
+    Returns ``(fp_by_grid, region_by_grid)`` where ``fp_by_grid`` maps
+    grid_id -> GeoDataFrame in EPSG:4326 and ``region_by_grid`` maps
+    grid_id -> region key (so tile resolution can pass region explicitly,
+    rule 06-multi-city: region must flow from config, never be inferred from
+    the grid ID).
     """
     fp_by_grid: dict[str, gpd.GeoDataFrame] = {}
+    region_by_grid: dict[str, str | None] = {}
 
     for grid_id, group in sampled.groupby("grid_id"):
         rkey = region_registry.lookup_region(grid_id)
@@ -102,9 +110,10 @@ def load_fp_geometries(
             fp = fp.to_crs(epsg=4326)
 
         fp_by_grid[grid_id] = fp
+        region_by_grid[grid_id] = rkey
         print(f"  {grid_id}: loaded {len(fp)} FP geometries")
 
-    return fp_by_grid
+    return fp_by_grid, region_by_grid
 
 
 def extract_hn_chips(
@@ -112,17 +121,25 @@ def extract_hn_chips(
     output_dir: Path,
     chip_size: int = 400,
     tiles_root: Path | None = None,
+    region_by_grid: dict[str, str | None] | None = None,
 ) -> tuple[list[dict], list[dict]]:
-    """Extract chips centered on FP centroids. Returns (images, provenance)."""
+    """Extract chips centered on FP centroids. Returns (images, provenance).
+
+    ``region_by_grid`` carries the per-grid region key so tile resolution
+    honours the imagery layer's file_layout (mosaic vs chunked). When omitted
+    the resolver falls back to ``resolve_tiles_dir``'s own region lookup.
+    """
     chip_dir = output_dir / "train"
     chip_dir.mkdir(parents=True, exist_ok=True)
 
     images = []
     provenance = []
     img_id = 900000  # High offset to avoid ID collision
+    region_by_grid = region_by_grid or {}
 
     for grid_id, fp_gdf in sorted(fp_by_grid.items()):
         grid_chips = 0
+        region = region_by_grid.get(grid_id)
         tile_cache: dict[str, rasterio.DatasetReader] = {}
         tile_handles: list[rasterio.DatasetReader] = []
 
@@ -131,8 +148,10 @@ def extract_hn_chips(
                 centroid = fp_row.geometry.centroid
                 lon, lat = centroid.x, centroid.y
 
-                # Find tile containing this point
-                tile_path = _find_tile(lon, lat, grid_id, tiles_root)
+                # Find tile containing this point (region-aware → mosaic-safe)
+                tile_path = resolve_tile_for_point(
+                    lon, lat, grid_id, region=region, tiles_root=tiles_root
+                )
                 if tile_path is None:
                     continue
 
@@ -143,51 +162,15 @@ def extract_hn_chips(
                     tile_handles.append(handle)
 
                 src = tile_cache[tile_key]
-                py, px = src.index(lon, lat)
 
-                # Center chip on FP centroid
-                x0 = max(0, int(px - chip_size // 2))
-                y0 = max(0, int(py - chip_size // 2))
-                x0 = min(x0, max(0, src.width - chip_size))
-                y0 = min(y0, max(0, src.height - chip_size))
-
-                w = min(chip_size, src.width - x0)
-                h = min(chip_size, src.height - y0)
-
-                if w < chip_size * 0.5 or h < chip_size * 0.5:
-                    continue
-
-                window = Window(x0, y0, w, h)
-                data = src.read(window=window)
-
-                # Pad if needed
-                if w < chip_size or h < chip_size:
-                    padded = np.zeros(
-                        (data.shape[0], chip_size, chip_size), dtype=data.dtype
-                    )
-                    padded[:, :h, :w] = data
-                    data = padded
-
-                # Skip blank chips
-                if np.all(data >= 245):
-                    continue
+                cropped = crop_chip(src, lon, lat, chip_size)
+                if cropped is None:
+                    continue  # tiny edge chip or blank
+                data, window, x0, y0, w, h = cropped
 
                 chip_name = f"hn_v4_{grid_id}_{tile_key}__{x0}_{y0}.tif"
                 chip_path = chip_dir / chip_name
-
-                profile = src.profile.copy()
-                for key in ("photometric", "compress", "jpeg_quality",
-                            "jpegtablesmode"):
-                    profile.pop(key, None)
-                profile.update(
-                    driver="GTiff",
-                    width=chip_size,
-                    height=chip_size,
-                    transform=src.window_transform(window),
-                    compress="lzw",
-                )
-                with rasterio.open(str(chip_path), "w", **profile) as dst:
-                    dst.write(data)
+                write_chip_geotiff(src, data, window, chip_path, chip_size)
 
                 images.append({
                     "id": img_id,
@@ -217,23 +200,6 @@ def extract_hn_chips(
         print(f"  {grid_id}: {len(fp_gdf)} FPs -> {grid_chips} chips")
 
     return images, provenance
-
-
-def _find_tile(lon: float, lat: float, grid_id: str,
-               tiles_root: Path | None = None) -> Path | None:
-    """Find tile GeoTIFF containing a lon/lat point."""
-    if tiles_root is not None:
-        grid_dir = tiles_root / grid_id
-    else:
-        grid_dir = resolve_tiles_dir(grid_id)
-    if not grid_dir.exists():
-        return None
-    for tif in grid_dir.glob(f"{grid_id}_*_*_geo.tif"):
-        with rasterio.open(tif) as src:
-            left, bottom, right, top = src.bounds
-            if left <= lon <= right and bottom <= lat <= top:
-                return tif
-    return None
 
 
 def merge_with_base(
@@ -343,7 +309,7 @@ def main():
     sampled = stratified_sample(shortlist, args.sample_rate, seed=args.seed)
 
     print(f"\n[3/4] Loading FP geometries and extracting chips...")
-    fp_by_grid = load_fp_geometries(sampled)
+    fp_by_grid, region_by_grid = load_fp_geometries(sampled)
     total_fp = sum(len(gdf) for gdf in fp_by_grid.values())
     print(f"  {total_fp} FP geometries loaded")
 
@@ -352,6 +318,7 @@ def main():
         fp_by_grid, args.output_dir,
         chip_size=args.chip_size,
         tiles_root=args.tiles_root,
+        region_by_grid=region_by_grid,
     )
     print(f"  Extracted {len(hn_images)} HN chips")
 

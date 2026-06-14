@@ -25,15 +25,18 @@ from collections import defaultdict
 from pathlib import Path
 
 import geopandas as gpd
-import numpy as np
 import rasterio
-from rasterio.windows import Window
 from shapely.geometry import box
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-from core.grid_utils import resolve_tiles_dir, get_results_root
+from core.grid_utils import get_results_root
 from core.annotation_loader import resolve_gt_path
 from core import region_registry
+from core.chip_extraction import (
+    crop_chip,
+    resolve_tile_for_point,
+    write_chip_geotiff,
+)
 
 # Default batch 003 grids (kept as convenience default for CLI)
 DEFAULT_BATCH_003_GRIDS = [
@@ -122,24 +125,6 @@ def load_fp_locations(grid_ids: list[str]) -> dict[str, gpd.GeoDataFrame]:
     return fp_by_grid
 
 
-def find_tile_for_point(lon: float, lat: float, grid_id: str,
-                        tiles_root: Path | None = None) -> Path | None:
-    """Find the tile GeoTIFF that contains a given lon/lat point."""
-    if tiles_root is not None:
-        grid_dir = tiles_root / grid_id
-    else:
-        grid_dir = resolve_tiles_dir(grid_id)
-    if not grid_dir.exists():
-        return None
-
-    for tif in grid_dir.glob(f"{grid_id}_*_*_geo.tif"):
-        with rasterio.open(tif) as src:
-            left, bottom, right, top = src.bounds
-            if left <= lon <= right and bottom <= lat <= top:
-                return tif
-    return None
-
-
 def extract_fp_chips(
     fp_by_grid: dict[str, gpd.GeoDataFrame],
     output_dir: Path,
@@ -167,7 +152,9 @@ def extract_fp_chips(
                 centroid = fp_row.geometry.centroid
                 lon, lat = centroid.x, centroid.y
 
-                tile_path = find_tile_for_point(lon, lat, grid_id, tiles_root)
+                tile_path = resolve_tile_for_point(
+                    lon, lat, grid_id, tiles_root=tiles_root
+                )
                 if tile_path is None:
                     continue
 
@@ -179,54 +166,14 @@ def extract_fp_chips(
 
                 src = tile_cache[tile_key]
 
-                # Convert FP centroid to pixel coordinates
-                py, px = src.index(lon, lat)
-
-                # Center chip on FP centroid
-                x0 = max(0, int(px - chip_size // 2))
-                y0 = max(0, int(py - chip_size // 2))
-
-                # Clamp to tile bounds
-                x0 = min(x0, max(0, src.width - chip_size))
-                y0 = min(y0, max(0, src.height - chip_size))
-
-                w = min(chip_size, src.width - x0)
-                h = min(chip_size, src.height - y0)
-
-                if w < chip_size * 0.5 or h < chip_size * 0.5:
-                    continue  # Skip tiny edge chips
-
-                window = Window(x0, y0, w, h)
-                data = src.read(window=window)
-
-                # Pad if needed
-                if w < chip_size or h < chip_size:
-                    padded = np.zeros(
-                        (data.shape[0], chip_size, chip_size), dtype=data.dtype
-                    )
-                    padded[:, :h, :w] = data
-                    data = padded
-
-                # Skip blank chips
-                if np.all(data >= 245):
-                    continue
+                cropped = crop_chip(src, lon, lat, chip_size)
+                if cropped is None:
+                    continue  # tiny edge chip or blank
+                data, window, x0, y0, w, h = cropped
 
                 chip_name = f"fp_{grid_id}_{tile_key}__{x0}_{y0}.tif"
                 chip_path = chip_dir / chip_name
-
-                profile = src.profile.copy()
-                for key in ("photometric", "compress", "jpeg_quality",
-                            "jpegtablesmode"):
-                    profile.pop(key, None)
-                profile.update(
-                    driver="GTiff",
-                    width=chip_size,
-                    height=chip_size,
-                    transform=src.window_transform(window),
-                    compress="lzw",
-                )
-                with rasterio.open(str(chip_path), "w", **profile) as dst:
-                    dst.write(data)
+                write_chip_geotiff(src, data, window, chip_path, chip_size)
 
                 images.append({
                     "id": img_id,

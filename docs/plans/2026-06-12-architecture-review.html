@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Architecture review — ZAsolar</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { htmlLabels: true, curve: "basis" } });
+</script>
+<style>
+  .seam { border-style: dashed; }
+  .modbox { border: 1.5px solid #94a3b8; border-radius: 6px; padding: 4px 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; background: #fff; }
+  .deadbox { border: 1.5px dashed #dc2626; color: #dc2626; opacity: .75; }
+  .deepbox { background: linear-gradient(135deg,#0f172a,#1e293b); color: #f1f5f9; border-color: #0f172a; border-width: 2.5px; }
+  .leaklabel { color: #dc2626; font-size: 10px; }
+  .arrow-down { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #94a3b8; margin: 2px auto; }
+  .band { border-left: 4px solid #94a3b8; padding: 6px 10px; font-size: 11px; background: #fff; }
+  .band-red { border-left-color: #dc2626; }
+  .band-deep { border-left-color: #0f172a; background: linear-gradient(135deg,#0f172a,#1e293b); color:#f1f5f9; }
+  pre.mermaid { display: flex; justify-content: center; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
+
+<!-- ============ HEADER ============ -->
+<header class="space-y-4">
+  <h1 class="text-3xl font-serif font-bold">Architecture review — ZAsolar</h1>
+  <p class="text-sm text-slate-500">2026-06-12 · workflow <span class="font-mono">wf_a4e16534-090</span> · 8 个区域探索 agent（Opus/Sonnet）→ 31 个候选经对抗校验存活（1 否决）→ 综合为 15 个 deepening 候选 + 11 步方案</p>
+  <div class="flex flex-wrap gap-3 text-xs text-slate-600 items-center">
+    <span class="inline-flex items-center gap-1"><span class="inline-block w-4 h-3 border-2 border-slate-500 rounded-sm"></span> module</span>
+    <span class="inline-flex items-center gap-1"><span class="inline-block w-5 border-t-2 border-dashed border-slate-500"></span> seam</span>
+    <span class="inline-flex items-center gap-1"><span class="inline-block w-5 border-t-2 border-red-600"></span> leakage / 副本边</span>
+    <span class="inline-flex items-center gap-1"><span class="inline-block w-4 h-3 rounded-sm" style="background:linear-gradient(135deg,#0f172a,#1e293b)"></span> deep module</span>
+  </div>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+    <div class="bg-white border border-slate-200 rounded px-2 py-1.5"><b>inference-eval 单体</b>：matcher 内核埋在 2257-LOC 五合一里</div>
+    <div class="bg-white border border-slate-200 rounded px-2 py-1.5"><b>core registry</b>：alias 三实现、detect_direct 内联 seam</div>
+    <div class="bg-white border border-slate-200 rounded px-2 py-1.5"><b>training/export</b>：chip 裁切 4 副本、声明式 builder monkeypatch 旧脚本</div>
+    <div class="bg-white border border-slate-200 rounded px-2 py-1.5"><b>analysis 66 脚本</b>：Tier-1 公式 3 处、GT-discovery 私名公用</div>
+    <div class="bg-white border border-slate-200 rounded px-2 py-1.5"><b>tests</b>：基础设施测试充分，eval 内核零测试</div>
+    <div class="bg-white border border-slate-200 rounded px-2 py-1.5"><b>subrepo seam</b>：3 处 raw-YAML back-channel 绕过 registry</div>
+    <div class="bg-white border border-slate-200 rounded px-2 py-1.5"><b>ops/config</b>：RunPod recipe 与 sync 脚本逐字克隆</div>
+    <div class="bg-white border border-slate-200 rounded px-2 py-1.5"><b>跨切面</b>：config.json 两方言、merge-mode lever 半覆盖</div>
+  </div>
+</header>
+
+<!-- ============ CANDIDATES ============ -->
+<section id="candidates" class="space-y-10">
+
+<!-- ████ C1 ████ -->
+<article id="c1" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">1 · 把 iou_matching 提为 core/eval_matching.py — 纯函数、直接可测</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">local-substitutable</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">detect_and_evaluate.py:1058-1221 → core/eval_matching.py · 5 个外部 caller · tests/eval/test_iou_matching.py</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before</p>
+      <pre class="mermaid">
+flowchart TB
+  subgraph DAE["detect_and_evaluate.py · 2257 LOC"]
+    SIDE["module-level 副作用<br/>set_grid_context + matplotlib.use"]
+    IOU["iou_matching + compute_iou<br/>L1058-1221 纯函数"]
+  end
+  A["tta_probe_baseline"] -.-> IOU
+  B["compute_ch2_recall"] -.-> IOU
+  C["validate_checkpoint"] -.-> IOU
+  D["installation_sym_eval"] -.-> IOU
+  E["evaluate_predictions"] -.-> IOU
+  A -. "import 即触发" .-> SIDE
+  B -.-> SIDE
+  C -.-> SIDE
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class SIDE leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <pre class="mermaid">
+flowchart TB
+  CORE["core/eval_matching.py<br/>iou_matching + compute_iou"]
+  DAE2["detect_and_evaluate.py<br/>一行 import shim"]
+  T["tests/eval/test_iou_matching.py<br/>synthetic GeoDataFrame fixture"]
+  A2["5 个 analysis caller"] --> CORE
+  DAE2 --> CORE
+  T --> CORE
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a,stroke-width:2.5px;
+  class CORE deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — F1 主裁判逻辑是真正的纯函数（零 global 读取），已被 5+ 外部脚本 by-name import（real seam，多 adapter），却埋在 2257-LOC module 里：每条 import 都无条件执行 <code class="text-xs bg-slate-100 px-1 rounded">set_grid_context(DEFAULT_GRID_ID)</code> 和 matplotlib 副作用，且零测试。</p>
+  <p class="text-sm"><b>Solution</b> — 原样搬到 core/eval_matching.py（签名不变），detect_and_evaluate.py 留 import shim（不留第二份实现 — spatial_nms 当年抽出后留了重复，覆辙勿蹈）；新增 fixture 测试覆盖 merge_preds 两模式。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>interface 不变，迁移零风险</li>
+    <li>F1 主裁判首次可被 CPU-only 测试</li>
+    <li>5+ caller 摆脱模块级副作用</li>
+    <li>为 evaluate_presence/footprint 解耦铺路</li>
+  </ul>
+</article>
+
+<!-- ████ C2 ████ -->
+<article id="c2" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">2 · 把四份 tiered postproc 过滤链坍缩进 core.postproc</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">detect_and_evaluate.py:816-859, 254-287 · core/postproc.py:1016-1090 · repostprocess.py:147-166 · test_parity_against_old.py</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — 一条过滤链，四个住址</p>
+      <div class="band band-red">detect_solar_panels 内联 area+elong（fall-through 语义，config 不可注入）</div>
+      <div class="band band-red">apply_conf_filter L254-287（conf fall-through）</div>
+      <div class="band band-deep">core.postproc.apply_postproc_filters（first-match-wins ✓ finalize.py 已迁入）</div>
+      <div class="band band-red">repostprocess.py 内联 elong+conf（import 常量但不调函数）</div>
+      <div class="band band-red">test_parity_against_old.py 的 snapshot 已与内联实现漂移</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 flex flex-col justify-center space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After — 单一实现承载两种语义</p>
+      <div class="band band-deep" style="padding:14px 10px">core.postproc.apply_postproc_filters<br/><span class="opacity-70">_apply_tiered_keep(op_mode='fall_through' | 'first_match')<br/>+ compute_rgb_zonal_means</span></div>
+      <div class="arrow-down"></div>
+      <div class="flex gap-1.5">
+        <div class="band flex-1">detect_solar_panels</div>
+        <div class="band flex-1">finalize.py</div>
+        <div class="band flex-1">repostprocess</div>
+      </div>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — area→elongation→RGB-shadow→conf 过滤链有 4 份实现，tier 语义故意分叉（fall-through vs first-match），靠一个已经漂移的 parity 测试把重复钉住而非消除；legacy 内联那份无法从 <code class="text-xs bg-slate-100 px-1 rounded">--postproc-config</code> 注入。</p>
+  <p class="text-sm"><b>Solution</b> — 先做一次显式语义决策（统一口径或 op_mode 双语义并存），然后 detect_solar_panels 与 repostprocess 都改调 core.postproc；跨实验可比性由单一实现守护。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>tier 语义集中一处（locality）</li>
+    <li>config 全路径可注入</li>
+    <li>漂移的 parity 钉子变冗余</li>
+    <li>canonical 配置承诺有单一守护者</li>
+  </ul>
+</article>
+
+<!-- ████ C3 ████ -->
+<article id="c3" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">3 · 统一 config.json 两方言到 run-provenance module，并把 script_sha256 移出 cache-key</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">detect_and_evaluate.py:314/359/454 · finalize.py:866-923 · build_model_*_tracker.py · inventory_snapshot.py · evaluate_predictions.py:56-73</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before</p>
+      <pre class="mermaid">
+flowchart TB
+  W1["detect_and_evaluate<br/>(geoai 链)"] --> J1["config.json 方言 A<br/>nested .config + script_sha256"]
+  W2["finalize.py<br/>(direct 链)"] --> J2["config.json 方言 B<br/>flat + merge_mode"]
+  J1 -.-> H1["infer_imagery_layer<br/>infer_region / infer_model_run<br/>字符串启发式 ×2 tracker"]
+  J2 -.-> H2["resolve_region_with_fallback"]
+  J1 -.-> H3["_merge_mode_label<br/>三层 dict 搜索"]
+  J1 -.-> CK["cache-key 含 script_sha256<br/>改任何代码 → 全部缓存失效"]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class H1,H2,H3,CK leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <pre class="mermaid">
+flowchart TB
+  W1["detect_and_evaluate"] --> RP["core/run_provenance.py<br/>RunRecord + write/read_run_record<br/>read 向后兼容旧两方言"]
+  W2["finalize.py"] --> RP
+  RP --> R1["build_model_*_tracker ×2"]
+  RP --> R2["inventory_snapshot"]
+  RP --> R3["evaluate_predictions"]
+  RP --> DG["script_sha256 = diagnostic 字段<br/>不进 cache-key"]
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a,stroke-width:2.5px;
+  class RP deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — 两条推理链写结构不同的 config.json，4 个下游各自维护字符串启发式（<code class="text-xs bg-slate-100 px-1 rounded">'geid' in tiles_dir</code> 之类）重述 regions.yaml 已编码的知识。独立 bug：script_sha256 进 cache-key，detect_and_evaluate.py 任何改动都让历史 geoai 结果缓存全部失效。</p>
+  <p class="text-sm"><b>Solution</b> — core/run_provenance.py：RunRecord dataclass + write/read。read 先兼容旧 nested 与新 flat 两格式再切写端（CT census mid-flight，避免强制重跑）；script_sha256 降为 diagnostic 字段。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>provenance schema 一处（locality）</li>
+    <li>infer_* 启发式全部退役</li>
+    <li>read_run_record 可测</li>
+    <li>修 spurious cache 失效 bug</li>
+  </ul>
+</article>
+
+<!-- ████ C4 ████ -->
+<article id="c4" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">4 · 让声明式 builder 真正拥有装配 — 删掉对 DEPRECATED 脚本的 monkeypatch</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">pipeline/dataset_builder.py:399-547 · scripts/training/build_unified_reviewall.py · build_training_pool.py:114-146</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — 取代者依赖被取代者</p>
+      <pre class="mermaid">
+flowchart TB
+  DB["pipeline/dataset_builder.py<br/>V1.2 声明式正路"]
+  BUR["build_unified_reviewall.py<br/>标 DEPRECATED · DO NOT DELETE"]
+  BTP["build_training_pool.py<br/>手写镜像 _source_to_label_source"]
+  DB -. "import 7 个私有函数" .-> BUR
+  DB -. "monkeypatch bur.JHB_REVIEW_ROOT<br/>finally 还原" .-> BUR
+  BTP -. "注释: mirrors bur · 已分叉" .-> BUR
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class BUR,BTP leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <pre class="mermaid">
+flowchart TB
+  PS["core/training/positive_sources.py<br/>CT/JHB loader + label_source 派生<br/>review_root 显式入参"]
+  DB2["dataset_builder.py"] --> PS
+  BUR2["build_unified_reviewall<br/>(薄 CLI / 归档)"] --> PS
+  BTP2["build_training_pool"] --> PS
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a,stroke-width:2.5px;
+  class PS deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — V1.2 意图是 spec 成为唯一 interface，实际相反：dataset_builder v2 正路调用被自己标 DEPRECATED 的脚本的 7 个私有函数，还 monkeypatch 其模块级全局。双向泄漏：spec 路径离不开 bespoke 实现，bespoke 宣布废弃却不能删；byte-equivalence 靠可变全局维系，并发即破。第三份 label_source 派生已在 build_training_pool 分叉。</p>
+  <p class="text-sm"><b>Solution</b> — 两个 source loader 抽到 core/training/positive_sources.py，review_root 显式参数，三个 caller 全部 import 它；模块级缓存改参数级。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>spec 真正成为 interface</li>
+    <li>label_source 派生收编为一份</li>
+    <li>消除 monkeypatch，恢复并发安全</li>
+    <li>deletion test：抽出后删 bespoke 无痛</li>
+  </ul>
+</article>
+
+<!-- ████ C5 ████ -->
+<article id="c5" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">5 · ModelRunConfig 加 deprecated 字段 — 封掉 raw-YAML back-channel</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">Strong</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">ports &amp; adapters</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">core/region_registry.py:60-68,149-159 · area_aggregate_eval.py:468-479 · solar_cls/build_cls_dataset.py:89-97 · solar_cls/audit_cls_sources.py:291-303</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — 3 条红边绕过 declared interface</p>
+      <pre class="mermaid">
+flowchart TB
+  Y["regions.yaml<br/>(deprecated: true 已存在)"]
+  REG["region_registry<br/>ModelRunConfig — 无 deprecated 字段"]
+  Y --> REG
+  Y -. "yaml.safe_load 手动遍历" .-> S1["solar_cls/build_cls_dataset"]
+  Y -. "同上 · 自注释抱怨字段缺失" .-> S2["solar_cls/audit_cls_sources"]
+  Y -. "主仓内同模式" .-> S3["area_aggregate_eval"]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class S1,S2,S3 leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <pre class="mermaid">
+flowchart TB
+  Y2["regions.yaml"] --> REG2["region_registry<br/>ModelRunConfig.deprecated: bool = False"]
+  REG2 --> S1b["solar_cls ×2<br/>get_model_run(...).deprecated"]
+  REG2 --> S3b["area_aggregate_eval"]
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a,stroke-width:2.5px;
+  class REG2 deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — 子仓 seam 唯一被三处独立绕过的字段：ModelRunConfig 不暴露 deprecated，迫使两个 solar_cls 脚本 + 主仓 area_aggregate_eval 各自 open(REGIONS_YAML) 手动遍历 YAML 树。YAML schema 一变三处静默坏。</p>
+  <p class="text-sm"><b>Solution</b> — dataclass 加一个默认 False 的字段 + _load_registry 一行；三处替换为 typed accessor。纯加法，与评估协议正交，风险极低。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>deprecated 知识住进 registry 一处</li>
+    <li>YAML schema 变更安全传播</li>
+    <li>移除子仓跨仓 raw-YAML 依赖</li>
+    <li>纯加法，风险极低</li>
+  </ul>
+</article>
+
+<!-- ████ C6 ████ -->
+<article id="c6" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">6 · 提取 Tier-1 指标内核（σ_Bw/RMSE/OLS/bootstrap）为可测 module</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">local-substitutable</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">area_aggregate_eval.py:288-438 → core/area_metrics.py · per_grid_dispersion_audit.py:98-229 · poly_conf_sweep.py:71-93</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — interface 与 implementation 等宽（mass diagram）</p>
+      <div class="flex gap-3 items-end justify-center pt-2">
+        <div class="text-center">
+          <div class="modbox deepbox" style="height:120px;display:flex;align-items:center">summarize()<br/>Ch3 主裁判 · 纯函数 · 零测试</div>
+          <div class="modbox mt-1" style="height:46px">evaluate_run()<br/>文件系统 I/O</div>
+          <p class="text-[10px] text-slate-400 mt-1">同文件 → import 拖入 geopandas</p>
+        </div>
+        <div class="text-center">
+          <div class="modbox deadbox" style="height:120px;display:flex;align-items:center">per_grid_dispersion_audit<br/>顶层裸函数逐行平行副本</div>
+          <p class="text-[10px] text-red-500 mt-1">不 import · 不可测</p>
+        </div>
+        <div class="text-center">
+          <div class="modbox deadbox" style="height:90px;display:flex;align-items:center">poly_conf_sweep._agg<br/>内联 σ_Bw/rmse/thru0</div>
+          <p class="text-[10px] text-red-500 mt-1">第三份公式</p>
+        </div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 flex flex-col justify-center space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <div class="band band-deep" style="padding:14px 10px">core/area_metrics.py<br/><span class="opacity-70">summarize + ols_regression + bootstrap_ci · input contract 文档化</span></div>
+      <div class="arrow-down"></div>
+      <div class="flex gap-1.5 flex-wrap">
+        <div class="band flex-1">area_aggregate_eval</div>
+        <div class="band flex-1">dispersion_audit</div>
+        <div class="band flex-1">poly_conf_sweep</div>
+        <div class="band flex-1">tests/analysis/</div>
+      </div>
+      <p class="text-[10px] text-slate-400">已有 3 个 caller 正确 import summarize → real seam 已存在，只是住错了地方</p>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — V1.4 成功指标的唯一实现 summarize() 是纯函数却零测试，且与文件系统 I/O 同文件；同一公式在另两个脚本完整复制，σ_Bw 改一处数学需三处同步。</p>
+  <p class="text-sm"><b>Solution</b> — 提到 core/area_metrics.py；两个副本改 import（poly_conf_sweep 注意 bootstrap 性能，设为可选）；synthetic per-grid rows 单测。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>Ch3 主裁判首次可单测</li>
+    <li>Tier-1 公式一处覆盖所有 sweep</li>
+    <li>dispersion_audit 顶层代码变可测函数</li>
+    <li>新 sweep 直接调用免复制</li>
+  </ul>
+</article>
+
+<!-- ████ C7 ████ -->
+<article id="c7" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">7 · chip 裁切 + tile-resolve 收编为一个 cropper — 顺手杀掉 mosaic 静默丢 HN 的 bug</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">hn_ops.py:277-303,407 · export_targeted_hn.py:135,203-229 · export_v4_hn.py:164-189,228-231 · build_v4_3_hn.py:57,104-112 · export_coco_dataset.py</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — 4 份 crop + 4 个 find_tile</p>
+      <div class="grid grid-cols-2 gap-1.5">
+        <div class="modbox">hn_ops<br/><span class="text-emerald-600 normal-case">✓ mosaic 分支正确</span></div>
+        <div class="modbox deadbox">export_targeted_hn<br/><span class="normal-case">chunked-only glob</span></div>
+        <div class="modbox deadbox">export_v4_hn<br/><span class="normal-case">chunked-only + 漏 region=</span></div>
+        <div class="modbox deadbox">build_v4_3_hn</div>
+      </div>
+      <p class="leaklabel mt-2">▲ chunked-only find_tile 对 vexcel/aerial_legacy mosaic 层静默返回空 → 整批 HN 静默丢失（已证实 defect，违反 rule 06）</p>
+      <p class="text-[10px] text-slate-400 mt-1">crop 逻辑（clamp/pad/全白跳过/LZW 写盘）在 4 文件逐字重复</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 flex flex-col justify-center space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <div class="band band-deep" style="padding:14px 10px">core/chip_extraction.py<br/><span class="opacity-70">crop_chip + write_chip_geotiff + resolve_tile_for_point（吸收 hn_ops 正确的 mosaic/chunked + CRS 分支）</span></div>
+      <div class="arrow-down"></div>
+      <div class="flex gap-1.5 flex-wrap">
+        <div class="band flex-1">export_coco</div>
+        <div class="band flex-1">3× export_*_hn</div>
+        <div class="band flex-1">hn_ops</div>
+      </div>
+      <p class="text-[10px] text-slate-400">chunked-only bug 与 missing-region 在单一实现里修一次</p>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — "裁窗口→pad→跳空白→写 GeoTIFF" 4 份逐字副本；find_tile 4 个定义中 2 个 chunked-only，对 mosaic 影像层静默 no-op。这不只是重复 — 是带着活 bug 的重复。</p>
+  <p class="text-sm"><b>Solution</b> — core/chip_extraction.py 持 crop/write/resolve 三函数（复用 hn_ops 已正确的那份分支），5 处改调。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>4 份裁切 → 1 个 deep module</li>
+    <li>chip 语义（阈值/pad/CRS）一处</li>
+    <li>杀 mosaic 静默丢 HN bug</li>
+    <li>tests 打一个 cropper interface</li>
+  </ul>
+</article>
+
+<!-- ████ C8 ████ -->
+<article id="c8" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">8 · 四份 merge-HN-into-COCO 副本统一到 hn_ops.merge_hn_into_coco</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">hn_ops.py:431 · export_targeted_hn.py:263 · export_v4_hn.py:239 · export_v4_1_hn.py:54 · build_v4_3_hn.py:300</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before</p>
+      <pre class="mermaid">
+flowchart TB
+  HM["hn_ops.merge_hn_into_coco<br/>最完整 · 生产路径"]
+  DB["dataset_builder"] --> HM
+  M1["export_targeted_hn<br/>merge_with_base_coco"]
+  M2["export_v4_hn<br/>merge_with_base"]
+  M3["export_v4_1_hn<br/>merge_with_base<br/>(extract 已复用，merge 自写)"]
+  M4["build_v4_3_hn<br/>merge_into_base"]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a,stroke-width:2.5px;
+  class M1,M2,M3,M4 leak
+  class HM deep
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <pre class="mermaid">
+flowchart TB
+  HM2["hn_ops.merge_hn_into_coco<br/>接受 list[HNResult]"]
+  DB2["dataset_builder"] --> HM2
+  C1["export_targeted_hn"] --> HM2
+  C2["export_v4_hn"] --> HM2
+  C3["export_v4_1_hn<br/>两 batch = 两个 HNResult"] --> HM2
+  C4["build_v4_3_hn"] --> HM2
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a,stroke-width:2.5px;
+  class HM2 deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — "读 base → hardlink 图 → 追加 HN images → 写合并 json + provenance CSV" 实现了 4-5 次；hn_ops 那份已是最完整且在生产路径，其余是子集副本，各自硬编码 description 与 provenance 文件名。</p>
+  <p class="text-sm"><b>Solution</b> — CLI 脚本退化为 extract → 包 HNResult → 调统一 merge 的薄壳；命名约定收一处。迁移前确认 docs/workflows.md 引用的老 CLI 无活跃 reproduce 依赖。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>4 merge → 1，语义一处</li>
+    <li>provenance 命名一致</li>
+    <li>ID 冲突/val 约定改一处</li>
+    <li>CLI 变薄壳（leverage）</li>
+  </ul>
+</article>
+
+<!-- ████ C9 ████ -->
+<article id="c9" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">9 · merge-mode provenance 补全：legacy detector 最小修复 + 死 JSON 字段清理</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">local-substitutable</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">detect_and_evaluate.py:512,290-346 · finalize.py:523-537,664-672 · v4_canonical.json:9 · runpod_vexcel_jhb382_overnight.sh:13/169</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — first-class lever 只覆盖一条链</p>
+      <pre class="mermaid">
+flowchart TB
+  subgraph DIRECT["direct 链"]
+    F["finalize.py<br/>_resolve_vectorization_options<br/>pixel-or | per-detection ✓"]
+  end
+  subgraph LEGACY["legacy 链 (CT 主排名 suite 在用)"]
+    D["detect_solar_panels<br/>无 merge_mode 概念<br/>config.json 写不出该字段"]
+  end
+  J["v4_canonical.json:9 merge_mode"] -. "CLI 非 None 时被静默忽略" .-> F
+  SH["overnight.sh 注释 pixel-or<br/>vs 代码 per-detection"]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class D,J,SH leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After（最小修复，全量迁移推后到 CT census 之后）</p>
+      <pre class="mermaid">
+flowchart TB
+  D2["legacy: config.json 写<br/>merge_mode='per_detection_geoai'<br/>(~10 行，无结构变化)"]
+  F2["finalize.py: JSON vs CLI<br/>不一致 → raise（显式冲突）"]
+  E["evaluate_predictions<br/>_merge_mode_label 两链都有值<br/>双-mode 纪律可机械执行"]
+  D2 --> E
+  F2 --> E
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a,stroke-width:2.5px;
+  class E deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — merge-mode 是 first-class lever（同 raw 推理差 6pp F1 / 0.6 bulk），但 seam 只存在于 direct 链；CT 主排名 suite 走 legacy 链，evaluation_protocol 的"双 merge-mode 强制"在结构上无法机械执行。JSON 配置字段对当前推理脚本是死配置，对 benchmark direct 路径却仍活。</p>
+  <p class="text-sm"><b>Solution</b> — 最小修复三件套：legacy 写固定变体标识、JSON-vs-CLI 冲突 raise、修 overnight 注释。全量迁移（legacy 也走 raw artifact → finalize）留到 CT census 之后。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>provenance 两入口都有定义</li>
+    <li>静默优先级变显式报错</li>
+    <li>注释/代码一致</li>
+    <li>lever seam 最终覆盖两条链</li>
+  </ul>
+</article>
+
+<!-- ████ C10 ████ -->
+<article id="c10" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">10 · 归档 building_filter.py，删掉 detect_and_evaluate 里的双重死代码</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">local-substitutable</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">building_filter.py:31,35-39,275 · detect_and_evaluate.py:57,606-622,775</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — 双重 dead</p>
+      <div class="modbox deadbox" style="padding:10px">building_filter.py<br/><span class="normal-case">硬编码单 CT grid bbox + 'G1238_{col}_{row}' tile ID · 零 caller import · textbook 违反 rule 06</span></div>
+      <div class="arrow-down"></div>
+      <div class="modbox deadbox" style="padding:10px">detect_and_evaluate.py:609<br/><span class="normal-case">if BUILDINGS_GPKG.exists() — 文件不存在 → 永远 False<br/>:775 注释"建筑掩膜已禁用" → cache 填了从不读</span></div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 flex flex-col justify-center space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <div class="band">building_filter.py → .archive/ 或标 DEPRECATED</div>
+      <div class="band">detect_and_evaluate.py 删 L606-622 死 load 块</div>
+      <div class="band band-deep">未来复活 → 强制经 region_registry 查 Overture 路径（region-aware）</div>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — 模块作用域锁死在一个早期试验 grid，且双重 dead：依赖文件不存在（软门永 False）+ 使用点已注释禁用。deletion test 干净通过：删后复杂度不在任何 caller 重现。</p>
+  <p class="text-sm"><b>Solution</b> — 归档 + 删死块。CT census mid-flight，删除是安全动作。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>移除违反 multi-city 规则的死 module</li>
+    <li>2257-LOC 文件少一段永不执行的块</li>
+    <li>复活则强制 region-aware</li>
+  </ul>
+</article>
+
+<!-- ████ C11 ████ -->
+<article id="c11" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">11 · 合并三个 Dropbox sync 克隆 + 修 sync_from_runpod 两处 interface 缺陷</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">sync_{annotations,progress_log,vexcel_results}_to_dropbox.sh · sync_from_runpod.sh:27-28,57,134</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before</p>
+      <div class="flex gap-1.5">
+        <div class="band band-red flex-1">sync_annotations 66L</div>
+        <div class="band band-red flex-1">sync_progress_log 63L</div>
+        <div class="band band-red flex-1">sync_vexcel 53L</div>
+      </div>
+      <p class="text-[10px] text-slate-500">每份 ~50 行样板相同：挂载检查 / FLAGS / arg 解析 / mkdir / rsync；Dropbox 路径硬编码 6 处</p>
+      <div class="band band-red mt-2">sync_from_runpod.sh — CWD 相对 .env（非 repo root 调用静默跳过）+ grep '^G[0-9]+' 把 CT census 在产的 L-namespace 格网静默丢弃（违反 rule 06）</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 flex flex-col justify-center space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <div class="band band-deep" style="padding:12px 10px">scripts/sync_to_dropbox.sh &lt;src&gt; &lt;dest&gt; [--delete] [--exclude …]<br/><span class="opacity-70">DROPBOX_ROOT 从 .env 读 · 三个 hook 各一行</span></div>
+      <div class="band mt-1">sync_from_runpod：.env 改 REPO_ROOT 锚定 · grid 过滤放宽 ^[A-Z][0-9]+</div>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — 三个结构性克隆只在 SRC/DEST 与 --delete 上不同；sync_from_runpod 的 grid 正则把 L1842-L1954 静默丢弃 — 这是当下正在跑的 CT census 拉取路径上的活缺陷。</p>
+  <p class="text-sm"><b>Solution</b> — 参数化为单脚本；--delete 与 --exclude 保留为显式参数；.env 加载统一 REPO_ROOT 锚定。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>Dropbox root 一处，新目标 = 1 hook 行</li>
+    <li>caller 声明 src/dest 而非机制</li>
+    <li>.env 加载不再 CWD 依赖</li>
+    <li>L-namespace 不再静默丢弃</li>
+  </ul>
+</article>
+
+<!-- ████ C12 ████ -->
+<article id="c12" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">12 · region alias 三实现收编 — 窄手术，保住短别名输出合约</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">core/grid_utils.py:52-76 · core/region_registry.py:387-401 · build_gemini_review_training_pool.py:52-56</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before</p>
+      <pre class="mermaid">
+flowchart TB
+  N1["grid_utils.normalize_region<br/>→ 'ct' / 'jhb' 短别名<br/>_ALIAS_TO_KEY 缺 jnb"]
+  N2["region_registry.normalize_region_key<br/>→ 'cape_town' / 'johannesburg'<br/>含 jnb ✓"]
+  N3["build_gemini._normalize_region<br/>registry 版 + jnb 特判"]
+  CMP["7+ 处 == 'jhb' 短别名比较"]
+  N1 --> CMP
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class N1,N3 leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After — 窄手术</p>
+      <pre class="mermaid">
+flowchart TB
+  REG["region_registry.normalize_region_key<br/>alias table 单一权威（含 jnb）"]
+  GU["grid_utils._region_key<br/>内部委托 registry<br/>normalize_region 公开输出不变"]
+  BG["build_gemini 删 jnb 特判"]
+  GU --> REG
+  BG --> REG
+  CMP2["7+ 处短别名比较 — 行为不变 ✓"]
+  GU --> CMP2
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a,stroke-width:2.5px;
+  class REG deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — alias→canonical 有三条独立实现且输出合约不同（短别名 vs full key）；grid_utils 注释自承应该用 registry 版却仍维护自己的两级转换；jnb 缺口真实存在。全量迁移会静默改掉 7+ 处 <code class="text-xs bg-slate-100 px-1 rounded">== 'jhb'</code> 比较的语义 — 所以只做内部委托。</p>
+  <p class="text-sm"><b>Solution</b> — 只在 _region_key 内部委托 registry（顺修 jnb），公开输出合约不动；build_gemini 特判删除。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>alias table 单一权威</li>
+    <li>jnb 缺口修复</li>
+    <li>新城市别名只改 registry</li>
+    <li>不破坏短别名比较合约</li>
+  </ul>
+</article>
+
+<!-- ████ C13 ████ -->
+<article id="c13" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">13 · _gt_spec_for 去私名公开为 GT-discovery interface</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">ports &amp; adapters</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">area_aggregate_eval.py:182-208 · build_model_area_coverage_tracker.py:183-198 · installation_sym_eval.py:101</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before</p>
+      <pre class="mermaid">
+flowchart TB
+  GT["_gt_spec_for（私有名）<br/>annotation_source → scheme-routing<br/>→ priority-suffix auto-discovery"]
+  OK["6 个脚本 by-name import<br/>(事实上的 public seam)"] --> GT
+  P1["_reviewed_gt_spec<br/>平行副本 · 缺 priority-suffix 层"]
+  P2["_xd_grid_pairs<br/>硬编码 gt_root / 绕过 auto-discovery"]
+  classDef leak stroke:#dc2626,stroke-width:2px,color:#dc2626;
+  class P1,P2 leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <pre class="mermaid">
+flowchart TB
+  GT2["area_aggregate_eval.resolve_gt_spec<br/>公开 · 留在 analysis 层"]
+  OK2["6 个既有 caller"] --> GT2
+  P1b["coverage_tracker<br/>(可带 strict 开关)"] --> GT2
+  P2b["installation_sym xd-path<br/>gt_root_override="] --> GT2
+  classDef deep fill:#0f172a,color:#f1f5f9,stroke:#0f172a,stroke-width:2.5px;
+  class GT2 deep
+      </pre>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — "某 grid 的 GT 文件在哪"这一关键问题的唯一抽象以私有名住在一个 analysis 脚本里，被 6 个脚本 by-name import；两个平行副本已分叉（版本选择策略不同 / 绕过 auto-discovery，versioned GT 出现时会静默漏）。</p>
+  <p class="text-sm"><b>Solution</b> — 去下划线公开（调用方全是 analysis 脚本，不强行升 core）；两个副本改路由到它。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>GT 发现单一可靠 interface</li>
+    <li>coverage_tracker 不再维护缺层副本</li>
+    <li>xd-path 不再静默漏 versioned GT</li>
+    <li>Li/L-namespace 路由集中</li>
+  </ul>
+</article>
+
+<!-- ████ C14 ████ -->
+<article id="c14" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">14 · 给 train.py 一个 typed TrainRunConfig — 集中杠杆约束校验</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">train.py:807-1028,1090-1093,1712-1740 · core/run_ledger.py:166-194</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 space-y-2">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before — interface 与 implementation 等宽</p>
+      <div class="flex gap-3 items-end justify-center pt-1">
+        <div class="text-center">
+          <div class="modbox" style="height:130px;display:flex;align-items:center;border-color:#dc2626">interface<br/>~50 CLI flags<br/>其中 ~12 个相互依赖</div>
+          <p class="text-[10px] text-slate-400 mt-1">argparse</p>
+        </div>
+        <div class="text-center">
+          <div class="modbox" style="height:140px;display:flex;align-items:center">implementation<br/>flags 逐个穿过函数体</div>
+          <p class="text-[10px] text-slate-400 mt-1">train.py 过程体</p>
+        </div>
+      </div>
+      <p class="leaklabel">同一杠杆知识三处手抄：argparse / run_ledger.HYPERPARAM_KEYS / training_history 逐字段；依赖约束只有一个 print('[WARN]')</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 flex flex-col justify-center space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <div class="band band-deep" style="padding:14px 10px">TrainRunConfig dataclass<br/><span class="opacity-70">from_args() 一次集中互斥校验（WARN→raise）</span></div>
+      <div class="arrow-down"></div>
+      <div class="flex gap-1.5">
+        <div class="band flex-1">过程体读 config 字段</div>
+        <div class="band flex-1">run_ledger 直接序列化</div>
+        <div class="band flex-1">training_history 同源</div>
+      </div>
+      <p class="text-[10px] text-slate-400">不合并 pipeline.specs.MaskSupervisionSpec — 那是 dataset-build-time schema，对抗校验已澄清非重复</p>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — ~50 个 flag 中 12 个 boundary/mask-trust 杠杆相互依赖，约束只有软 WARN；杠杆清单在三处手抄需同步。</p>
+  <p class="text-sm"><b>Solution</b> — TrainRunConfig 收口 + from_args() hard validation；纯 main() 内部重构，不改 CLI/COCO/评估协议。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>依赖约束收到一处校验</li>
+    <li>软 WARN 升 hard validation</li>
+    <li>manifest 直接序列化，不再三处手抄</li>
+    <li>CLI 不变，零外部影响</li>
+  </ul>
+</article>
+
+<!-- ████ C15 ████ -->
+<article id="c15" class="bg-white rounded-xl border border-slate-200 p-6 space-y-4 shadow-sm">
+  <div class="flex items-start justify-between gap-4">
+    <h2 class="text-xl font-serif font-semibold">15 · RunPod 批推理：抽 CANONICAL_DETECT_ARGS 片段（克制版）</h2>
+    <div class="flex gap-2 shrink-0">
+      <span class="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Worth exploring</span>
+      <span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">in-process</span>
+    </div>
+  </div>
+  <p class="font-mono text-xs text-slate-500">runpod_detect_direct_template.sh:49-64 · runpod_3model_jhb_cbd25_compare.sh:60-75 · runpod_vexcel_jhb382_overnight.sh:140-157</p>
+  <div class="grid md:grid-cols-2 gap-4">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">Before</p>
+      <div class="flex gap-1.5">
+        <div class="band band-red flex-1">template<br/>7 个字面量参数</div>
+        <div class="band band-red flex-1">compare<br/>同 7 个字面量</div>
+        <div class="band band-red flex-1">overnight<br/>同 7 个 + queue/SHM/heartbeat</div>
+      </div>
+      <p class="text-[10px] text-slate-500">chip-size 400 / overlap 0.25 / score-thr 0.05 / det-per-img 300 / mask-thr 0.3 / raw-mask-storage crop / prefetch 2 — 逐字 ×3；信号量循环 ×4</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-3 flex flex-col justify-center space-y-1.5">
+      <p class="text-xs uppercase tracking-wider text-slate-400 mb-2">After</p>
+      <div class="band band-deep">scripts/lib/canonical_detect_args.sh — CANONICAL_DETECT_ARGS array（~5 行）</div>
+      <div class="band">三脚本 source 后拼接；merge-mode / --profile / Phase C 等刻意分叉的 lever 仍各脚本显式声明</div>
+      <p class="text-[10px] text-slate-400">不抽完整 run_parallel_grids — 3 脚本规模下那是 hypothetical seam（对抗校验收窄了原候选）</p>
+    </div>
+  </div>
+  <p class="text-sm"><b>Problem</b> — canonical 检测参数逐字复制 3 处，新 batch 脚本每次 fork 整段字面量；但三脚本在 first-class lever 上是刻意发散的，完整 recipe lib 会制造只有一个 adapter 的 seam。</p>
+  <p class="text-sm"><b>Solution</b> — 只抽 7 个字面量为 shell array，刻意分叉保留显式。</p>
+  <ul class="text-sm grid grid-cols-2 gap-x-6 gap-y-1 list-disc list-inside text-slate-700">
+    <li>canonical 参数改一处</li>
+    <li>新脚本不再 fork 字面量</li>
+    <li>刻意 lever 仍显式可见</li>
+    <li>不引入 hypothetical seam</li>
+  </ul>
+</article>
+
+</section>
+
+<!-- ============ TOP RECOMMENDATION ============ -->
+<section id="top-recommendation" class="rounded-xl p-8 deep text-slate-100 space-y-3">
+  <p class="text-xs uppercase tracking-wider text-emerald-400">Top recommendation</p>
+  <h2 class="text-2xl font-serif font-semibold"><a href="#c1" class="hover:underline">#1 — 把 iou_matching 提为 core/eval_matching.py</a></h2>
+  <p class="text-sm text-slate-300 leading-relaxed">leverage 最高、风险最低、解锁后续最多。F1 主裁判逻辑已被 5+ 外部脚本 by-name import — real seam 早已存在，只是住在 2257-LOC 的错误 module 里，每条 import 都拖着 set_grid_context + matplotlib 副作用，且零测试。迁移是 byte-equivalent 搬家：签名不变、零 global、留 import shim，对 CT census 和锁定 benchmark 完全透明。它一次性给评估内核一个干净的 test surface，并为 #6（area_metrics）和 evaluate_presence/footprint 后续解耦建立 core/eval_* 落点。唯一执行陷阱：必须用 shim 而非第二份拷贝（spatial_nms 当年留了重复实现的覆辙）。</p>
+</section>
+
+<!-- ============ STEPWISE PLAN ============ -->
+<section id="plan" class="space-y-6">
+  <h2 class="text-2xl font-serif font-bold">分步优化方案 — 11 步，按解锁效应与风险排序</h2>
+  <p class="text-sm text-slate-500">每步可独立落地，配等价验证；绝不在中途破坏锁定的评估协议（docs/evaluation_protocol.md）。步骤 1/3/5/6/8/9 无前置依赖，可并行或按需穿插。</p>
+  <ol class="space-y-3">
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">1</span>
+      <div class="text-sm space-y-1">
+        <p><b>iou_matching → core/eval_matching.py</b>（候选 #1）— 原样搬家 + import shim + synthetic fixture 测试。</p>
+        <p class="text-xs text-slate-500">验证：新测试通过；run_benchmark v3c 重跑 cape_town_independent_26，F1/P/R byte-identical；5 个外部 import 仍解析。</p>
+      </div>
+    </li>
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">2</span>
+      <div class="text-sm space-y-1">
+        <p><b>5 个 analysis caller 改 import core.eval_matching</b> — 摆脱对 2257-LOC module 的重 import。<span class="text-slate-400">依赖步骤 1</span></p>
+        <p class="text-xs text-slate-500">验证：compute_ch2_recall / installation_sym_eval 在已有结果 grid 重跑输出一致；import 不再触发 set_grid_context。</p>
+      </div>
+    </li>
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">3</span>
+      <div class="text-sm space-y-1">
+        <p><b>Tier-1 统计内核 → core/area_metrics.py</b>（候选 #6）— summarize/_ols/_bootstrap 提出，evaluate_run 留原处。</p>
+        <p class="text-xs text-slate-500">验证：synthetic rows 单测；σ_Bw/RMSE/agg_F1/thru0 重跑 byte-identical；3 个既有 caller 仍解析。</p>
+      </div>
+    </li>
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">4</span>
+      <div class="text-sm space-y-1">
+        <p><b>两份 Tier-1 公式副本路由到 core/area_metrics</b> — dispersion_audit 重构为函数；poly_conf_sweep._agg 委托 summarize（bootstrap 设可选防拖慢 sweep）。<span class="text-slate-400">依赖步骤 3</span></p>
+        <p class="text-xs text-slate-500">验证：poly_conf_sweep 单 grid 重跑各阈值点指标一致；solar_zerov2 评分链 --gt-root 路径不丢。</p>
+      </div>
+    </li>
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">5</span>
+      <div class="text-sm space-y-1">
+        <p><b>ModelRunConfig.deprecated + 封三处 raw-YAML back-channel</b>（候选 #5）— 含 solar_cls 两脚本。</p>
+        <p class="text-xs text-slate-500">验证：registry 测试 + deprecated run 断言；三脚本过滤行为与改动前一致。</p>
+      </div>
+    </li>
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">6</span>
+      <div class="text-sm space-y-1">
+        <p><b>merge-mode provenance 最小修复</b>（候选 #9）— legacy 写 'per_detection_geoai'；JSON-vs-CLI 冲突 raise；修 overnight 注释。</p>
+        <p class="text-xs text-slate-500">验证：legacy 重跑一个 grid，config.json 含 merge_mode；cache reuse-gating 不破（同参数命中缓存）。</p>
+      </div>
+    </li>
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">7</span>
+      <div class="text-sm space-y-1">
+        <p><b>core/run_provenance.py 统一两方言</b>（候选 #3）— read 先兼容旧格式再切写端；script_sha256 移出 cache-key；退役 infer_* 启发式。<span class="text-slate-400">依赖步骤 5、6</span></p>
+        <p class="text-xs text-slate-500">验证：历史两方言 config.json 都解析正确（与 infer_* 旧输出对比）；改非检测代码后历史结果不被强制重跑。</p>
+      </div>
+    </li>
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">8</span>
+      <div class="text-sm space-y-1">
+        <p><b>positive-source loader → core/training/positive_sources.py</b>（候选 #4）— 删 monkeypatch；收编 build_training_pool 镜像派生。</p>
+        <p class="text-xs text-slate-500">验证：unified_reviewall_v2.yaml dry-run，build_manifest.json byte-identical；删 bespoke 后 v2 路仍能装配。</p>
+      </div>
+    </li>
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">9</span>
+      <div class="text-sm space-y-1">
+        <p><b>core/chip_extraction.py</b>（候选 #7）— 收编 4 份 crop + 4 个 find_tile，修 mosaic 静默丢 HN bug + 补 region= 参数。</p>
+        <p class="text-xs text-slate-500">验证：synthetic GeoTIFF 单测；chunked grid 重跑 export_coco chip 字节一致；vexcel mosaic 层 HN 不再为空（回归验证）。</p>
+      </div>
+    </li>
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">10</span>
+      <div class="text-sm space-y-1">
+        <p><b>4 份 merge-HN 副本 → hn_ops.merge_hn_into_coco</b>（候选 #8）。<span class="text-slate-400">依赖步骤 9</span></p>
+        <p class="text-xs text-slate-500">验证：export_v4_1_hn 复现历史 HN 数据集，images/annotations 集合一致；老 CLI 仍可产出。</p>
+      </div>
+    </li>
+    <li class="bg-white border border-slate-200 rounded-lg p-4 flex gap-4">
+      <span class="shrink-0 w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm font-bold">11</span>
+      <div class="text-sm space-y-1">
+        <p><b>收尾三件</b>：region alias 窄手术（#12）、resolve_gt_spec 公开（#13）、postproc 过滤链统一（#2，<b>需先决一个 fall-through vs first-match 语义口径</b>）。<span class="text-slate-400">依赖步骤 1、3</span></p>
+        <p class="text-xs text-slate-500">验证：短别名比较行为不变；coverage_tracker 输出一致；test_parity_against_old 改打 core.postproc 单一实现，cape_town_independent_26 F1 与锁定基线 byte-identical。</p>
+      </div>
+    </li>
+  </ol>
+  <p class="text-xs text-slate-400">未排入主线（独立随手可做）：#10 building_filter 归档、#11 Dropbox sync 合并 + sync_from_runpod 修复（其中 L-namespace 丢弃缺陷建议尽早单独修——它在 CT census 拉取路径上）、#14 TrainRunConfig（下次训练改动时顺带做）、#15 CANONICAL_DETECT_ARGS（下次新建 batch 脚本时做）。被对抗校验否决 1 项：annotation_loader.resolve_gt_path 塌缝（friction 不足）。</p>
+</section>
+
+<footer class="text-xs text-slate-400 pt-4 border-t border-slate-200">
+  ZAsolar architecture review · 2026-06-12 · 41 agents · 2.49M tokens · 全部候选经独立对抗校验（亲读 file:line 证据 + deletion test + 既定决策对照）
+</footer>
+
+</main>
+</body>
+</html>

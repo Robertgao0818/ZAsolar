@@ -117,7 +117,7 @@ def extract_small_fp_hn(
     else:
         sampled = shortlist
 
-    fp_by_grid = load_fp_geometries(sampled)
+    fp_by_grid, region_by_grid = load_fp_geometries(sampled)
     if not fp_by_grid:
         return HNResult(source_type="small_fp_hn")
 
@@ -125,6 +125,7 @@ def extract_small_fp_hn(
         fp_by_grid, output_dir,
         chip_size=chip_size,
         tiles_root=tiles_root,
+        region_by_grid=region_by_grid,
     )
 
     # Remap IDs to target segment
@@ -227,10 +228,14 @@ def extract_negative_pool_hn(
         return HNResult(source_type="negative_pool", n_grids=0, n_chips=0)
 
     # Crop a chip per row, centred on the bbox centroid.
-    import numpy as np
     import rasterio
-    from rasterio.windows import Window
     from shapely import wkt as _wkt
+
+    from core.chip_extraction import (
+        crop_chip,
+        resolve_tile_for_point,
+        write_chip_geotiff,
+    )
 
     chip_dir = output_dir / "train"
     chip_dir.mkdir(parents=True, exist_ok=True)
@@ -248,8 +253,16 @@ def extract_negative_pool_hn(
         except Exception:  # noqa: BLE001
             continue
 
-        tile_path = _resolve_tile_for_geom(
-            geom, grid_id, region, layer, tiles_root
+        # bbox_geo_wkt is stored in EPSG:4326 (backfill_geometry.py). The crop /
+        # resolve helpers reproject the centroid into the tile's native CRS
+        # (vexcel_2024 / aerial_legacy are EPSG:3857) before indexing pixels —
+        # never assume lon/lat == raster units (rule 06-multi-city).
+        centroid = geom.centroid
+        lon, lat = centroid.x, centroid.y
+
+        tile_path = resolve_tile_for_point(
+            lon, lat, grid_id, region=region, imagery_layer=layer,
+            tiles_root=tiles_root,
         )
         if tile_path is None:
             print(f"[negative_pool] {grid_id}: no tile for chip "
@@ -257,50 +270,17 @@ def extract_negative_pool_hn(
             continue
 
         with rasterio.open(tile_path) as src:
-            # bbox_geo_wkt is stored in EPSG:4326 (backfill_geometry.py); the
-            # tile may be in any native CRS (e.g. vexcel_2024 / aerial_legacy
-            # are EPSG:3857). Reproject the centroid into the tile's CRS before
-            # indexing pixels — never assume lon/lat == raster units
-            # (rule 06-multi-city: branch/look up CRS, do not assume EPSG).
-            x_native, y_native = _geom_xy_in_crs(geom, src.crs)
-            py, px = src.index(x_native, y_native)
-            x0 = max(0, int(px - chip_size // 2))
-            y0 = max(0, int(py - chip_size // 2))
-            x0 = min(x0, max(0, src.width - chip_size))
-            y0 = min(y0, max(0, src.height - chip_size))
-            w = min(chip_size, src.width - x0)
-            h = min(chip_size, src.height - y0)
-            if w < chip_size * 0.5 or h < chip_size * 0.5:
-                continue
-            window = Window(x0, y0, w, h)
-            data = src.read(window=window)
-            if w < chip_size or h < chip_size:
-                padded = np.zeros(
-                    (data.shape[0], chip_size, chip_size), dtype=data.dtype
-                )
-                padded[:, :h, :w] = data
-                data = padded
-            if np.all(data >= 245):
-                continue  # blank tile margin
+            cropped = crop_chip(src, lon, lat, chip_size)
+            if cropped is None:
+                continue  # tiny edge chip or blank tile margin
+            data, window, x0, y0, w, h = cropped
 
             chip_name = (
                 f"np_{region}_{grid_id}_{row.get('archetype', 'na')}"
                 f"_{img_id}.tif"
             )
             chip_path = chip_dir / chip_name
-            profile = src.profile.copy()
-            for key in ("photometric", "compress", "jpeg_quality",
-                        "jpegtablesmode"):
-                profile.pop(key, None)
-            profile.update(
-                driver="GTiff",
-                width=chip_size,
-                height=chip_size,
-                transform=src.window_transform(window),
-                compress="lzw",
-            )
-            with rasterio.open(str(chip_path), "w", **profile) as dst:
-                dst.write(data)
+            write_chip_geotiff(src, data, window, chip_path, chip_size)
 
         images.append({
             "id": img_id,
@@ -354,78 +334,19 @@ def _is_training_eligible(row: dict) -> bool:
 def _geom_xy_in_crs(geom, dst_crs):
     """Return the geometry centroid (x, y) reprojected into ``dst_crs``.
 
-    ``bbox_geo_wkt`` rows are stored in EPSG:4326 (see ``backfill_geometry.py``).
-    Tiles may be in any native CRS (vexcel_2024 / aerial_legacy are EPSG:3857),
-    so the centroid must be reprojected before it can be compared against tile
-    bounds or fed to ``src.index`` — comparing lon/lat against metre-scale
-    bounds silently resolves nothing (rule 06-multi-city: never assume EPSG).
-
-    When ``dst_crs`` is already geographic / EPSG:4326 (CT aerial layers) the
-    transform is a no-op and the original lon/lat is returned unchanged.
+    Backward-compatible shim: the reprojection logic now lives in
+    ``core.chip_extraction.point_xy_in_crs`` (shared with every HN/COCO chip
+    exporter). This wrapper keeps the geom-taking signature that
+    ``tests/test_negative_pool_ingest.py`` and any other in-tree caller relies
+    on.  ``bbox_geo_wkt`` rows are EPSG:4326; tiles may be in any native CRS
+    (vexcel_2024 / aerial_legacy are EPSG:3857), so the centroid must be
+    reprojected before comparison / ``src.index`` (rule 06-multi-city: never
+    assume EPSG). For 4326 / None ``dst_crs`` the transform is a no-op.
     """
+    from core.chip_extraction import point_xy_in_crs
+
     centroid = geom.centroid
-    lon, lat = centroid.x, centroid.y
-    if dst_crs is None:
-        return lon, lat
-    try:
-        from rasterio.crs import CRS as _CRS
-        if _CRS.from_epsg(4326) == dst_crs:
-            return lon, lat
-    except Exception:  # noqa: BLE001
-        pass
-    from rasterio.warp import transform as _warp_transform
-    xs, ys = _warp_transform("EPSG:4326", dst_crs, [lon], [lat])
-    return xs[0], ys[0]
-
-
-def _resolve_tile_for_geom(geom, grid_id, region, layer, tiles_root):
-    """Return the GeoTIFF that contains ``geom`` for a negative-pool row.
-
-    Branches on ``chunked`` vs ``mosaic`` file layout (rule 06-multi-city): a
-    mosaic resolves to a single file; a chunked layer is a directory of geo
-    chips and we pick the chunk whose bounds contain the geometry centroid.
-
-    The geometry is stored in EPSG:4326; each candidate tile's bounds are in
-    that tile's native CRS, so the centroid is reprojected per-tile via
-    ``src.crs`` before the contains-check (do not assume lon/lat == tile units).
-    """
-    from pathlib import Path as _Path
-
-    import rasterio
-
-    from core.grid_utils import resolve_tiles_dir
-
-    try:
-        base = (tiles_root if tiles_root is not None
-                else resolve_tiles_dir(grid_id, region=region,
-                                       imagery_layer=layer))
-    except Exception as exc:  # noqa: BLE001
-        print(f"[negative_pool] {grid_id}: tile resolve failed ({exc})")
-        return None
-
-    base = _Path(base)
-    if base.is_file():
-        return base  # mosaic layout
-
-    if tiles_root is not None and base.is_dir():
-        # tiles_root override may point one level above the grid subdir
-        cand = base / grid_id
-        if cand.is_dir():
-            base = cand
-
-    if not base.is_dir():
-        return None
-
-    for tif in sorted(base.glob("*.tif")):
-        try:
-            with rasterio.open(tif) as src:
-                left, bottom, right, top = src.bounds
-                x_native, y_native = _geom_xy_in_crs(geom, src.crs)
-                if left <= x_native <= right and bottom <= y_native <= top:
-                    return tif
-        except Exception:  # noqa: BLE001
-            continue
-    return None
+    return point_xy_in_crs(centroid.x, centroid.y, dst_crs)
 
 
 def merge_hn_into_coco(

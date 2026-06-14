@@ -10,7 +10,7 @@
 #
 # Pipeline per batch:
 #   1. stage  : copy /workspace tiles -> /dev/shm/tiles/<JNB.../>
-#   2. phaseA : detect_direct.py + finalize.py (pixel-or, v4_agg) parallel × PARALLEL
+#   2. phaseA : detect_direct.py + finalize.py (per-detection, v4_canonical) parallel × PARALLEL
 #   3. phaseB : sam_refine_maskbox.py (one batch call covering the whole batch)
 #   4. clear  : rm /dev/shm staging for this batch
 #

@@ -95,7 +95,8 @@ def build_dataset(
     # ── v2 positive-source path ───────────────────────────────────────
     # When a spec declares explicit `positives` (schema_version >= 2) it is
     # using the explicit-source builder, which drives the SAME selection
-    # loaders as scripts/training/build_unified_reviewall.py so the emitted
+    # loaders (core.training.positive_sources) as the DEPRECATED bespoke
+    # scripts/training/build_unified_reviewall.py so the emitted
     # build_manifest.json is byte-identical to the bespoke script.
     if spec.positives:
         return _build_dataset_v2(spec, spec_path, output_dir, dry_run=dry_run)
@@ -366,16 +367,17 @@ def _copy_base_as_final(base_dir: Path, build_dir: Path) -> None:
 def _build_records_from_positives(spec, *, exclude_imagery_layers: set[str]):
     """Build the per-grid ``records`` list from spec.positives.
 
-    Reuses the bespoke loaders from build_unified_reviewall so the per-record
-    annotation ordering (hence ``source_id``) and the ``source_file`` paths
-    are byte-identical to the bespoke script.  Each PositiveSourceSpec routes
-    to either the CT pool loader or the JHB results-review loader.
+    Reuses the shared loaders from core.training.positive_sources so the
+    per-record annotation ordering (hence ``source_id``) and the
+    ``source_file`` paths are byte-identical to the bespoke script.  Each
+    PositiveSourceSpec routes to either the CT pool loader or the JHB
+    results-review loader.
 
     ``exclude_imagery_layers`` drops any positive whose imagery_layer is in
     the set (the aerial_2023 archive enforcement).
     """
     import rasterio
-    from scripts.training import build_unified_reviewall as bur
+    from core.training import positive_sources as psrc
 
     val_grids = set(spec.val_grids)
     # Group sources by (region, source_kind, imagery_layer) — each such group
@@ -396,7 +398,7 @@ def _build_records_from_positives(spec, *, exclude_imagery_layers: set[str]):
                 # CT: discover grids from data/annotations/, skip legacy +
                 # spec exclude_grids, tag label_source via bespoke mapping.
                 for region in ps.regions:
-                    entries = bur._ct_entries() if region == "cape_town" else None
+                    entries = psrc._ct_entries() if region == "cape_town" else None
                     if entries is None:
                         raise NotImplementedError(
                             f"pool_manifest source for region {region!r} not "
@@ -413,14 +415,14 @@ def _build_records_from_positives(spec, *, exclude_imagery_layers: set[str]):
                             print(f"[SKIP] CT {grid_id}: legacy weak-supervision "
                                   f"(schema={entry.schema_type})")
                             continue
-                        tiles = bur._tiles_for(grid_id, region=region,
-                                               imagery_layer=imagery_layer)
+                        tiles = psrc._tiles_for(grid_id, region=region,
+                                                imagery_layer=imagery_layer)
                         if not tiles:
                             print(f"[SKIP] CT {grid_id}: no tiles")
                             continue
                         with rasterio.open(tiles[0]) as src:
                             tile_crs = src.crs
-                        annots = bur._load_ct_grid_annotations(grid_id, tile_crs)
+                        annots = psrc._load_ct_grid_annotations(grid_id, tile_crs)
                         if len(annots) == 0:
                             continue
                         seen_record_keys.add(rkey)
@@ -436,7 +438,7 @@ def _build_records_from_positives(spec, *, exclude_imagery_layers: set[str]):
                             "tile_map": {t.stem: t for t in tiles},
                             "tile_crs": str(tile_crs),
                             "annots": annots,
-                            "tile_to_annots": bur._assign_intersections(annots, tiles),
+                            "tile_to_annots": psrc._assign_intersections(annots, tiles),
                             "source_files": {None: Path(entry.path)},
                         })
 
@@ -444,49 +446,47 @@ def _build_records_from_positives(spec, *, exclude_imagery_layers: set[str]):
                 # JHB: explicit grid list, load reviewed + sam_added gpkgs
                 # from results/<region>/<run>/<grid>/review/.
                 review_root = (REPO_ROOT / ps.review_root).resolve()
-                # Temporarily point the bespoke loader at the spec's root so
-                # _load_jhb_grid_annotations + source_files paths match.
-                orig_root = bur.JHB_REVIEW_ROOT
-                bur.JHB_REVIEW_ROOT = review_root
-                try:
-                    region = ps.regions[0] if ps.regions else "johannesburg"
-                    for grid_id in ps.grids:
-                        rkey = (region, grid_id, imagery_layer)
-                        if rkey in seen_record_keys:
-                            continue
-                        tiles = bur._tiles_for(grid_id, region=region,
-                                               imagery_layer=imagery_layer)
-                        if not tiles:
-                            print(f"[SKIP] JHB {grid_id}: no tiles")
-                            continue
-                        with rasterio.open(tiles[0]) as src:
-                            tile_crs = src.crs
-                        annots = bur._load_jhb_grid_annotations(grid_id, tile_crs)
-                        if len(annots) == 0:
-                            print(f"[SKIP] JHB {grid_id}: no annotations after combine")
-                            continue
-                        seen_record_keys.add(rkey)
-                        review_dir = review_root / grid_id / "review"
-                        split = ps.split or (
-                            "val" if grid_id in val_grids else "train"
-                        )
-                        records.append({
-                            "split": split,
-                            "region": region,
-                            "imagery_layer": imagery_layer,
-                            "grid_id": grid_id,
-                            "tiles": tiles,
-                            "tile_map": {t.stem: t for t in tiles},
-                            "tile_crs": str(tile_crs),
-                            "annots": annots,
-                            "tile_to_annots": bur._assign_intersections(annots, tiles),
-                            "source_files": {
-                                "reviewed_prediction": review_dir / f"{grid_id}_reviewed.gpkg",
-                                "sam_added_browser": review_dir / f"{grid_id}_sam_added.gpkg",
-                            },
-                        })
-                finally:
-                    bur.JHB_REVIEW_ROOT = orig_root
+                # review_root is an explicit loader parameter — no global
+                # monkeypatch — so _load_jhb_grid_annotations + source_files
+                # paths match the spec's root concurrency-safely.
+                region = ps.regions[0] if ps.regions else "johannesburg"
+                for grid_id in ps.grids:
+                    rkey = (region, grid_id, imagery_layer)
+                    if rkey in seen_record_keys:
+                        continue
+                    tiles = psrc._tiles_for(grid_id, region=region,
+                                            imagery_layer=imagery_layer)
+                    if not tiles:
+                        print(f"[SKIP] JHB {grid_id}: no tiles")
+                        continue
+                    with rasterio.open(tiles[0]) as src:
+                        tile_crs = src.crs
+                    annots = psrc._load_jhb_grid_annotations(
+                        grid_id, tile_crs, review_root=review_root,
+                    )
+                    if len(annots) == 0:
+                        print(f"[SKIP] JHB {grid_id}: no annotations after combine")
+                        continue
+                    seen_record_keys.add(rkey)
+                    review_dir = review_root / grid_id / "review"
+                    split = ps.split or (
+                        "val" if grid_id in val_grids else "train"
+                    )
+                    records.append({
+                        "split": split,
+                        "region": region,
+                        "imagery_layer": imagery_layer,
+                        "grid_id": grid_id,
+                        "tiles": tiles,
+                        "tile_map": {t.stem: t for t in tiles},
+                        "tile_crs": str(tile_crs),
+                        "annots": annots,
+                        "tile_to_annots": psrc._assign_intersections(annots, tiles),
+                        "source_files": {
+                            "reviewed_prediction": review_dir / f"{grid_id}_reviewed.gpkg",
+                            "sam_added_browser": review_dir / f"{grid_id}_sam_added.gpkg",
+                        },
+                    })
             else:
                 raise ValueError(f"unknown source_kind {ps.source_kind!r}")
 
@@ -495,7 +495,7 @@ def _build_records_from_positives(spec, *, exclude_imagery_layers: set[str]):
 
 def _build_dataset_v2(spec, spec_path, output_dir, *, dry_run: bool = False) -> Path:
     """v2 builder driven by spec.positives. Byte-equivalent selection."""
-    from scripts.training import build_unified_reviewall as bur
+    from core.training import positive_sources as psrc
 
     resolved_root = resolve_env_vars(spec.output.root)
     build_date = datetime.now(timezone.utc)
@@ -532,7 +532,7 @@ def _build_dataset_v2(spec, spec_path, output_dir, *, dry_run: bool = False) -> 
     max_x = (spec.mask_supervision.untrusted_max_x_trusted
              if spec.mask_supervision else 4.0)
     train_recs = [r for r in records if r["split"] == "train"]
-    train_summary = bur._per_record_summary(train_recs)
+    train_summary = psrc._per_record_summary(train_recs)
     train_trusted = sum(r["n_trusted"] for r in train_summary)
     train_untrusted = sum(r["n_untrusted"] for r in train_summary)
     ratio = train_untrusted / max(1, train_trusted)
@@ -544,7 +544,7 @@ def _build_dataset_v2(spec, spec_path, output_dir, *, dry_run: bool = False) -> 
     )
 
     # ── Build manifest (byte-equivalent shape) ───────────────────────
-    selected_annotations = bur._selected_annotations_from_records(records)
+    selected_annotations = psrc._selected_annotations_from_records(records)
 
     seen: set[str] = set()
     annotation_paths: list[Path] = []
