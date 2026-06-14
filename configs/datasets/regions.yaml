@@ -32,26 +32,34 @@ regions:
     # annotation/training provenance), and Li's independent L-prefix scheme
     # (L\d{4}); per-scheme routing is in annotation_schemes[*].grid_id_pattern.
     grid_id_pattern: "(CPT\\d{4}|G\\d{4}|L\\d{4})"
-    # 2026-06-12 CT regrid (ADR-0002 decision #5): the census grid is renumbered
-    # CPT\d{4}, DIGIT-PRESERVING from the source Gao G-IDs (G1240 -> CPT1240;
-    # geometry is NOT re-cut — each CPT cell is the identical 1km source G cell).
-    # Ocean cells with no City-of-Cape-Town WMS aerial coverage are simply
-    # dropped (they get no CPT counterpart): 2214 source G cells -> 1103 CPT
-    # cells kept / 1111 dropped. Coverage was probed per-cell against the
-    # "Aerial Imagery_Aerial Imagery 2025Jan" WMS layer
-    # (cityimg.capetown.gov.za ERDAS IWS); the per-cell probe results are at
-    # results/analysis/ct_wms_coverage_probe/probe.csv. The G->CPT crosswalk
-    # (2214 rows, kept flag + coverage_fraction + drop reason) lives at
-    # data/ct_grid_crosswalk_g_to_cpt.csv and the new task grid (1103 cells,
-    # vexcel 7-city column convention, legacy_gao_id back-reference) at
-    # data/task_grid_cpt.gpkg.
-    # G\d{4} is now a RETIRED namespace — kept fully resolvable for historical
-    # artifacts (data/task_grid.gpkg via the gao scheme, aerial_2025
-    # coverage_grids, training provenance, Li calibration mapping) but excluded
-    # from default ambiguous lookup: lookup_regions() falls back to retired
-    # namespaces only when no active-namespace region claims the ID. Li's L\d{4}
-    # stays ACTIVE. See ADR-0002.
-    retired_grid_id_patterns: ["G\\d{4}"]
+    # 2026-06-12 CT regrid (ADR-0002 decision #5), EXTENDED 2026-06-14 to the FULL
+    # metro (decision A): the census grid is renumbered CPT\d{4}, DIGIT-PRESERVING
+    # from the source global Gao G-IDs (G1240 -> CPT1240; geometry is NOT re-cut —
+    # each CPT cell is the identical 1km source G cell). The two original RA task
+    # grids — Gao/RA1 (west, 2214 cells) + Li/RA2 (east, 2215 cells), in Dropbox
+    # RA_Solar/grid_data/{Gao,Li}.kml — are ONE global G-numbering split
+    # geographically; merged (zero ID / zero geometry overlap, clean seam at
+    # lon~18.606) they give the 4429-cell full-metro grid (data/task_grid_ct_full.gpkg).
+    # Ocean / no-imagery cells are dropped (no CPT counterpart): 4429 source G
+    # cells -> 2083 CPT cells kept / 2346 dropped. Coverage probed per-cell against
+    # the "Aerial Imagery_Aerial Imagery 2025Jan" WMS layer (cityimg.capetown.gov.za
+    # ERDAS IWS); per-cell results at results/analysis/ct_wms_coverage_probe/
+    # {probe.csv west, probe_li_east.csv east, probe_full.csv combined}. The G->CPT
+    # crosswalk (4429 rows, kept flag + coverage_fraction + drop reason) is
+    # data/ct_grid_crosswalk_g_to_cpt.csv; the L->CPT crosswalk (Li L-IDs,
+    # digit-preserving) is data/ct_grid_crosswalk_l_to_cpt.csv; the task grid
+    # (2083 cells, vexcel 7-city column convention, legacy_gao_id back-reference)
+    # is data/task_grid_cpt.gpkg.
+    # CPT统一 (decision A, 2026-06-14): BOTH G\d{4} AND L\d{4} are now RETIRED —
+    # kept fully resolvable for historical artifacts (data/task_grid.gpkg via the
+    # gao scheme, task_grid_li.gpkg via the li scheme, aerial_2025 coverage_grids,
+    # training / Li-GT provenance) but excluded from default ambiguous lookup:
+    # lookup_regions() falls back to retired only when no active region claims the
+    # ID. CPT\d{4} is the SOLE ACTIVE CT census namespace. 25 of the 73 Li GT
+    # cells map to dropped (no-2025Jan-imagery) CPT cells; their GT stays L-keyed
+    # and is used only as out-of-census cross-check (decision A accepted the
+    # 2025Jan-only footprint over mixed vintages). See ADR-0002.
+    retired_grid_id_patterns: ["G\\d{4}", "L\\d{4}"]
 
     annotation_schemes:
       gao:

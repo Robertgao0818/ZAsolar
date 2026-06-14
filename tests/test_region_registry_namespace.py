@@ -26,9 +26,10 @@ OVERLAP_GIDS = ["G1189", "G1190", "G1293", "G1513", "G1570", "G1630"]
 def test_retired_patterns_loaded():
     jhb = region_registry.get_region_config("johannesburg")
     assert jhb.retired_grid_id_patterns == ("G\\d{4}", "JHB\\d{2}")
-    # CT regrid (ADR-0002 decision #5): G\d{4} retired, CPT\d{4} canonical.
+    # CT regrid (ADR-0002 #5; full-metro decision A, 2026-06-14): G\d{4} AND
+    # L\d{4} retired, CPT\d{4} the sole active CT census namespace (CPT统一).
     ct = region_registry.get_region_config("cape_town")
-    assert ct.retired_grid_id_patterns == ("G\\d{4}",)
+    assert ct.retired_grid_id_patterns == ("G\\d{4}", "L\\d{4}")
 
 
 @pytest.mark.parametrize("gid", OVERLAP_GIDS)
@@ -58,8 +59,12 @@ def test_jnb_canonical_is_active():
     assert region_registry.lookup_regions("JNB0001") == ["johannesburg"]
 
 
-def test_li_lprefix_is_active_cape_town():
+def test_li_lprefix_resolves_to_cape_town_via_retired_tier():
+    # Full-metro CPT统一 (decision A, 2026-06-14): L\d{4} is now RETIRED (folded
+    # into CPT via data/ct_grid_crosswalk_l_to_cpt.csv). It stays resolvable —
+    # no active region claims it, so the retired-tier fallback returns cape_town.
     assert region_registry.lookup_regions("L1787") == ["cape_town"]
+    assert region_registry.lookup_region("L1787") == "cape_town"
 
 
 # --- CPT canonical census namespace (ADR-0002 decision #5, 2026-06-12) -------
@@ -77,7 +82,7 @@ def test_cpt_pattern_in_grid_id_pattern():
     ct = region_registry.get_region_config("cape_town")
     assert "CPT" in ct.grid_id_pattern
     # grid_id_pattern stays the FULL resolvable set (ADR-0002): CPT (active) +
-    # G (retired) + L (Li active).
+    # G (retired) + L (retired, folded into CPT — decision A 2026-06-14).
     import re
 
     assert re.fullmatch(ct.grid_id_pattern, "CPT1240")

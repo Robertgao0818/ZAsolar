@@ -1,12 +1,15 @@
-"""CT regrid crosswalk integrity (ADR-0002 decision #5, 2026-06-12).
+"""CT regrid crosswalk integrity (ADR-0002 decision #5; full-metro 2026-06-14).
 
 The Cape Town census grid was renumbered G\\d{4} -> CPT\\d{4}, DIGIT-PRESERVING
-(G1240 -> CPT1240), dropping ocean cells with no City-of-Cape-Town WMS aerial
-coverage. These tests pin the crosswalk + new task grid against the source grid:
+(G1240 -> CPT1240), dropping ocean / no-imagery cells with no City-of-Cape-Town
+WMS aerial coverage. Extended 2026-06-14 (decision A) from the west-only Gao grid
+to the FULL metro: Gao/RA1 west (2214) + Li/RA2 east (2215) = 4429 source cells in
+one global G-numbering, of which 2083 clear the 2025Jan WMS coverage threshold.
+These tests pin the crosswalk + new task grid against the merged source grid:
 
-  - data/ct_grid_crosswalk_g_to_cpt.csv  (2214 rows, kept flag + reason)
-  - data/task_grid_cpt.gpkg              (1103 kept CPT cells)
-  - data/task_grid.gpkg                  (2214 source Gao G cells, geometry source)
+  - data/ct_grid_crosswalk_g_to_cpt.csv  (4429 rows, kept flag + reason)
+  - data/task_grid_cpt.gpkg              (2083 kept CPT cells)
+  - data/task_grid_ct_full.gpkg          (4429 source Gao G cells, geometry source)
 
 Geometry is NOT re-cut: each CPT cell is the identical source G cell.
 """
@@ -24,11 +27,11 @@ from core import region_registry
 BASE_DIR = Path(__file__).resolve().parent.parent
 CROSSWALK = BASE_DIR / "data" / "ct_grid_crosswalk_g_to_cpt.csv"
 CPT_GRID = BASE_DIR / "data" / "task_grid_cpt.gpkg"
-SOURCE_GRID = BASE_DIR / "data" / "task_grid.gpkg"
+SOURCE_GRID = BASE_DIR / "data" / "task_grid_ct_full.gpkg"
 
-SOURCE_CELL_COUNT = 2214
-KEPT_CELL_COUNT = 1103
-DROPPED_CELL_COUNT = SOURCE_CELL_COUNT - KEPT_CELL_COUNT  # 1111
+SOURCE_CELL_COUNT = 4429
+KEPT_CELL_COUNT = 2083
+DROPPED_CELL_COUNT = SOURCE_CELL_COUNT - KEPT_CELL_COUNT  # 2346
 
 
 @pytest.fixture(scope="module")
