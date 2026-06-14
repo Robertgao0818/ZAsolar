@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+#
+# pre-push gate — roadmap item `xhealth-1`
+#   (docs/plans/2026-05-29-codebase-optimization.md, Phase 1 安全网)
+#
+# Runs two CPU-only checks before every `git push` (~12s total):
+#   1. scripts/validate_registry.py   — regions/training_sets/model_registry 交叉校验
+#   2. pytest -q tests/               — 单元测试套件 (252 tests)
+#
+# Scope note: pytest is restricted to tests/ on purpose. The data-dependent
+# scripts/training/jhb_phaseA/test_*.py files need tile data that isn't present
+# locally and are deferred to roadmap item `xhealth-9` (pytest.ini testpaths /
+# mark-slow). Do NOT broaden this to a bare `pytest` until xhealth-9 lands.
+#
+# Escape hatch: `git push --no-verify` bypasses this gate (use for docs-only or
+# WIP branches when you knowingly want to skip it).
+#
+set -u
+
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$repo_root" || exit 0
+
+# Prefer the project venv (./.venv -> ~/.venvs/zasolar), same as post-commit hook.
+python_cmd="python3"
+if [ -x "$repo_root/.venv/bin/python" ]; then
+  python_cmd="$repo_root/.venv/bin/python"
+fi
+
+fail=0
+
+echo "[pre-push] 1/2 validate_registry.py ..."
+if ! "$python_cmd" scripts/validate_registry.py; then
+  echo "[pre-push] ✗ registry validation FAILED" >&2
+  fail=1
+fi
+
+echo "[pre-push] 2/2 pytest -q tests/ ..."
+if ! "$python_cmd" -m pytest -q -p no:cacheprovider tests/; then
+  echo "[pre-push] ✗ pytest FAILED" >&2
+  fail=1
+fi
+
+if [ "$fail" -ne 0 ]; then
+  echo "" >&2
+  echo "[pre-push] BLOCKED — fix the above, or 'git push --no-verify' to override." >&2
+  exit 1
+fi
+
+echo "[pre-push] ✓ all checks passed"
+exit 0

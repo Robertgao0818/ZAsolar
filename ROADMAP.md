@@ -1,16 +1,48 @@
-# Roadmap — Cape Town Solar Panel Detection
+# Roadmap — South Africa Solar Census
+
+## Status Track
+
+**GOAL**: Solar Panel Census in South Africa, including location x time. 
+
+
+**Active campaigns** (2026-06-12):
+
+| Campaign | Status | Blocker / next step |
+|---|---|---|
+| F1-gap closure — Tier A (caliber & ceiling) | A1–A3 landed (merge-mode calibration rules, presence dual-caliber output, leakage-free operating-point lock); gtnoise T1-ceiling campaign pack built | A4 blocked on RA adjudication of the gtnoise_t1_ceiling sample |
+| F1-gap closure — Tier B (B1 TTA pilot + B2 zerov2 probes) | All zero-GPU prep complete: 268-polygon missed-GT set anchored on 5 grids, three probe scripts written, zerov2 1a′/1b code changes verified locally | Blocked on pod GPU availability (host had no free GPUs 2026-06-10); ~1.5h B1 + ~8h B2 pod work remains; pre-registered kill bars immovable |
+| F1-gap closure — Tier C (training levers) | Non-GPU engineering landed and tested (C-1 negative-pool tooling, C-2 warmup+EMA flags, C-3(b) area-adaptive ignore-band, C-3(a) Phase-0 mislabel harness); full `pytest tests/` 193 passed | Next pod session runs C-1 retrain → C-3(b) single-lever retrain → C-3(a) Phase-0 gate, per `docs/handoffs/2026-06-12-tier-c-pod-runbook.md`; C-4 deliberately not pre-built |
+| CT census | Operating point locked 2026-06-08 (unified_A per-det + solar_cls adaptive_v1 CLS-only, leakage CLEAN); Li KML 53-grid calibration set ingested 2026-06-11 | Run the unified_A×CT calibration on the Li 53-grid set, then full-region rollout |
+| JHB inventory → install-date backdating | **Done** (2026-06-04): FP-cut inventory (47,465→41,393 dets, 9/9 gates PASS) → full GEHI adaptive scan complete in `solar_backdating`; canonical install-dated gpkg = 92.7% point-dated + 2.5% lower-bound (95.1% labeled), delivered to the economic layer | Campaign closed; further work is optimization only (residual ~4.9% undated recovery, Wayback present-clamp + 2023 absent-side cohort refinements) |
+| solar_zerov2 (DINOv3-SAT + Mask2Former bet) | Phase 0 frozen-backbone lost to the V3-C floor even after sweep; revive/kill rides entirely on the Tier B2 probes (backbone unfreeze + pretrained decoder) | Same pod-GPU blocker as Tier B; pre-registered floor: F1 ≥ 0.817 **and** σ_Bw ≤ 0.248 on JHB CBD25 clean_gt |
+| Architecture deepening | Steps 1/3/5/6/8/9 **landed 2026-06-12 PM**: 4 new core modules, monkeypatch deleted, mosaic silent-HN-drop bug fixed, merge-mode provenance closed (CLI-explicit, user decision). All byte-equivalence gates pass; 252 tests green; uncommitted. **Track: `docs/adr/0001-codebase-optimization-2026-06.md`** (checkboxes + decisions D1–D6; evidence in `docs/handoffs/2026-06-12-architecture-opt-landing.md`) | Commit pending review (splittable per step); **`sync_from_runpod.sh` L-namespace drop still unfixed** (live defect on CT census pull path — fix standalone, early); then steps 2/4/7/10/11 per ADR track; D5 (postproc tier semantics) needs ruling before step 11's C2 |
+
+**Locked decisions** (still in effect):
+- Success metric is the V1.4 aggregate-inventory-at-grid-level frame; per-polygon F1 is diagnostic only.
+- JHB CBD25 evaluation GT is locked to clean_gt; Li GT serves only as an independent cross-check, never the main ranking table.
+- CT model ranking runs on `cape_town_independent_26`; CT GT is A2 sub-array quality (not gold), so area-side σ_Bw/RMSE are the primary judges there.
+- Ch3 model selection uses the full Tier-1 metric suite (σ_Bw + RMSE primary, bulk ∈ [0.5, 2.0] as sanity gate) — never bulk_ratio alone.
+- merge-mode (pixel-or vs per-detection) is a first-class, model-dependent lever: every new checkpoint is scored in both modes, and run_benchmark rejects cross-caliber comparisons.
+- CT census post-processing = CLS-only (solar_cls adaptive_v1 chips, classify-all) on unified_A per-det, locked 2026-06-08; Gemini FP-cut remains for JHB and cross-domain.
+- JHB production operating point = unified_reviewall_A per-det+SAM @ c=0.925; JHB grid scheme = JNB Vexcel-382 canonical (legacy Gxxxx/JHBnn retired 2026-06-03).
+- Li annotations live in the L-namespace (G→L rename on import); the 53-grid Li KML set is the unified_A×CT calibration set (L1787/L1841/L0264/L1520 excluded).
+- Recall recovery must be training-time: threshold lowering, roof rescan, cross-imagery transfer and NMS relaxation are adjudicated dead ends — TTA (B1) is the last inference-side lever standing.
+- The `installation` profile never does GT-side dissolve (`installation_sym` is diagnostic-only); no pre-training merge of sub-arrays into installation blobs; no volume-based losses (Dice/IoU) replacing BCE.
+- The negative pool is a project-level, monotonically accumulating asset; HN archetype breadth must be ≥ positive breadth; warm-start never substitutes explicit HN inheritance.
+- Temporal/install-date work lives only in `solar_backdating` (GEHistoricalImagery is the sole imagery provider); classifier work only in `solar_cls`; both are plugins of this repo via shared venv + PYTHONPATH.
+- Pre-registered kill bars are immovable once written: B1 (<10–15% of missed polygons convert to IoU≥0.5 proposals → abandon TTA), B2 (floor above), C-3(a) (≥5% affected chips → build, else kill).
 
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-06-10: fix(annotations): dedup G1238 T1 manifest rows + correct census_mid_date test
-- 2026-06-10: docs(plans): F1-gap Tier B handoff prompt + roll ROADMAP recently-completed
-- 2026-06-10: docs(plans): F1-gap review 计划入库 + Tier A 执行回写与报告
-- 2026-06-10: feat(eval): gtnoise_t1_ceiling 战役包(抽样+RA协议+paired评分harness+种子先行版)
-- 2026-06-10: feat(eval): installation_sym 诊断 profile(GT 侧 dissolve)+ Step0/sweep 实测
-- 2026-06-10: feat(eval): validate_checkpoint 双 merge-mode + Tier-1 全套 + v4_poly_diag gallery
-- 2026-06-10: feat(eval): presence 双口径输出 + 显式口径字段 + run_benchmark 跨口径拒绝
-- 2026-06-10: feat(eval): leakage-free 工作点锁定协议(脚本+注册+协议文档)
+- 2026-06-14: refactor(core): architecture optimization landing — eval/area/chip/positive-source extraction (ADR-0001)
+- 2026-06-14: feat(region): CT CPT regrid + namespace-aware registry (ADR-0002)
+- 2026-06-12: docs(plans): optimization checklist 校对 — xhealth-2 done, core-4/cls-6 半收敛裁决
+- 2026-06-12: chore(env): xhealth-2 — regenerate requirements.lock cu126→cu128, pin pytest, hardware header
+- 2026-06-12: docs(handoffs): Tier C pod runbook — unified entry for tomorrow's GPU steps
+- 2026-06-12: feat(analysis): C-3(a) Phase-0 mislabel-rate measurement harness
+- 2026-06-12: feat(training): C-2 warmup+EMA flags + C-3(b) area-adaptive boundary ignore-band
+- 2026-06-12: feat(training): C-1 negative-pool tooling — geometry backfill + agreement-filtered ingest + leakage guard
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
@@ -23,7 +55,7 @@ Stock geoai `SolarPanelDetector` (Mask R-CNN ResNet50-FPN) + post-processing.
 
 ### Completed
 - [x] Detection pipeline (`detect_and_evaluate.py`): geoai → mask → vectorize → filter → evaluate
-- [x] Building footprint filter (`building_filter.py`): OSM + Microsoft buildings
+- [x] Building footprint filter (`building_filter.py`): OSM + Microsoft buildings（2026-06-12 退役归档至 `_archive/building_filter_legacy_2026-06-12/`，见 ADR 0001 #10）
 - [x] Tile pipeline (`tiles/build_vrt.py`): WMS download → GeoTIFF → VRT mosaic
 - [x] Multi-threshold IoU evaluation (0.1–0.7), merge-matching and strict modes
 - [x] Size-stratified recall analysis (<10m², 10–50m², 50–100m², >100m²)
