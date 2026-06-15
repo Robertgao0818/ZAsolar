@@ -167,7 +167,13 @@ def set_grid_context(grid_id: str = DEFAULT_GRID_ID,
     AREA_ERROR_METRICS_PATH = OUTPUT_DIR / "area_error_metrics.csv"
 
 
-set_grid_context(DEFAULT_GRID_ID)
+try:
+    set_grid_context(DEFAULT_GRID_ID)
+except (KeyError, FileNotFoundError):
+    # DEFAULT_GRID_ID may not exist in the active task grid (e.g. retired namespace
+    # when only CPT-namespace grids are loaded). The actual grid context is set later
+    # by set_grid_context() inside main() once --grid-id and --region are parsed.
+    pass
 
 
 # ════════════════════════════════════════════════════════════════════════
