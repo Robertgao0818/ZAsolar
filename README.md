@@ -40,7 +40,6 @@ scripts/
   analysis/               benchmarks, audits, calibration sweeps
   imagery/                tile download / preview / VRT
   training/               COCO export, hard-negative export
-  classifier/             PV-vs-thermal binary classifier pipeline
   annotations/            review GUI, SAM FN GUI, batch finalize
 detect_and_evaluate.py    primary inference + eval entry
 detect_direct.py          stage 1 of direct pipeline (raw detections)
@@ -97,14 +96,23 @@ The Tier-1 metric system uses `area_aggregate_eval.py`
 + R²), with `sigma_Bw` and RMSE as primary arbiters and `bulk in [0.5, 2.0]`
 as a sanity gate.
 
-## Sibling repo — `solar_backdating`
+## Sibling repos
 
-Install-date back-dating (using historical Google Earth imagery for each
-detected installation footprint) lives in a sibling repository:
-[Robertgao0818/solar_backdating](https://github.com/Robertgao0818/solar_backdating).
-It runs as a plugin of this repo — shares the `.venv` and imports
-`core.region_registry`, `core.annotation_loader`, `core.grid_utils`. Any new
-temporal / GEHistoricalImagery / install-date code goes there, not here.
+The pipeline is split into three deployable units. Two sibling repositories run
+as **plugins** of this repo: they share this repo's `.venv` and import
+`core.region_registry` / `core.grid_utils` (and, for back-dating,
+`core.annotation_loader`) through a `ZASOLAR_ROOT` anchor. Each concern stays in
+its own repo so it can be versioned and run independently.
+
+- **[`solar_backdating`](https://github.com/Robertgao0818/solar_backdating)**
+  (public) — install-date back-dating. For each detected footprint it walks
+  historical Google Earth imagery (GEHistoricalImagery) to infer when the
+  installation appeared. All temporal / install-date code lives here, not in
+  this repo.
+- **`solar_cls`** (private) — a post-hoc PV-vs-(solar-thermal / look-alike) chip
+  classifier that suppresses detector false positives. The detector consumes its
+  filtered output as a file path (`--classifier-filtered-gpkg`), never as a
+  Python import.
 
 ## License
 

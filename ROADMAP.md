@@ -35,14 +35,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-06-14: feat(region): extend CPT regrid to full metro — 2083 cells, L folded into CPT (decision A)
+- 2026-06-14: chore(infra+docs): pre-push test gate, TTA probes, roadmap/plan roll
 - 2026-06-14: refactor(core): architecture optimization landing — eval/area/chip/positive-source extraction (ADR-0001)
 - 2026-06-14: feat(region): CT CPT regrid + namespace-aware registry (ADR-0002)
 - 2026-06-12: docs(plans): optimization checklist 校对 — xhealth-2 done, core-4/cls-6 半收敛裁决
 - 2026-06-12: chore(env): xhealth-2 — regenerate requirements.lock cu126→cu128, pin pytest, hardware header
 - 2026-06-12: docs(handoffs): Tier C pod runbook — unified entry for tomorrow's GPU steps
 - 2026-06-12: feat(analysis): C-3(a) Phase-0 mislabel-rate measurement harness
-- 2026-06-12: feat(training): C-2 warmup+EMA flags + C-3(b) area-adaptive boundary ignore-band
-- 2026-06-12: feat(training): C-1 negative-pool tooling — geometry backfill + agreement-filtered ingest + leakage guard
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.

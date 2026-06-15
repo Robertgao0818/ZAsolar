@@ -38,7 +38,6 @@ scripts/
   analysis/               benchmark / audit / 校准扫描
   imagery/                瓦片下载 / 预览 / VRT
   training/               COCO 导出, hard-negative 导出
-  classifier/             PV vs 热水器二分类 pipeline
   annotations/            review GUI, SAM FN GUI, 批量 finalize
 detect_and_evaluate.py    主推理 + 评估入口
 detect_direct.py          直接 pipeline 第 1 阶段 (raw detections)
@@ -92,13 +91,20 @@ python scripts/analysis/run_benchmark.py --suite jhb_cbd_25_vexcel
 log-`sigma` + RMSE + `thru0_beta` + R²），以 `sigma_Bw` 和 RMSE 为主裁判，
 `bulk in [0.5, 2.0]` 为 sanity gate。
 
-## 兄弟仓库 — `solar_backdating`
+## 兄弟仓库
 
-安装时间反推（使用 Google Earth 历史影像逐 footprint 反推）单独放在兄弟仓库：
-[Robertgao0818/solar_backdating](https://github.com/Robertgao0818/solar_backdating)。
-它作为本仓库的插件运行 — 共享 `.venv`，import `core.region_registry`、
-`core.annotation_loader`、`core.grid_utils`。任何新的 temporal /
-GEHistoricalImagery / 安装时间相关代码都去那边，不进本仓库。
+整条 pipeline 拆成三个可独立部署的单元。两个兄弟仓库作为本仓库的**插件**运行：
+共享本仓库的 `.venv`，并通过 `ZASOLAR_ROOT` 锚点 import `core.region_registry`、
+`core.grid_utils`（back-dating 还会 import `core.annotation_loader`）。每个关注点
+独立成仓，可单独版本化、单独运行。
+
+- **[`solar_backdating`](https://github.com/Robertgao0818/solar_backdating)**
+  （public）— 安装时间反推。对每个检测到的 footprint，遍历 Google Earth 历史影像
+  （GEHistoricalImagery）反推装置出现的时间。所有 temporal / 安装时间相关代码都在
+  这里，不进本仓库。
+- **`solar_cls`**（private）— 事后 PV vs（太阳能热水器 / look-alike）chip 分类器，
+  用于压制检测器的假阳性。检测器把它过滤后的输出当作文件路径消费
+  （`--classifier-filtered-gpkg`），从不作为 Python import。
 
 ## License
 
