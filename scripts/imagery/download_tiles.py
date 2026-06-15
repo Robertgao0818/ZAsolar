@@ -186,7 +186,16 @@ def download_grid(
     spec = get_grid_spec(grid_id, region=region)
 
     from core.grid_utils import TILES_ROOT
-    tiles_dir = TILES_ROOT / grid_id
+    from core import region_registry
+    # Write tiles under the SOURCE grid id so resolve_tiles_dir() — used by
+    # detect_and_evaluate.py and the classifier — finds them. The CPT regrid
+    # (ADR-0002) keys on-disk tiles under the digit-preserving source Gao id
+    # (CPT1240 -> G1240); already-source ids (bare G####, L####, JHB, …) map to
+    # themselves. Chip *filenames* keep the logical grid_id so they match the
+    # detector's `{GRID_ID}_*_geo.tif` glob when addressed by the logical id.
+    rkey = region_registry.normalize_region_key(region) or region_registry.lookup_region(grid_id)
+    source_id = region_registry.resolve_source_grid_id(grid_id, rkey) if rkey else grid_id
+    tiles_dir = TILES_ROOT / source_id
     tiles_dir.mkdir(parents=True, exist_ok=True)
 
     total_all = spec.n_cols * spec.n_rows
