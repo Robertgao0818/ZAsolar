@@ -26,7 +26,7 @@ set -uo pipefail
 ZAS=${ZAS:-/root/ZAsolar}
 CLS=${CLS:-/root/solar_cls}
 CLS_GIT=${CLS_GIT:-git@github.com:Robertgao0818/solar_cls.git}  # needs github ssh key on pod
-HF_DETECTOR_REPO=${HF_DETECTOR_REPO:-Robertgao0818/zasolar-unifiedA}  # override to change
+HF_DETECTOR_REPO=${HF_DETECTOR_REPO:-botao0818/zasolar-unified-reviewall-A}  # public; override to change
 HF_DETECTOR_FILE=${HF_DETECTOR_FILE:-best_model.pth}
 DETECTOR_DIR="$ZAS/checkpoints/exp_unified_reviewall_A"
 CLS_CKPT="$CLS/checkpoints/cls_pv_thermal_v2_dinov2_vits14/best_cls.pth"
