@@ -120,6 +120,7 @@ DL_PID=$!
 
 # ── Phase B: batched inferencer (consumes downloaded grids) ─────────────────
 mapfile -t GRIDS < "$GLIST"
+BK_PIDS=()                                     # background per-batch backup PIDs
 for ((i=0; i<${#GRIDS[@]}; i+=BATCH)); do
   BATCH_GRIDS=("${GRIDS[@]:i:BATCH}")
   bn=$(( i/BATCH + 1 ))
@@ -136,21 +137,29 @@ for ((i=0; i<${#GRIDS[@]}; i+=BATCH)); do
   # detect (parallel; reads tiles from local disk via resolve_tiles_dir fast-path)
   printf '%s\n' "${BATCH_GRIDS[@]}" | xargs -P "$PARALLEL" -I{} bash -c 'infer_one "$@"' _ {}
 
-  # per-batch backup of essentials -> Dropbox (masks/ excluded; small + safe)
-  for G in "${BATCH_GRIDS[@]}"; do
-    [ -f "$STATE/infer_$G.ok" ] || continue
-    [ -f "$STATE/bk_$G.ok" ] && continue
-    if rclone copy "$RESULTS_DIR/$G" "$DROPBOX_DEST/results/$RUN/$G" \
-         --include 'predictions_metric.gpkg' --include 'predictions.geojson' \
-         --include 'config.json' >>"$LOGS/backup.log" 2>&1; then
-      touch "$STATE/bk_$G.ok"
-    fi
-  done
+  # per-batch backup of essentials -> Dropbox, in the BACKGROUND so the next
+  # batch's detect (GPU) overlaps this upload (network I/O — disjoint resources).
+  # Backups never pile up: one upload (~min) << one detect batch (~tens of min).
+  # Phase D's full recursive rclone sweep is the completeness backstop, so an
+  # interrupted bg backup is harmless; bk_*.ok markers make it resumable too.
+  ( for G in "${BATCH_GRIDS[@]}"; do
+      [ -f "$STATE/infer_$G.ok" ] || continue
+      [ -f "$STATE/bk_$G.ok" ] && continue
+      if rclone copy "$RESULTS_DIR/$G" "$DROPBOX_DEST/results/$RUN/$G" \
+           --include 'predictions_metric.gpkg' --include 'predictions.geojson' \
+           --include 'config.json' >>"$LOGS/backup.log" 2>&1; then
+        touch "$STATE/bk_$G.ok"
+      fi
+    done ) &
+  BK_PIDS+=($!)
 
   write_status
-  log "batch $bn done: infer=$(ls "$STATE"/infer_*.ok 2>/dev/null|wc -l)/$TOTAL backup=$(ls "$STATE"/bk_*.ok 2>/dev/null|wc -l)"
+  log "batch $bn detect done: infer=$(ls "$STATE"/infer_*.ok 2>/dev/null|wc -l)/$TOTAL backup=$(ls "$STATE"/bk_*.ok 2>/dev/null|wc -l) (bg backup running)"
 done
 
+# drain any in-flight background per-batch backups before the final phases
+log "Phase B inference done; draining ${#BK_PIDS[@]} background backups..."
+for p in "${BK_PIDS[@]}"; do wait "$p" 2>/dev/null; done
 wait "$DL_PID" 2>/dev/null
 log "Phase B complete. infer ok=$(ls "$STATE"/infer_*.ok 2>/dev/null|wc -l) empty=$(ls "$STATE"/infer_*.empty 2>/dev/null|wc -l) fail=$(ls "$STATE"/infer_*.fail 2>/dev/null|wc -l)"
 
