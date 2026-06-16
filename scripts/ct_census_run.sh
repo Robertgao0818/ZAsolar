@@ -52,14 +52,15 @@ echo "results dir: $RESULTS_DIR | grids: $TOTAL | batch: $BATCH | parallel: $PAR
 now(){ date +%s; }
 log(){ printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
 write_status(){
-  local dl inf bk dlf inff
+  local dl inf emp bk dlf inff
   dl=$(ls "$STATE"/dl_*.ok 2>/dev/null | wc -l)
   inf=$(ls "$STATE"/infer_*.ok 2>/dev/null | wc -l)
+  emp=$(ls "$STATE"/infer_*.empty 2>/dev/null | wc -l)
   bk=$(ls "$STATE"/bk_*.ok 2>/dev/null | wc -l)
   dlf=$(ls "$STATE"/dl_*.fail 2>/dev/null | wc -l)
   inff=$(ls "$STATE"/infer_*.fail 2>/dev/null | wc -l)
   { echo "phase=$(cat "$STATE/PHASE" 2>/dev/null)"
-    echo "total=$TOTAL download=$dl/$TOTAL(fail $dlf) infer=$inf/$TOTAL(fail $inff) backup=$bk"
+    echo "total=$TOTAL download=$dl/$TOTAL(fail $dlf) infer=$inf empty=$emp fail=$inff done=$((inf+emp))/$TOTAL backup=$bk"
     echo "run=$RUN results=$RESULTS_DIR"
     echo "last_update=$(now) ts=$(date '+%F %T')"
   } > "$STATE/STATUS.txt"
@@ -81,17 +82,33 @@ dl_one(){
 }
 infer_one(){
   local G=$1
-  [ -f "$STATE/infer_$G.ok" ] && return 0
+  # terminal states needing no recompute: detected (.ok) OR surveyed-empty (.empty)
+  { [ -f "$STATE/infer_$G.ok" ] || [ -f "$STATE/infer_$G.empty" ]; } && return 0
   SOLAR_TILES_ROOT="$TILES_DISK" python "$ZAS/detect_and_evaluate.py" \
     --grid-id "$G" --region ct --imagery-layer aerial_2025 \
     --model-run "$RUN" --model-path "$DETECTOR_CKPT" \
     --postproc-config "$POSTPROC" --data-scope full_grid --force \
     > "$LOGS/infer_$G.log" 2>&1
   if [ -f "$RESULTS_DIR/$G/predictions_metric.gpkg" ]; then
-    rm -f "$STATE/infer_$G.fail"; touch "$STATE/infer_$G.ok"
+    rm -f "$STATE/infer_$G.fail" "$STATE/infer_$G.empty"; touch "$STATE/infer_$G.ok"
+  elif grep -q '未检测到太阳能板' "$LOGS/infer_$G.log"; then
+    # detector ran over every tile and found zero panels: a VALID census zero
+    # (surveyed, count=0), NOT a failure. Distinct .empty marker so resume skips
+    # it and the coverage manifest counts it as surveyed-empty, not lost/failed.
+    rm -f "$STATE/infer_$G.fail"; touch "$STATE/infer_$G.empty"
   else
+    # no gpkg AND no clean zero-detection line = real failure (crash/OOM/no tiles).
+    # Keep as .fail: retried on resume, flagged 'infer_failed' in the manifest.
     touch "$STATE/infer_$G.fail"
   fi
+  # masks/ are intermediate per-tile raster (band1 mask + band2 conf) written
+  # before vectorization. Nothing downstream reads them: the census inventory
+  # lives in predictions_metric.gpkg, cls reads gpkg+tiles, backup ships gpkg,
+  # merge reads gpkg. Drop them the instant a grid is TERMINAL — success OR
+  # zero-detection (the `else` branch above). Zero-detection cells still write a
+  # full set of per-tile mask rasters (~225-440 MB/grid); at this census's grid
+  # count that is the dominant disk leak if left to accumulate.
+  rm -rf "$RESULTS_DIR/$G/masks"
 }
 export -f dl_one infer_one
 
@@ -135,7 +152,7 @@ for ((i=0; i<${#GRIDS[@]}; i+=BATCH)); do
 done
 
 wait "$DL_PID" 2>/dev/null
-log "Phase B complete. infer ok=$(ls "$STATE"/infer_*.ok 2>/dev/null|wc -l) fail=$(ls "$STATE"/infer_*.fail 2>/dev/null|wc -l)"
+log "Phase B complete. infer ok=$(ls "$STATE"/infer_*.ok 2>/dev/null|wc -l) empty=$(ls "$STATE"/infer_*.empty 2>/dev/null|wc -l) fail=$(ls "$STATE"/infer_*.fail 2>/dev/null|wc -l)"
 
 # ── Phase C: cls v2 over ALL grids (one pass) + merge ───────────────────────
 echo "phaseC-cls+merge" > "$STATE/PHASE"; write_status
@@ -153,6 +170,17 @@ python "$ZAS/scripts/ct_census_merge.py" \
   --results-dir "$RESULTS_DIR" --glist "$GLIST" --state "$STATE" \
   --run "$RUN" --out "$MERGED" > "$LOGS/merge.log" 2>&1 || log "WARN merge nonzero — see $LOGS/merge.log"
 
+# per-grid coverage manifest: every CPT cell tagged ok / empty / infer_failed /
+# download_failed / not_reached (+census_count). The grid-level deliverable that
+# the polygon inventory cannot express — surveyed-empty cells (count=0) included.
+log "building per-grid coverage manifest"
+MANIFEST="$STATE/ct_census_coverage_cpt"
+python "$ZAS/scripts/ct_census_coverage_manifest.py" \
+  --glist "$GLIST" --state "$STATE" --results-dir "$RESULTS_DIR" --logs "$LOGS" \
+  --run "$RUN" --task-grid "$ZAS/data/task_grid_cpt.gpkg" \
+  --out "$MANIFEST" > "$LOGS/manifest.log" 2>&1 || log "WARN manifest nonzero — see $LOGS/manifest.log"
+cat "$LOGS/manifest.log" | tail -3
+
 # ── Phase D: final backup + VERIFY ──────────────────────────────────────────
 echo "phaseD-verify-backup" > "$STATE/PHASE"; write_status
 log "backing up cls outputs + merged inventory -> Dropbox"
@@ -161,6 +189,11 @@ rclone copy "$RESULTS_DIR" "$DROPBOX_DEST/results/$RUN" \
   --include '*/predictions_metric.gpkg' --include '*/config.json' \
   >>"$LOGS/backup.log" 2>&1
 rclone copy "$MERGED" "$DROPBOX_DEST/" >>"$LOGS/backup.log" 2>&1
+# coverage manifest (.csv always, .gpkg if task-grid join succeeded) — the
+# grid-level census denominator; ship it so surveyed-empty evidence survives teardown
+for ext in csv gpkg; do
+  [ -f "$MANIFEST.$ext" ] && rclone copy "$MANIFEST.$ext" "$DROPBOX_DEST/" >>"$LOGS/backup.log" 2>&1
+done
 
 # verify: merged file present remotely at matching size; per-grid filtered counts agree
 loc_filt=$(ls "$RESULTS_DIR"/*/predictions_metric_cls_filtered.gpkg 2>/dev/null | wc -l)
