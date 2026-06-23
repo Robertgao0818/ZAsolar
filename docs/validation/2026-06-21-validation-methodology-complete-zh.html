@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZAsolar — 验证与稳健性方法学（完整版）</title>
+<style>
+  :root { --ink:#1a1a1a; --rule:#1a1a1a; --muted:#666; --accent:#0b5; --tint:#f6f8f6; --warn:#b50; }
+  * { box-sizing:border-box; }
+  body {
+    font-family: "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    color: var(--ink);
+    max-width: 980px;
+    margin: 40px auto;
+    padding: 0 28px;
+    line-height: 1.62;
+    background: #fff;
+    font-size: 15px;
+  }
+  h1 { font-size: 1.55rem; margin-bottom: 4px; }
+  .sub { color: var(--muted); font-size: 0.86rem; margin-bottom: 6px; line-height: 1.55; }
+  .sub code, code { font-family: "SF Mono", ui-monospace, "DejaVu Sans Mono", Consolas, monospace; font-size: 0.85em; }
+  .sub code, p code, li code, td code { background:#f3f3f3; padding:1px 5px; border-radius:3px; }
+
+  /* 目录 */
+  nav.toc {
+    background: #fafafa; border: 1px solid #e3e3e3; border-radius: 6px;
+    padding: 12px 18px; margin: 18px 0 26px; font-size: 0.9rem;
+  }
+  nav.toc b { display:block; font-size: 0.8rem; letter-spacing:.06em; color: var(--muted); margin-bottom: 6px; }
+  nav.toc ol { margin: 0; padding-left: 1.3rem; }
+  nav.toc li { margin: 3px 0; }
+  nav.toc a { color: var(--ink); text-decoration: none; }
+  nav.toc a:hover { color: var(--accent); }
+
+  h2 {
+    font-size: 1.18rem; font-weight: 700; margin: 34px 0 10px;
+    padding-bottom: 5px; border-bottom: 2px solid var(--rule);
+  }
+  h2 .n { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: .5rem; }
+  h3 { font-size: 1.0rem; font-weight: 700; margin: 22px 0 6px; }
+  h3 .tag { color: var(--accent); }
+  p { margin: .6rem 0; }
+  strong, b { font-weight: 700; }
+
+  /* 摘要 / 提示框 */
+  .box {
+    background: var(--tint); border: 1px solid #cfe3cf; border-left: 4px solid var(--accent);
+    padding: 14px 18px; margin: 14px 0; font-size: 0.97rem;
+  }
+  .box .lab { display:block; font-size:0.74rem; letter-spacing:.08em; color:var(--accent); font-weight:700; margin-bottom:6px; }
+  .box.warn { border-color:#e8cba8; border-left-color: var(--warn); background:#fbf6ef; }
+  .box.warn .lab { color: var(--warn); }
+  .oneline { font-style: italic; color:#333; }
+
+  /* 三线表 */
+  table.tlt { border-collapse: collapse; width: 100%; font-size: 0.87rem; margin: 10px 0 6px; }
+  table.tlt thead tr.top th { border-top: 2.4px solid var(--rule); }
+  table.tlt thead tr th { border-bottom: 1.1px solid var(--rule); }
+  table.tlt tbody tr:last-child td { border-bottom: 2.4px solid var(--rule); }
+  table.tlt tbody tr.rule-above td { border-top: 1.1px solid var(--rule); }
+  table.tlt th, table.tlt td { padding: 7px 11px; text-align: left; vertical-align: top; }
+  table.tlt th { font-weight: 600; }
+  table.tlt td.num, table.tlt th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.tlt tr.total td { font-weight: 700; background:#fafafa; }
+  .hl { font-weight: 700; }
+  .pass { color:#0a7; font-weight:700; }
+  .fail { color:var(--warn); font-weight:700; }
+  .ref td { color: var(--muted); }
+
+  .caption { font-size: 0.8rem; color: var(--muted); margin: 4px 0 0; }
+  .caption b { color: var(--ink); }
+
+  ul, ol { margin: .5rem 0; padding-left: 1.3rem; }
+  li { margin: .4rem 0; }
+
+  /* 三段式编号 */
+  ol.three { list-style: none; counter-reset: t; padding-left: 0; margin: 10px 0; }
+  ol.three > li { position: relative; margin: 12px 0; padding: 2px 0 2px 40px; counter-increment: t; }
+  ol.three > li::before {
+    content: counter(t); position: absolute; left: 0; top: 0;
+    width: 26px; height: 26px; border-radius: 50%; background: var(--accent); color:#fff;
+    font-weight: 700; font-size: 0.85rem; display: flex; align-items: center; justify-content: center;
+  }
+  ol.three .t { font-weight: 700; }
+
+  .notes { font-size: 0.82rem; color: var(--muted); margin-top: 10px; }
+  hr.sec { border:0; border-top:1px dashed #ccc; margin: 30px 0; }
+
+  footer { margin-top: 36px; padding-top: 14px; border-top: 1px dashed #ccc; font-size: 0.8rem; color: var(--muted); }
+
+  @media print {
+    body { margin: 0 auto; font-size: 12px; max-width: 100%; padding: 0; }
+    h2 { margin: 18px 0 8px; page-break-after: avoid; }
+    h3 { page-break-after: avoid; }
+    table, .box { page-break-inside: avoid; }
+    nav.toc { page-break-after: always; }
+    a { color: inherit; text-decoration: none; }
+  }
+</style>
+</head>
+<body>
+
+<h1>ZAsolar —— 验证与稳健性方法学（完整版）</h1>
+<p class="sub">
+  南非屋顶光伏普查及其 install-date 回溯层 · 母文档 2026-06-21，端到端测试执行于 2026-06-23<br>
+  <b>范围：</b>普查及其 install-date 层如何抵御"会让一个已发表数字移动"的三件事——
+  一个被调过的阈值、一条不可复现的流水线、一台随机的仪器。<br>
+  源文档 <code>docs/validation/2026-06-21-validation-methodology.md</code>
+</p>
+
+<nav class="toc">
+  <b>目录</b>
+  <ol>
+    <li><a href="#sum">执行摘要</a></li>
+    <li><a href="#s1">规范稳健性 —— 校准不是一个被调出来的常数</a></li>
+    <li><a href="#s2">计算可复现性 —— 可追溯，而非种子级 bit 复现</a></li>
+    <li><a href="#s3">仪器可靠性 —— 对唯一的随机步进行测量（含端到端从 0 复现）</a></li>
+    <li><a href="#s4">什么被保证、什么不被保证</a></li>
+    <li><a href="#app">附录 —— 溯源表（论断 → 来源）</a></li>
+  </ol>
+</nav>
+
+<!-- ============ 执行摘要 ============ -->
+<h2 id="sum">执行摘要</h2>
+<p>
+  一个普查数字的可信度，取决于它对"产生它的人为选择与噪声"有多稳健。本文以应用经济学家审计估计量的方式审计 ZAsolar 屋顶光伏存量——
+  对每一个 headline 数字追问：<em>什么会让它动、能动多少。</em>三个问题，三个回答：
+</p>
+
+<table class="tlt">
+  <thead>
+    <tr class="top"><th>稳健性问题</th><th>防范什么</th><th>结论</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><b>1. 规范稳健性</b> —— headline 是否调参产物？</td>
+      <td>研究者自由度 / oracle 泄漏</td>
+      <td>操作点<b>只在与所有报告套件不相交的校准网格上</b>拟合，带 ≤1pp 迁移验收门。门<em>失败</em>处（生产 per-detection 链），报告回退到<b>预先声明、fail-closed</b> 的阈值，而非被扫出来的最优值。失败被<b>记录，不被隐藏</b>。</td>
+    </tr>
+    <tr>
+      <td><b>2. 计算可复现性</b> —— 同输入复现同数字？</td>
+      <td>运行间静默漂移</td>
+      <td>不是模型权重的种子级 bit 复现，我们也不这样声称。保证的是：单一指标内核、<b>config-match 输出复用</b>、<b>冻结</b>的评估 GT、<b>锁定</b>的 merge-mode + 操作点——任何数字都可从源 tile 与 model run 重新推导并追溯。</td>
+    </tr>
+    <tr>
+      <td><b>3. 仪器可靠性</b> —— 唯一的随机器件让结果动多少？</td>
+      <td>install-date 层的 LLM 采样噪声</td>
+      <td>检测器与后处理确定，<b>唯一</b>随机步是 Gemini 打分器。test-retest（642 装机、3 次同输入重跑）：个体 install-date 在生产 k=1 下约 <b>81%</b> 可复现；已确认属于<b>生产模型</b>（McNemar <em>p</em>≈0.65），且<b>非松解码产物</b>（greedy <code>temperature:0</code> 已用且无助于降噪）。可行杠杆=<b>majority-of-3 投票</b>（K=6 认证 → <b>~0.95</b> 库存加权，3× 成本）。误差近零均值 → 聚合后 <b>install-year 直方图复现到每年 ~1.7%</b>（TVD 0.025）。</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="box">
+  <span class="lab">一句话诚实版</span>
+  <span class="oneline">个体估计比看上去更吵；聚合量比个体估计更稳；唯一"重跑还可能让数字动"的地方——CT per-detection 操作点——被明确标为 fail-closed-pending，而非声称已认证。</span>
+</div>
+
+<p>全文贯穿两个语义锚点：</p>
+<ul>
+  <li><b>(i)</b> Cape Town 的评估 GT 是 <b>SAM2 sub-array（Axis-A "A2"）标注，非 installation 级 gold</b>，所以 per-polygon F1 降为诊断，选型走面积聚合离散度（σ_Bw、RMSE）。</li>
+  <li><b>(ii)</b> 目标是<b>存量级（面积/计数）判断</b>，不是 per-polygon 匹配。</li>
+</ul>
+
+<hr class="sec">
+
+<!-- ============ §1 ============ -->
+<h2 id="s1"><span class="n">1</span>规范稳健性 —— 校准不是一个被调出来的常数</h2>
+
+<p><b>威胁。</b>在报告套件上扫一个阈值、再用那个被扫出来的数字在<em>同一套件</em>上报告，就是 oracle 泄漏——估计量在自夸。这里并非假想：在 2026-06-07 的评估面上，模型排名<em>随扫描口径翻转</em>——在某一固定阈值下 v3c 赢；在各模型各自最优阈值下 unified_A 赢。一个在评估集上调出来的阈值，因此不是可辩护的操作点。</p>
+
+<p><b>控制手段：带泄漏检查的锁。</b>操作点<b>只在与所有报告套件不相交的校准网格集</b>上拟合，再做迁移验证（<code>scripts/analysis/lock_operating_point.py</code>）。三条保证由机制强制，而非靠约定：</p>
+<ul>
+  <li>校准网格不得与任何已登记报告套件相交——相交时脚本抛 <code>[LEAKAGE]</code>（<code>lock_operating_point.py:283–290</code>）。</li>
+  <li>验收 = 锁定点的 <code>agg_area_F1</code> 在<b>每一个</b>验证套件上都落在 oracle 扫描最大值的 <b>1pp</b> 以内，否则锁失败（<code>ACCEPT_GAP = 0.01</code>，门在 <code>:325–327</code>）。</li>
+  <li>验证套件只读——只用于<em>检查</em>迁移，绝不用于<em>拟合</em>（<code>operating_point_calibration.yaml</code> 规则 4）。</li>
+</ul>
+<p>每次拟合都记录其校准名册、排名规则、逐套件迁移 gap、一个 <code>all_suites_pass</code> 布尔值，以及该次运行的 <code>git_head</code>。</p>
+
+<p><b>诚实的结果——这道门是有牙齿的。</b>它失败过，而且失败就在生产链上：</p>
+<table class="tlt">
+  <thead>
+    <tr class="top"><th>lock</th><th>merge-mode</th><th class="num">迁移 gap</th><th>裁决</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>ct_aerial_2025_v3c</code></td><td>pixel-or</td><td class="num"><b>0.00 pp</b></td><td class="pass">干净锁定</td></tr>
+    <tr><td><code>ct_aerial_2025_v3c_perdet</code></td><td>per-detection</td><td class="num"><b>5.22 pp</b></td><td class="fail">未通过验收</td></tr>
+  </tbody>
+</table>
+<p>即便把整条校准链以 per-detection 模式重跑以消除 merge-mode 混淆，per-detection 锁仍失败——gap 停在 5.22pp。诊断是结构性的：在 per-detection 链上，排名规则（σ_Bw + RMSE）偏好高阈值，而验收指标（agg_F1）峰值更低（t ≈ 0.925），因为 per-detection 预测没有可裁剪的 over-paint，两个指标因而分叉。<b>处置：fail-closed。</b>生产 per-detection 报告使用一个来自 2026-06-07 权衡分析的<em>预先声明</em>阈值，绝不使用在报告套件上扫出来的值。能把这个预声明阈值替换成认证阈值的 unified_A × CT 锁，已用泄漏干净的校准集登记（53 块 Li-KML 网格，距所有训练/报告网格 ≥23.5 km），但<b>尚未拟合</b>——其 tile 待下载。这个缺口是本节承重的 caveat，明说而非粉饰。</p>
+
+<p><b>两个审计者不可混为一谈的杠杆。</b></p>
+<ol>
+  <li><em>Polygon-confidence 是被校准的；流水线的像素级 <code>post_conf</code> 是固定的。</em>被锁定的杠杆是消费时在 <code>predictions_metric.gpkg</code> 上施加的 per-polygon <code>(confidence, area_m²)</code> 裁剪（<code>polygon_conf_sweep.py:54–57</code>），面积感知，使主导的假阳原型（小、低置信团块）能比大装机砍得更狠。它与 finalizer 里写死的粗固定 <code>post_conf_threshold = 0.85</code>（<code>core/postproc.py:1064–1066</code>）<b>不同</b>。混淆二者会错置校准归属。普查刻意让检测器保持宽松——把 polygon-conf 抬到 σ_Bw 最优的 0.97 会损失约 15pp 计数召回（见校准附录）——并把假阳剔除交给域内的 <code>solar_cls</code> 分类器，而非置信度旋钮。</li>
+  <li><em>Merge-mode 是一等的、模型相关的杠杆。</em><code>v4_canonical.json</code>（跨实验可比性锚）携带<b>七个</b>后处理键、<b>无 <code>merge_mode</code> 字段</b>——它在 2026-06-12 架构优化落地中被剥离，调用方现在必须显式传 <code>--merge-mode</code>；<code>finalize.py</code> 在 CLI 与 JSON 不一致时抛错。这很重要，因为同一模型在两种模式下的离散度差异显著（在 wave-1 面上 unified_A 为 σ_Bw 0.270 / RMSE 395 m² per-detection，对 0.361 / 588 m² pixel-or），所以 pixel-or 与 per-detection 是<b>各自独立、各自拟合的锁</b>。数字总是在标明的 merge-mode 下报告，绝不取跨模式最大值当 headline。</li>
+</ol>
+
+<hr class="sec">
+
+<!-- ============ §2 ============ -->
+<h2 id="s2"><span class="n">2</span>计算可复现性 —— 可追溯，而非种子级 bit 复现</h2>
+
+<p><b>不声称什么。</b>流水线不提供模型输出的种子级逐 bit 复现。把这点说清楚，是契约的一部分。</p>
+<p><b>保证什么</b>：任何被报告的数字都能通过四件锁定工件，从其输入重新推导并回溯：</p>
+<ul>
+  <li><b>单一指标内核。</b>"模型–GT 一致性"的可执行定义是一个纯、无副作用的函数 <code>summarize()</code>（<code>core/area_metrics.py:84</code>）——于 2026-06-12 抽取为"逐 bit 相同逻辑"，使每个调用方算出相同统计量。它消费逐网格的集合论并集面积（A=pred，B=GT，A∩B），产出 Tier-1 套件：<code>agg_area_F1</code>、<code>bulk_pred_gt_ratio</code>、<code>std_ratio_Bw</code>（σ_Bw，主部署裁判的 B 加权离散度）、<code>std_logratio</code>、<code>rmse_m2</code>、<code>thru0_slope</code>、<code>ols_r2</code>。全流程<b>唯一</b>带种子的组件是 bootstrap-CI（<code>seed=0</code>）——它管的是置信区间，不是模型输出。（注：<code>cov50</code> 是 CT 普查覆盖率，来自<em>另一个</em>脚本，非本内核产出，不归入 Tier-1 套件。）</li>
+  <li><b>Config-match 输出复用。</b>推理仅当 <code>results/&lt;grid&gt;/config.json</code> 与当前代码+参数匹配时才复用既有结果；覆盖需 <code>--force</code>。一个数字不可能静默来自设置不同的陈旧运行。</li>
+  <li><b>冻结的评估 GT。</b>JHB CBD 面上的选型锁定到冻结的 <code>clean_gt</code>；把评估 GT 漂到 Li GT 或 micro-T1 被禁止。比较面不随被比较的模型移动。</li>
+  <li><b>锁定的 merge-mode + 操作点</b>（§1），外加逐网格溯源字段（<code>imagery_layer_id</code>、<code>model_run_id</code>），把每个数字系到具体源 tile 与具体推理批次。</li>
+</ul>
+<p>所以这里的"可复现"指的是<b>在锁定配置下追溯-并-重推</b>，而非确定性重放。这是诚实且有用的论断：第二个分析员，给定相同 config 与冻结 GT，重算出相同 summary——并能指向任一单元背后的确切 tile 与运行。</p>
+
+<hr class="sec">
+
+<!-- ============ §3 ============ -->
+<h2 id="s3"><span class="n">3</span>仪器可靠性 —— 对唯一的随机步进行测量</h2>
+
+<p>检测器（Mask R-CNN）、后处理与面积指标，在权重固定下全是确定的。install-date 层加入<b>一个</b>随机器件：一台 Gemini 视觉模型，逐装机读取一串时间序列航拍 chip，对每个日期判定 PV 是否存在——产出一个存在<em>模式</em>及派生的 <em>install-date</em>。这是全流水线<b>唯一</b>一个在相同输入上重跑可能给出不同答案的地方。注意这<b>不是</b>松温度产物：打分器已请求 greedy <code>temperature:0</code> 解码（<code>gemini_solar_image_review.py:404</code>）；残余方差来自这是一个<em>思考型</em>模型、其内部推理轨迹被采样（无固定种子）。本节测量它让结果动多少，以及什么能消除它。</p>
+
+<h3>设计 —— 相同输入上的 test-retest</h3>
+<p>从 15,859-anchor 的 JHB 存量中分层抽样 <b>244 anchor / 642 装机</b>，刻意<em>超采</em>歧义层（non-monotonic、no-recent-anchor、gemini-failed）——LLM 噪声最可能咬人的地方；headline 随后<b>按存量真实层占比重加权</b>。每个装机的 chip 渲染<b>一次</b>（固定 8 日期窗口，2018–2025）并冻结，然后在这些逐 bit 相同的图像上<b>打分三次</b>。可靠性 = rep-to-rep 一致率；输入恒定，故这隔离的是模型自身的采样方差。chip 与打分调用都为本实验<b>新生成</b>——只有 anchor 列表及其生产状态层被复用（用于分层与存量重加权）；无任何生产 install-date 被回收。（<code>solar_backdating/scripts/validation/llm_reliability_{sample,analyze}.py</code>；原始+汇总在 <code>results/analysis/llm_consistency/reliability/</code>。）</p>
+<p>headline 那次跑用了 env 默认的 <code>gemini-3-flash-agent</code>。但生产<b>几乎全部</b>日期由朴素 <code>gemini-3-flash</code> 别名产出（round 类型 <code>initial</code>/<code>bisection</code>/<code>tail</code>/<code>walk_back</code> 加 2023-census 步），<code>gemini-3-flash-agent</code> 只用于狭窄的 <code>anchor_recovery</code> round。为确认这个数字属于<em>生产</em>仪器而非 agent 别名，我们在<b>同一批冻结 chip</b> 上对 150-装机分层切片 ×3 用 <code>gemini-3-flash</code> 重打分——见下"模型一致性"。</p>
+
+<h3>逐装机可靠性 —— <span class="tag">中等</span></h3>
+<table class="tlt">
+  <thead>
+    <tr class="top"><th>层（stratum）</th><th class="num">n</th><th class="num">P(install-date ×3 相同)</th><th class="num">P(pattern ×3 相同)</th><th class="num">存量权重</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>done_appears（clean）</td><td class="num">148</td><td class="num">0.818</td><td class="num">0.777</td><td class="num">0.689</td></tr>
+    <tr><td>ambiguous · no-recent-anchor</td><td class="num">168</td><td class="num">0.792</td><td class="num">0.738</td><td class="num">0.164</td></tr>
+    <tr><td>ambiguous · non-monotonic</td><td class="num">130</td><td class="num">0.823</td><td class="num">0.715</td><td class="num">0.130</td></tr>
+    <tr><td>installed-during-census</td><td class="num">62</td><td class="num">0.839</td><td class="num">0.758</td><td class="num">0.011</td></tr>
+    <tr><td>already-present bound</td><td class="num">53</td><td class="num">0.830</td><td class="num">0.755</td><td class="num">0.004</td></tr>
+    <tr><td>gemini-failed</td><td class="num">81</td><td class="num">0.840</td><td class="num">0.728</td><td class="num">0.002</td></tr>
+    <tr class="total"><td>库存加权</td><td class="num"></td><td class="num">0.814</td><td class="num">0.762</td><td class="num"></td></tr>
+    <tr class="ref"><td><em>样本（非加权）</em></td><td class="num">642</td><td class="num">0.818</td><td class="num">0.745</td><td class="num"></td></tr>
+  </tbody>
+</table>
+<p>即<b>约 81%</b> 装机重跑得到相同 install-date、<b>约 76%</b> 得到相同存在模式。可靠性在各层间<em>相当均匀</em>——难例几乎不比 clean 差——这本身就说明噪声是边际日期判定的属性，而非少数病态装机的属性。但 headline 单看是最坏情形（k=1）；对<em>同一批</em>三次重跑的另外三种切法（无新 API；<code>…/reliability/recut/reliability_recut.json</code>）重新框定它到底有多糟。</p>
+
+<h3>模型一致性 —— 这个数字属于生产模型，不是 agent 别名</h3>
+<p>在 150-装机冻结 chip 切片上用生产 <code>gemini-3-flash</code> ×3 重打分，install-date 复现 <b>0.807</b>，与 agent 别名在相同目标上的 <b>0.820</b> 统计上无法区分（配对 McNemar χ² = 0.20，<em>p</em> ≈ 0.65；150 中 9 对 11 不一致）。在主导 clean 层上二者同样接近（flash 0.925 对 agent 0.85，n=40），且库存加权切片值在 flash 下如有差异也略<em>高</em>（~0.87）。headline 因此迁移到真正产出存量的模型——既不被别名抬高，也不被压低。（<code>results/analysis/llm_consistency/reliability/parity/parity_compare.json</code>。）</p>
+
+<h3>~18% 分歧的解剖 —— 它比单步翻转更宽，且无法被显式旋钮过滤</h3>
+<p>在 117 个分歧装机中：</p>
+<ul>
+  <li><b>41%（48）是 present-vs-absent 翻转</b>，非定日错误：在一处微弱装机上，模型在"2018–2025 从不可见"与"在日期 X 出现"之间翻转。这是可见性阈值处的检测裕度抖动。</li>
+  <li><b>33%（39）恰好移一个影像步</b>（~12 个月——headline 中位数）：占 69 个仅日期分歧者的 57%。</li>
+  <li><b>26%（30）跳两年或以上</b>；这些多步跳跃集中在被标记的小歧义尾。</li>
+</ul>
+<p>粗化到 install-year 在这里<b>毫无帮助</b>，而且必须说明<em>为什么</em>：8 日期窗口按年分布（8 个日期落在 8 个不同年份），故 install-year 一致<b>按构造</b>等于精确日期一致——已验证，非假设。年级报告因此在个体上不比精确日期更可靠。两个诊断确认噪声是结构性而非可门控的：它集中在已被标 non-monotonic/uncertain 的约 8% 装机中（重跑翻转率 <b>0.35 对 0.17</b>，对干净单调序列），但<b>置信度无法筛除</b>——642 个目标中 637 个自报置信度 ≥ 0.9，分歧者均值置信度（0.933）仅略低于一致者（0.958）。模型在即将翻转时仍自信，所以置信度裁剪不是那个杠杆。</p>
+
+<h3>杠杆 1 —— 投票，别信单次采样（<span class="pass">已认证</span>）</h3>
+<p>生产对每个装机只打分<b>一次</b>（k=1），恰是上面测到的最坏情形。三次重跑里，<b>98.4%</b> 装机已存在明确多数（≥2/3）；只有 <b>1.6%（642 中 10）</b>是不可救的三方分裂。为认证<em>去噪后</em>答案的复现性（不仅是"多数是否存在"），我们把生产模型（<code>gemini-3-flash</code>）重跑扩到冻结切片上的 <b>K=6</b>，在全部十个不相交的 3∣3 划分上比较两次<b>独立</b>的 majority-of-3 抽取。结果：单次抽取复现 <b>0.910</b>（库存加权，两次独立抽取一致），而 <b>majority-of-3 投票复现 0.951</b>（主导 clean 层 0.980）——以 3× 调用换 <b>+4.1pp</b> 提升。majority-of-k 去噪器因此不仅合理而是<b>已测量</b>：它把有效 install-date 复现性抬入 mid-90s。（完全成立的 majority-of-5 需 10 次重跑；6 次代理已对 92% 装机在 ≥4/6 次里钉住众数答案。<code>…/reliability/parity/majority_k.json</code>。）</p>
+
+<h3>杠杆 2 —— 钉死解码器：测过了，它<em>不是</em>那个修复</h3>
+<p>自然假设是方差为松温度产物。它不是。原生打分路径已无条件发送 greedy <code>temperature:0</code>（<code>gemini_solar_image_review.py:404</code>），所以两次可靠性运行<em>本就</em>是 greedy。而 <code>gemini-3-flash</code>——一个直接、非 agent 别名——尽管那个 greedy 请求，仍<b>一样地变</b>（上文 0.807 对 0.820）。残余 rep-to-rep 移动是一个<em>思考型</em>视觉模型在边际可见性日期判定上对推理轨迹采样的内禀属性，不是一个被遗漏未钉的解码器。这关掉了便宜的"config 修复"叙事：诚实的杠杆是<b>投票</b>（杠杆 1）与<b>聚合</b>（下），不是温度旗标。</p>
+
+<h3>聚合可靠性 —— <span class="pass">高</span>（被发表的量是稳健的）</h3>
+<p>经济交付物不是任一单个 install-date；它是 <b>install-year cohort 分布</b>（每年出现多少装机）。因为逐目标误差近零均值，它们在聚合下抵消。三次重跑之间：</p>
+<table class="tlt">
+  <thead>
+    <tr class="top"><th>install-year</th><th class="num">rep 1</th><th class="num">rep 2</th><th class="num">rep 3</th><th class="num">最大摆幅</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>2022</td><td class="num">70</td><td class="num">69</td><td class="num">67</td><td class="num">3</td></tr>
+    <tr><td>2023</td><td class="num">95</td><td class="num">87</td><td class="num">96</td><td class="num">9</td></tr>
+    <tr><td>2024</td><td class="num">280</td><td class="num">291</td><td class="num">284</td><td class="num">11</td></tr>
+  </tbody>
+</table>
+<p>全分布一致性为重跑间<b>总变差距离（TVD）0.025</b>，且<b>最大</b>的逐年 cohort 计数只移动样本的 <b>~1.7%</b>。用经济学家的话：这台仪器在个体读数上是把吵尺，但它产出的<em>直方图</em>——进入任何下游采用率或政策分析的那个量——复现到几个百分点以内。这就是 LLM 随机性能让已发表 cohort 数字移动多少的界。</p>
+
+<!-- ===== 端到端 ===== -->
+<h3 id="e2e">端到端可复现性 —— 从 0 重跑（执行于 2026-06-23，3 次重跑）</h3>
+<p>上面的 test-retest 刻意<em>冻结</em>了输入：chip 在单一固定全局窗口上渲染一次再重打分，故它隔离打分器自身采样方差，并且——如 §4 所记——是真实再估计会移动多少的<b>下界</b>。互补的上界问题正是审计者真会问的：<em>若第二个分析员把整条回溯流水线在相同装机上从 0 重跑一遍，多大比例会恢复同一个 install interval？</em>本协议规定那次运行。</p>
+
+<p><b>设计 —— 重放生产链，不冻结任何东西。</b>由同一份分层样本驱动（§3 的 244 anchor / 642 装机，从 <code>sample_anchors.csv</code> 逐字复用，故两实验直接可比、存量重加权延续）。对每个装机，完整生产回溯链端到端重执行，与存量产出方式 1:1——<b>无任何输入被固定</b>：</p>
+<ul>
+  <li><b>影像从 GEHI 重抓</b>（非复用），故 provider 侧 capture 选择 / <code>--allow-nearest</code> 吸附重跑；</li>
+  <li><b>自适应日期搜索逐 anchor 重跑</b>（<code>run_adaptive_scan.py</code>）——每次运行逐轮挑<em>自己</em>的探测 vintage，而非 §3 用的单一冻结全局窗口；</li>
+  <li><b>chip 从新抓的 vintage 重渲染</b>；</li>
+  <li><b>打分用生产模型路由</b>——<code>gemini-3-flash</code> 跑 <code>initial</code>/<code>bisection</code>/<code>tail</code>/<code>walk_back</code> 与 2023-census 步，<code>gemini-3-flash-agent</code> 只跑 <code>anchor_recovery</code>，与产出存量的那次运行一致；</li>
+  <li><b>install-interval 后处理完整重跑</b>（<code>infer_install_dates.py</code>，含孤立 dip 修复 <code>repair_isolated_dips</code>）——故比较落在<em>后处理后</em>的交付物，而非原始分数。</li>
+</ul>
+
+<p><b>度量 —— install interval，对生产。</b>一致单位是 <code>infer_install_dates.py</code> 发出的 <b>install interval</b> 本身（<code>[install_interval_start, install_interval_end]</code> 括号；point-dated 的 <code>done_appears</code> 装机是退化的单步 ~1 年区间；带界层 <code>installed-during-census</code>、<code>already-present</code> 携其开/闭括号）。两种切法，镜像 §3：</p>
+<ul>
+  <li><b>1 次运行 vs 生产</b>——单次从 0 重跑的区间，逐装机对<b>生产存量实际交付的区间</b>比较。这是端到端 k=1 复现性：诚实的"一次独立重跑能否移动这个装机的日期"数字。</li>
+  <li><b>3 次运行——互相 + 多数。</b>三次独立从 0 重跑给出三方一致率与一个 <b>majority-of-3</b> 去噪区间，是 §3 认证多数杠杆的端到端类比。</li>
+</ul>
+
+<p><b>结果（执行于 2026-06-23；3 次从 0 重跑）。</b>相比 §3 的下降很大，也是 headline 发现：<b>自适应再搜索——而非打分器自身采样——才是 install-date 方差的主导来源，且冻结输入测试结构性地看不见它。</b>§3 把每个 anchor 的 chip 冻结在一个全局窗口上仅重打分（k=1 0.81）；端到端每次都重新决定<em>抓哪些</em> vintage 去打分，一次在关键轮次上的歧义/abstain 判定就能让整个区间脱轨。（已验证为真实信号、非 harness 产物：缓存 chip 存在且可读；重跑确实把生产读得干净的帧重新打成歧义。）</p>
+
+<table class="tlt">
+  <thead>
+    <tr class="top"><th>切法</th><th>单位</th><th>参照</th><th class="num">非加权 / 库存加权</th></tr>
+  </thead>
+  <tbody>
+    <tr class="ref"><td>§3 冻结输入 k=1（参照）</td><td>install-date</td><td>同输入重打分</td><td class="num">0.81</td></tr>
+    <tr class="rule-above"><td class="hl">单次从 0 重跑 vs 生产</td><td>install interval（精确 start+end）</td><td>生产交付的区间</td><td class="num hl">0.45–0.47 / 0.57–0.61（3 reps）</td></tr>
+    <tr><td class="hl">过程自洽（成对 rep↔rep）</td><td>install interval</td><td>另一次独立重跑</td><td class="num hl">0.62–0.66 / 0.74–0.75</td></tr>
+    <tr><td>3 方互相一致（全 3 reps 相同）</td><td>install interval</td><td>—</td><td class="num">0.53 / 0.66</td></tr>
+    <tr><td>majority-of-3 vs 生产</td><td>install interval</td><td>生产交付的区间</td><td class="num">0.45 / 0.58</td></tr>
+    <tr><td>install-year vs 生产</td><td>日历年（双方均定档）</td><td>生产交付的年份</td><td class="num">0.66 / —</td></tr>
+    <tr><td class="hl">cohort 直方图（被发表的量）</td><td>install-year 分布</td><td>rep-to-rep TVD</td><td class="num hl">0.037–0.063（vs 生产 0.058–0.071）</td></tr>
+  </tbody>
+</table>
+
+<p>三个读数，按重要性排序：</p>
+<ol class="three">
+  <li>
+    <span class="t">被发表的经济量是稳健的。</span>
+    个体日期会抖，但 install-year <em>分布</em>几乎不动：rep-to-rep 直方图 TVD 0.037–0.063（对 §3 冻结的 0.025）。误差在相邻年份间是替代性的、非系统的，故在聚合中大体抵消。经济分析消费的直方图能复现；单个装机的括号常常不能。
+  </li>
+  <li>
+    <span class="t">逐装机复现性中等，且正确的分母是 rep↔rep，不是 rep↔生产。</span>
+    两次独立重跑在<em>精确</em>区间上一致 ~0.74（库存加权）；对生产存量的一致更低（~0.60），因为生产是更高覆盖的抽样——它定档 434/642，对重跑紧密聚集的 370/385/371（多 ~16%）。<b>majority-of-3 不抬升 vs 生产</b>（0.58），因为多数去噪收敛到<em>过程</em>中心，而非生产；这与 §3 相反——那里生产<em>就是</em>中心，多数爬到 0.95。
+  </li>
+  <li>
+    <span class="t">路由是 churn 机制。</span>
+    46% 装机（1926 个装机-rep 对中 881 个）被与生产<em>不同</em>的流水线层定档——而且是双向的（如生产-<code>gehi_main</code>→重跑-undated，以及生产-undated→重跑-<code>gehi_main</code>），是真实搜索不稳的签名，而非单向缺陷。2023-census 层是最大单一贡献者：在重跑中变回 <code>no_recent</code> 的 anchor 失去 census 收窄所需的干净 absent→present 范例对。
+  </li>
+</ol>
+
+<div class="box">
+  <span class="lab">对论文 —— 诚实的写法</span>
+  把 <b>cohort-直方图 TVD</b> 与 <b>rep↔rep 自洽</b>作为 headline 复现性证据；把精确逐装机区间（~0.74 库存加权 rep↔rep，~0.60 vs 生产存量）作为<b>诊断地板</b>；并把 ~16% 覆盖差（生产比新鲜重跑定档更多）作为对"生产存量是有利抽样"的诚实 caveat 披露。
+  <b>不要把"完全一致"当目标，也不要拿生产当真值</b>——后者的分母不是真值，是同分布里的高覆盖抽样；而"完全一致"在这个估计量上不是可达目标，因为冻结测试乐观且结构性盲于自适应搜索这个主方差源——这正是本测试存在的意义。
+</div>
+
+<p class="caption">
+  数字与逐装机审计轨迹在 <code>~/zasolar_data/geid_temporal/llm_endtoend_20260623/analysis_3rep/</code>
+  （<code>endtoend_summary.json</code>、<code>derived_cuts.json</code>、<code>endtoend_per_installation.csv</code>）。
+</p>
+<p class="caption">
+  <b>成本（每次重跑，实测）：</b>~38 分钟挂钟、~1,300 次 Gemini 调用（L0 601 + L1 651 + census 54）、517 次 anchor GEHI 抓取、~3GB chip——3 次重跑 ≈ 2 小时 / ~3,900 调用 / ~9GB。它通过逐 anchor 重导窗口（而非重放冻结窗口）取代了 §4 提到的更便宜的"window-faithfulness 重打分"半步。
+</p>
+
+<hr class="sec">
+
+<!-- ============ §4 ============ -->
+<h2 id="s4"><span class="n">4</span>什么被保证、什么不被保证</h2>
+<p>直说，便于读者校准信任：</p>
+<ul>
+  <li><b>已保证。</b>带泄漏检查的操作点选择（§1）；单一、抽取出的、可追溯的指标内核与 config-match 复用（§2）；对 LLM 致聚合方差的、库存加权的、已测量的界（§3）。</li>
+  <li><b>Fail-closed，未认证。</b>CT 生产 per-detection 操作点无法在 ≤1pp 迁移下锁定，故以<b>预先声明</b>阈值交付；能认证它的 unified_A × CT 锁<b>已登记但未拟合</b>（tile 待下）。组合阅读者不应推断 CT 操作点已泄漏认证——它是 fail-closed，等待那次拟合。</li>
+  <li><b>已记录，非在本文重推。</b>0.97 置信度最优的 ~15pp 计数召回代价，以及 Platt/温度缩放消融，溯源到校准附录自身记录，而非本文一次新运行。</li>
+  <li><b>可靠性数字的范围。</b>§3 的冻结输入数字测量的是固定 8 日期窗口下的 JHB install-date 打分器；它界定<em>冻结输入上的采样</em>方差，不含重抓影像或重跑<em>自适应</em>日期搜索带来的额外方差。~81% 是 <b>k=1</b> 生产设置且超采歧义层。早先标记的若干后续现已<b>执行</b>（2026-06-23）：模型一致性重打分确认数字属于生产模型而非 agent 别名；greedy 解码检查显示 <code>temperature:0</code> 已用且<b>不</b>降方差；K=6 majority-of-3 认证在冻结输入上测得去噪提升（→ ~0.95 库存加权）；以及——此前唯一未结的——<b>端到端从 0 重跑</b>（§3"端到端可复现性"）现有 3 次重跑。其裁决重塑此 caveat：冻结输入下界<em>远</em>低于总量。端到端精确区间复现性在两次独立重跑间约 0.74 库存加权（~0.60 vs 生产存量，后者为更高覆盖抽样），伴 46% 层路由 churn——<b>自适应再搜索</b>而非打分器主导总方差，且冻结输入测试结构性地看不见它。<b>幸存的是聚合</b>：install-year cohort 直方图 rep-to-rep TVD 0.037–0.063，故被发表的分布即便个体括号不复现也复现。报告直方图 TVD + rep↔rep 自洽作为复现性证据；把逐装机精确区间作为诊断地板；披露 ~16% 覆盖差作为对生产存量的 caveat。</li>
+</ul>
+
+<hr class="sec">
+
+<!-- ============ 附录 ============ -->
+<h2 id="app">附录 —— 溯源表（论断 → 来源）</h2>
+<table class="tlt">
+  <thead>
+    <tr class="top"><th>论断领域</th><th>来源</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>带泄漏检查的锁、≤1pp 验收、<code>[LEAKAGE]</code> 守卫</td><td><code>scripts/analysis/lock_operating_point.py:283–290, 325–327</code>；<code>configs/eval/operating_point_calibration.yaml</code></td></tr>
+    <tr><td>锁定的 CT 点（pixel-or PASS 0.00pp / per-det FAIL 5.22pp）</td><td><code>configs/eval/locked_operating_points.json</code></td></tr>
+    <tr><td>Polygon-conf 扫描 vs 固定 <code>post_conf</code></td><td><code>scripts/analysis/polygon_conf_sweep.py:54–57</code>；<code>core/postproc.py:1064–1066</code></td></tr>
+    <tr><td>v4_canonical = 7 键、无 <code>merge_mode</code>（CLI 显式）</td><td><code>configs/postproc/v4_canonical.json</code>；<code>finalize.py</code> merge-mode 守卫</td></tr>
+    <tr><td>Tier-1 指标内核 + 产出键 + seed=0 bootstrap</td><td><code>core/area_metrics.py:84</code>（<code>summarize</code>）、<code>:70–81</code></td></tr>
+    <tr><td>Config-match 复用 / 冻结 clean_gt / 溯源字段</td><td><code>docs/evaluation_protocol.md</code>；逐网格 <code>results/&lt;grid&gt;/config.json</code></td></tr>
+    <tr><td>LLM test-retest 设计 + headline 数字</td><td><code>solar_backdating/scripts/validation/llm_reliability_sample.py</code>、<code>llm_reliability_analyze.py</code>；<code>results/analysis/llm_consistency/reliability/{reliability_summary,aggregate_stability}.json</code></td></tr>
+    <tr><td>样本规模（244 anchor / 642 装机 / 15,859 总体，seed 42）</td><td><code>~/zasolar_data/geid_temporal/llm_reliability_20260622/sample/sample_manifest.json</code></td></tr>
+    <tr><td>Majority-of-3（98.4%）、分歧几何、abstain/置信度切法、year≡date</td><td><code>solar_backdating/scripts/validation/llm_reliability_recut.py</code>；<code>…/reliability/recut/reliability_recut.json</code></td></tr>
+    <tr><td>模型一致性：flash 0.807 vs flash-agent 0.820、McNemar χ²=0.20；生产路由（<code>cheap_model=gemini-3-flash</code>，<code>anchor_recovery</code>→agent）</td><td><code>…/reliability/parity/{parity_compare,FINDINGS}.{json,md}</code>；<code>~/zasolar_data/geid_temporal/jhb_full382_fpcut_scan_2026-06-02/run.log</code>（<code>[CFG]</code> 行）</td></tr>
+    <tr><td>greedy <code>temperature:0</code> 已用（非可修杠杆）</td><td><code>solar_backdating/scripts/validation/gemini_solar_image_review.py:404</code></td></tr>
+    <tr><td>Majority-of-3 认证：k=1 0.910 → maj-3 0.951 库存加权、K=6、10 个不相交划分</td><td><code>~/zasolar_data/geid_temporal/llm_reliability_20260622/parity_flash/</code>；<code>…/reliability/parity/majority_k.json</code></td></tr>
+    <tr><td>存量规模（15,859 anchor / 41,393 定档装机）</td><td><code>~/zasolar_data/geid_temporal/jhb_full382_fpcut_scan_2026-06-02/</code></td></tr>
+    <tr><td><b>端到端从 0 重跑（执行 2026-06-23，3 reps）</b>——完整 4 层链（L0 <code>gehi_main</code> → L1 per-target no-recent → L_census 2023-收窄 → <code>merge_three_layers.py --with-census</code> + flatten）。发现：精确区间 rep↔rep ~0.74 库存加权（~0.60 vs 生产）、46% 路由 churn、cohort-year TVD 0.037–0.063（聚合稳健）</td><td>原样复用生产层脚本：<code>solar_backdating/scripts/temporal/{run_adaptive_scan.py, infer_install_dates.py, run_census2023_scan.py}</code> + 生产 <code>merge_three_layers.py</code>/<code>flatten_gpkg_to_csv.py</code>。Harness：<code>solar_backdating/scripts/validation/llm_endtoend_{build_reference,select_units,expand_l1,splice_merge,analyze}.py</code> + <code>run_endtoend_rep.sh</code>。复用 §3 <code>sample_anchors.csv</code>。路由缝：生产 no-recent/census 成员资格复用为固定候选池；所有随机步（GEHI 抓取、渲染、Gemini 打分、infer、merge）重跑；L1 成员资格逐副本从其自身 L0 重导；路由翻转被测量而非吸收。结果在 <code>~/zasolar_data/geid_temporal/llm_endtoend_20260623/analysis_3rep/</code></td></tr>
+  </tbody>
+</table>
+
+<footer>
+  ZAsolar 验证与稳健性方法学（完整版，全中文）· 由 <code>docs/validation/2026-06-21-validation-methodology.md</code> 完整渲染，
+  端到端从 0 复现测试（2026-06-23）整合入 §3 · 生成于 2026-06-24。
+</footer>
+
+</body>
+</html>
