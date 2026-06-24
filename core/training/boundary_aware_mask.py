@@ -18,28 +18,60 @@ Mechanism: torchvision's RoIHeads.forward looks up the loss function via
 attribute is enough — no subclass / forward override needed.
 
 The patch reads the per-image ignore_masks and mask_weights from a
-module-level batch state (``stash_batch_supervision``) because torchvision's
-RoIHeads.forward only forwards ``t["masks"]`` and ``t["labels"]`` to the loss
-fn. The training loop is responsible for stashing and clearing state per
-batch.
+module-level batch state because torchvision's RoIHeads.forward only forwards
+``t["masks"]`` and ``t["labels"]`` to the loss fn — the custom supervision
+fields have to be smuggled in out-of-band.
 
-Usage:
-    from core.training.boundary_aware_mask import (
-        install_patch, stash_batch_supervision, clear_batch_supervision,
+How the batch state is populated (production contract — NOT a manual
+``stash_batch_supervision`` call in the training loop): stashing happens
+automatically inside the ``model.transform.forward`` wrapper installed by
+``install_transform_aux_resize``. That wrapper is the only place that sees the
+*post-transform* targets (resized to torchvision's internal spatial range),
+which is exactly the shape the patched mask loss needs. The training loop just
+runs ``model(images, targets)``.
+
+Lifecycle seam — use ``MaskSupervisionPatch`` rather than wiring the three
+patches + the per-batch boundary by hand (install order matters, and the
+stale-state hazard below is invisible in a scattered set of calls):
+
+    patch = MaskSupervisionPatch(
+        model, enable_aux_resize=True, enable_box_loss_telemetry=False,
     )
-    install_patch()  # once at startup
-    ...
+    patch.install()                 # mask-loss patch + transform wrapper (+ box telemetry)
     for images, targets in loader:
-        stash_batch_supervision(targets)
-        loss_dict = model(images, targets)  # patched maskrcnn_loss reads stash
-        clear_batch_supervision()
+        with patch.batch():         # asserts a fresh stash happened this forward
+            loss_dict = model(images, targets)
+    patch.teardown()                # restore torchvision + unwrap the model
+
+Stale-state hazard the seam guards: the auto-stash overwrites *all* batch
+state on every training forward, so the loss is correct as long as the stash
+runs. The state is never cleared between batches. If a training forward ever
+computed the mask loss without a fresh stash (transform not in ``.training``,
+or a target without ``"masks"``), the previous batch's supervision would
+silently feed the loss. That path is unreachable in today's loop;
+``patch.batch()`` makes it *structurally* unreachable by raising
+``StaleSupervisionError`` instead of leaking.
+
+The low-level ``install_patch`` / ``stash_batch_supervision`` /
+``clear_batch_supervision`` functions remain the primitives the class delegates
+to (and the existing smoke tests in ``scripts/training/jhb_phaseA/`` call them
+directly); ``MaskSupervisionPatch`` is the coordinating seam over them.
 """
 from __future__ import annotations
+
+from contextlib import contextmanager
 
 import torch
 import torch.nn.functional as F
 from torchvision.models.detection import roi_heads as _rh
 from torchvision.ops import roi_align
+
+
+class StaleSupervisionError(RuntimeError):
+    """Raised when the patched mask loss would run against batch-supervision
+    state that was not refreshed for the current forward — i.e. the per-batch
+    auto-stash was skipped and the previous batch's state would leak. See the
+    module docstring's stale-state note and ``MaskSupervisionPatch.batch``."""
 
 
 _BATCH_STATE: dict = {
@@ -49,13 +81,33 @@ _BATCH_STATE: dict = {
     "label_sources": None,
 }
 
+# Monotonic count of stash events. ``patched_maskrcnn_loss`` never reads it, so
+# bumping it is byte-equivalent w.r.t. the loss; ``MaskSupervisionPatch.batch``
+# samples it before/after a forward to prove a fresh stash happened this batch
+# — the structural guard against the stale-state hazard documented above.
+_STASH_COUNTER = 0
+
 
 def stash_batch_supervision(targets: list[dict]) -> None:
-    """Stash per-image supervision tensors. Call before model(images, targets)."""
+    """Stash per-image supervision tensors for the patched mask loss.
+
+    In production this is called automatically by the transform wrapper
+    (``install_transform_aux_resize``), not from the training loop. It fully
+    overwrites every key of ``_BATCH_STATE`` on each call, so stale state from a
+    prior batch cannot survive a stash that actually runs (see the module
+    docstring's stale-state note for the one path the seam still guards).
+    """
+    global _STASH_COUNTER
     _BATCH_STATE["ignore_masks"] = [t.get("ignore_masks") for t in targets]
     _BATCH_STATE["mask_weights"] = [t.get("mask_weights") for t in targets]
     _BATCH_STATE["mask_pixel_weights"] = [t.get("mask_pixel_weights") for t in targets]
     _BATCH_STATE["label_sources"] = [t.get("label_sources", []) for t in targets]
+    _STASH_COUNTER += 1
+
+
+def stash_counter() -> int:
+    """Current value of the monotonic stash counter (see ``_STASH_COUNTER``)."""
+    return _STASH_COUNTER
 
 
 def clear_batch_supervision() -> None:
@@ -239,6 +291,8 @@ def install_transform_aux_resize(model) -> None:
     if getattr(transform, "_aux_resize_installed", False):
         return
     base_forward = transform.forward
+    # Stash the original so teardown can restore it (clean test isolation).
+    transform._aux_resize_base_forward = base_forward
 
     def patched_forward(images, targets=None):
         image_list, targets_out = base_forward(images, targets)
@@ -262,6 +316,18 @@ def install_transform_aux_resize(model) -> None:
 
     transform.forward = patched_forward
     transform._aux_resize_installed = True
+
+
+def uninstall_transform_aux_resize(model) -> None:
+    """Restore the original ``model.transform.forward``. Idempotent."""
+    transform = model.transform
+    if not getattr(transform, "_aux_resize_installed", False):
+        return
+    base = getattr(transform, "_aux_resize_base_forward", None)
+    if base is not None:
+        transform.forward = base
+    transform._aux_resize_installed = False
+    transform._aux_resize_base_forward = None
 
 
 def is_transform_aux_resize_installed(model) -> bool:
@@ -399,6 +465,8 @@ def wrap_select_training_samples(model) -> None:
     if getattr(rh_obj, "_select_training_samples_wrapped", False):
         return
     original = rh_obj.select_training_samples
+    # Stash the original so teardown can restore it (clean test isolation).
+    rh_obj._select_training_samples_original = original
 
     def wrapper(proposals, targets):
         result = original(proposals, targets)
@@ -410,3 +478,155 @@ def wrap_select_training_samples(model) -> None:
 
     rh_obj.select_training_samples = wrapper
     rh_obj._select_training_samples_wrapped = True
+
+
+def unwrap_select_training_samples(model) -> None:
+    """Restore the original ``roi_heads.select_training_samples``. Idempotent."""
+    rh_obj = model.roi_heads
+    if not getattr(rh_obj, "_select_training_samples_wrapped", False):
+        return
+    original = getattr(rh_obj, "_select_training_samples_original", None)
+    if original is not None:
+        rh_obj.select_training_samples = original
+    rh_obj._select_training_samples_wrapped = False
+    rh_obj._select_training_samples_original = None
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Lifecycle seam — MaskSupervisionPatch
+# ════════════════════════════════════════════════════════════════════════
+class MaskSupervisionPatch:
+    """Single lifecycle seam over the boundary-aware-supervision patch bundle.
+
+    Replaces the four scattered install calls (``install_patch`` /
+    ``install_transform_aux_resize`` / ``install_fastrcnn_patch`` /
+    ``wrap_select_training_samples``) coordinated by implicit ordering in
+    ``train.py main()`` with one object that owns the whole lifecycle::
+
+        install()  →  for each batch:  with patch.batch(): model(...)  →  teardown()
+
+    Two independent levers (mirroring train.py's flags exactly, so the *set* of
+    installed patches is byte-equivalent to the pre-seam code):
+
+      * ``enable_aux_resize`` — the mask-loss path: install the boundary-aware
+        ``maskrcnn_loss`` patch and the transform wrapper that resizes the aux
+        spatial fields and auto-stashes them. Driven by
+        ``--per-source-mask-weight`` / ``--per-instance-mask-trusted`` and the
+        jhb_phaseA spec.
+      * ``enable_box_loss_telemetry`` — the per-source box-reg-loss diagnostic:
+        *additionally* patch ``fastrcnn_loss`` and wrap
+        ``select_training_samples``. Driven by ``--log-per-source-box-reg-loss``.
+        It also needs the transform wrapper (to stash ``label_sources``) and
+        installs the mask-loss patch, which is a no-op when no aux fields are
+        present — identical to stock ``maskrcnn_loss``. This matches the
+        pre-seam code, which installed both on this path too.
+
+    Per-batch guard (the stale-state hazard — see module docstring):
+
+      * ``assert_fresh_state`` (default ``True``) — ``batch()`` raises
+        ``StaleSupervisionError`` if no fresh stash happened during the forward.
+        Behaviour-preserving: on every *reachable* training path the auto-stash
+        always runs, so this never fires; it only converts the latent silent
+        leak into a loud error if a future change ever opens that path.
+      * ``clear_after_batch`` (default ``False``) — the deliberate Step-B
+        semantics change (actually clear the batch state after each forward).
+        Off by default; flipping it on is a gated change to record in the
+        experiment ledger, never folded silently into the behaviour-preserving
+        seam.
+    """
+
+    def __init__(
+        self,
+        model,
+        *,
+        enable_aux_resize: bool,
+        enable_box_loss_telemetry: bool = False,
+        assert_fresh_state: bool = True,
+        clear_after_batch: bool = False,
+    ) -> None:
+        self.model = model
+        self.enable_aux_resize = enable_aux_resize
+        self.enable_box_loss_telemetry = enable_box_loss_telemetry
+        self.assert_fresh_state = assert_fresh_state
+        self.clear_after_batch = clear_after_batch
+        self._installed = False
+
+    @property
+    def _wrapper_installed(self) -> bool:
+        # The transform wrapper (and thus the auto-stash) is installed whenever
+        # either lever is on.
+        return self.enable_aux_resize or self.enable_box_loss_telemetry
+
+    def install(self, *, verbose: bool = True) -> "MaskSupervisionPatch":
+        """Install the patches this object's levers select, in dependency order.
+
+        Idempotent — every underlying installer guards against double-install,
+        so calling ``install()`` twice (or re-installing the mask patch from a
+        second lever) is a no-op.
+        """
+        if self._wrapper_installed:
+            install_patch()
+            install_transform_aux_resize(self.model)
+        if self.enable_box_loss_telemetry:
+            install_fastrcnn_patch()
+            wrap_select_training_samples(self.model)
+        self._installed = True
+        if verbose:
+            self._log_install()
+        return self
+
+    def _log_install(self) -> None:
+        if not self._wrapper_installed:
+            print("[PATCH] MaskSupervisionPatch: no supervision levers enabled (no-op)")
+            return
+        modes = []
+        if self.enable_aux_resize:
+            modes.append("aux-resize (boundary-aware mask loss)")
+        if self.enable_box_loss_telemetry:
+            modes.append("per-source box-reg-loss telemetry")
+        print(f"[PATCH] MaskSupervisionPatch installed: {', '.join(modes)} "
+              f"(assert_fresh_state={self.assert_fresh_state}, "
+              f"clear_after_batch={self.clear_after_batch})")
+
+    @contextmanager
+    def batch(self):
+        """Per-batch boundary. Enter before ``model(images, targets)``.
+
+        On normal exit (Step A) assert a fresh stash ran during this forward —
+        i.e. the previous batch's supervision did not leak into the loss. On
+        any exit, if ``clear_after_batch`` is on (gated Step B), clear the
+        batch state. A forward that raises is left un-asserted (the loss never
+        ran) but still cleared.
+        """
+        start = _STASH_COUNTER
+        try:
+            yield
+            if (self.assert_fresh_state and self._wrapper_installed
+                    and _STASH_COUNTER == start):
+                raise StaleSupervisionError(
+                    "patched maskrcnn_loss ran without a fresh per-batch stash "
+                    "(stash counter did not advance during the forward); the "
+                    "previous batch's supervision would have leaked into the "
+                    "loss. The auto-stash in the transform wrapper must run on "
+                    "every training forward."
+                )
+        finally:
+            if self.clear_after_batch:
+                clear_batch_supervision()
+                _clear_matched_info()
+
+    def teardown(self) -> None:
+        """Restore torchvision's stock losses and unwrap the model, leaving the
+        process clean for test isolation / a second in-process training run."""
+        restore_original()
+        restore_fastrcnn()
+        uninstall_transform_aux_resize(self.model)
+        unwrap_select_training_samples(self.model)
+        self._installed = False
+
+    # ── box-loss telemetry readout (delegating convenience) ────────────────
+    def reset_box_loss_buckets(self) -> None:
+        reset_box_loss_buckets()
+
+    def box_loss_bucket_means(self) -> dict[str, float]:
+        return box_loss_bucket_means()

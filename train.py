@@ -18,6 +18,7 @@ import argparse
 import json
 import time
 import warnings
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -698,7 +699,8 @@ def collate_fn(batch):
 
 
 def train_one_epoch(model, optimizer, data_loader, device, epoch,
-                    lr_scheduler=None, scaler=None, profiler=None, ema=None):
+                    lr_scheduler=None, scaler=None, profiler=None, ema=None,
+                    mask_patch=None):
     """Train for one epoch, return average loss. Supports AMP via scaler.
 
     If `profiler` is a StageProfiler, per-stage wall/GPU times are accumulated
@@ -706,6 +708,10 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch,
 
     If `ema` is a ModelEMA, its shadow weights are updated after every optimizer
     step (C-2 recipe lever; None = no EMA, legacy behavior).
+
+    If `mask_patch` is a MaskSupervisionPatch, each forward runs inside its
+    per-batch boundary (asserts a fresh supervision stash happened this forward;
+    optional Step-B per-batch clear). None = no boundary-aware supervision.
     """
     model.train()
     total_loss = 0.0
@@ -748,44 +754,49 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch,
 
         optimizer.zero_grad()
 
-        if scaler is not None:
-            if prof is not None:
-                with prof("forward", cuda=True):
+        # Per-batch supervision boundary: asserts a fresh stash ran this forward
+        # (guards the stale-state hazard) + optional Step-B clear. No-op when no
+        # MaskSupervisionPatch is active. See MaskSupervisionPatch.batch().
+        batch_ctx = mask_patch.batch() if mask_patch is not None else nullcontext()
+        with batch_ctx:
+            if scaler is not None:
+                if prof is not None:
+                    with prof("forward", cuda=True):
+                        with torch.amp.autocast("cuda"):
+                            loss_dict = model(images, targets)
+                            losses = sum(loss for loss in loss_dict.values())
+                    with prof("backward", cuda=True):
+                        scaler.scale(losses).backward()
+                    with prof("step"):
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                        scaler.step(optimizer)
+                        scaler.update()
+                else:
                     with torch.amp.autocast("cuda"):
                         loss_dict = model(images, targets)
                         losses = sum(loss for loss in loss_dict.values())
-                with prof("backward", cuda=True):
                     scaler.scale(losses).backward()
-                with prof("step"):
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
                     scaler.step(optimizer)
                     scaler.update()
             else:
-                with torch.amp.autocast("cuda"):
+                if prof is not None:
+                    with prof("forward", cuda=True):
+                        loss_dict = model(images, targets)
+                        losses = sum(loss for loss in loss_dict.values())
+                    with prof("backward", cuda=True):
+                        losses.backward()
+                    with prof("step"):
+                        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+                        optimizer.step()
+                else:
                     loss_dict = model(images, targets)
                     losses = sum(loss for loss in loss_dict.values())
-                scaler.scale(losses).backward()
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-                scaler.step(optimizer)
-                scaler.update()
-        else:
-            if prof is not None:
-                with prof("forward", cuda=True):
-                    loss_dict = model(images, targets)
-                    losses = sum(loss for loss in loss_dict.values())
-                with prof("backward", cuda=True):
                     losses.backward()
-                with prof("step"):
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
                     optimizer.step()
-            else:
-                loss_dict = model(images, targets)
-                losses = sum(loss for loss in loss_dict.values())
-                losses.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
-                optimizer.step()
 
         if lr_scheduler is not None:
             lr_scheduler.step()
@@ -1060,15 +1071,11 @@ def main():
     # ── Datasets ──────────────────────────────────────────────────────
     _install_aux_resize = False  # set in either branch below
     if args.jhb_phaseA_spec:
-        from core.training.boundary_aware_mask import install_patch
         from core.training.jhb_phaseA_dataset import JHBRawPartsDataset, load_spec
         from core.training.jhb_phaseA_transforms import (
             BoundaryAwareTrainTransforms,
             ValTransforms as _PhaseAValTransforms,
         )
-
-        install_patch()
-        print(f"[PATCH] boundary-aware maskrcnn_loss installed")
 
         spec = load_spec(args.jhb_phaseA_spec)
         train_ds = JHBRawPartsDataset(
@@ -1078,8 +1085,8 @@ def main():
             spec, "val", transforms=_PhaseAValTransforms()
         )
         # PhaseA emits per-image ignore_masks / mask_weights / mask_pixel_weights
-        # and needs the same post-transform aux resize + stash as the COCO path.
-        # Setting this flag drives install_transform_aux_resize(model) below.
+        # and needs the boundary-aware mask loss + post-transform aux resize +
+        # stash. The consolidated MaskSupervisionPatch.install() below does it.
         _install_aux_resize = True
     else:
         # C-3(b): parse the area-adaptive band config once (None when off).
@@ -1107,19 +1114,11 @@ def main():
             boundary_ignore_band=args.boundary_ignore_band,
             band_config=_band_config,
         )
+        # The boundary-aware mask loss + transform aux-resize/stash are
+        # installed by the consolidated MaskSupervisionPatch.install() below.
         _install_aux_resize = (
             args.per_source_mask_weight or args.per_instance_mask_trusted
         )
-        if _install_aux_resize:
-            from core.training.boundary_aware_mask import install_patch
-            install_patch()
-            modes = []
-            if args.per_source_mask_weight:
-                modes.append("per-source-mask-weight")
-            if args.per_instance_mask_trusted:
-                modes.append("per-instance-mask-trusted")
-            print(f"[PATCH] boundary-aware maskrcnn_loss installed "
-                  f"({'+'.join(modes)})")
     print(f"[DATA] Train: {len(train_ds)} images, Val: {len(val_ds)} images")
 
     loader_kwargs = dict(
@@ -1148,36 +1147,27 @@ def main():
         reinit_box_predictor(model)
     model.to(device)
 
-    # Boundary-aware supervision: wrap model.transform so per-image aux fields
-    # (mask_pixel_weights, ignore_masks) are resized to match torchvision's
-    # post-transform mask shape before stashing — fixes the spatial mismatch
-    # between pre-transform 400-space weights and post-transform 800-space
-    # proposals used by patched mask loss.
-    if _install_aux_resize:
-        from core.training.boundary_aware_mask import install_transform_aux_resize
-        install_transform_aux_resize(model)
-        print("[HOOK] model.transform wrapped for post-transform aux resize + stash")
-
-    # ── Per-source box reg loss: install fastrcnn patch + wrap RoI sampler ──
-    if args.log_per_source_box_reg_loss:
-        from core.training.boundary_aware_mask import (
-            install_patch as _install_mask_patch,
-            install_fastrcnn_patch,
-            install_transform_aux_resize as _install_transform_box,
-            wrap_select_training_samples,
-        )
-        _install_mask_patch()    # idempotent; ensures stash hook also runs
-        install_fastrcnn_patch()
-        wrap_select_training_samples(model)
-        # Reuse the same transform wrapper for box-loss bucketing. The wrapper
-        # also handles non-mask cases gracefully (no-op when aux fields absent),
-        # so it's safe even when neither per_source_mask_weight nor
-        # per_instance_mask_trusted is set.
-        if not _install_aux_resize:
-            _install_transform_box(model)
-            print("[HOOK] model.transform wrapped (box-loss bucketing path)")
-        print("[PATCH] fastrcnn_loss patched + select_training_samples wrapped "
-              "(per-source box reg loss bucketing ON)")
+    # ── Boundary-aware supervision lifecycle seam ─────────────────────────
+    # One object owns install → per-batch boundary → teardown for the three
+    # torchvision monkey-patches: boundary-aware mask loss + transform
+    # aux-resize/auto-stash (per-image mask_pixel_weights / ignore_masks resized
+    # to torchvision's post-transform shape, fixing the 400-space-vs-800-space
+    # mismatch) + per-source box-reg-loss telemetry. It replaces the previously
+    # scattered install calls whose ordering was implicit; the *set* of
+    # installed patches is byte-equivalent to the pre-seam code:
+    #   enable_aux_resize          → mask-loss patch + transform wrapper
+    #   enable_box_loss_telemetry  → + fastrcnn patch + select_training wrap
+    # (see core.training.boundary_aware_mask.MaskSupervisionPatch). For a
+    # single-run process teardown is unnecessary (process exit cleans up); the
+    # seam's teardown is exercised by tests/training/test_mask_supervision_patch.
+    mask_patch = None
+    if _install_aux_resize or args.log_per_source_box_reg_loss:
+        from core.training.boundary_aware_mask import MaskSupervisionPatch
+        mask_patch = MaskSupervisionPatch(
+            model,
+            enable_aux_resize=_install_aux_resize,
+            enable_box_loss_telemetry=args.log_per_source_box_reg_loss,
+        ).install()
 
     # Trusted source classification mirrors _LABEL_SOURCE_TO_MASK_TRUSTED.
     _TRUSTED_SRC = {k for k, v in _LABEL_SOURCE_TO_MASK_TRUSTED.items() if v}
@@ -1441,6 +1431,7 @@ def main():
             avg_loss = train_one_epoch(
                 model, optimizer1, train_loader, device, epoch,
                 scaler=scaler, profiler=epoch_prof, ema=ema,
+                mask_patch=mask_patch,
             )
             dt = time.time() - t0
             if epoch_prof is not None:
@@ -1619,6 +1610,7 @@ def main():
         avg_loss = train_one_epoch(
             model, optimizer2, train_loader, device, epoch,
             lr_scheduler=scheduler, scaler=scaler, profiler=epoch_prof, ema=ema,
+            mask_patch=mask_patch,
         )
         dt = time.time() - t0
         if epoch_prof is not None:
