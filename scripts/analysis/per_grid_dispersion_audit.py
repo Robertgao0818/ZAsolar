@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import math
+import sys
 from pathlib import Path
 
 import geopandas as gpd
@@ -24,6 +25,9 @@ from shapely.ops import unary_union
 ROOT = Path("/home/gaosh/projects/ZAsolar")
 OUTDIR = ROOT / "docs/experiments/per_hexagon_dispersion_2026-05-10"
 OUTDIR.mkdir(parents=True, exist_ok=True)
+
+sys.path.insert(0, str(ROOT))
+from core.polygon_validation import MAX_PLAUSIBLE_POLY_M2  # noqa: E402
 
 GRIDS = [
     "G0772","G0773","G0774","G0775","G0776",
@@ -42,7 +46,6 @@ LAYERS = {
     ),
 }
 METRIC_CRS = "EPSG:32735"
-MAX_PLAUSIBLE = 20_000.0  # m², reject corrupted polygons
 
 
 def union_geom(p: Path):
@@ -56,7 +59,7 @@ def union_geom(p: Path):
     if str(g.crs) != METRIC_CRS:
         g = g.to_crs(METRIC_CRS)
     geoms = [x for x in g.geometry if x and not x.is_empty
-             and 0 < x.area <= MAX_PLAUSIBLE]
+             and 0 < x.area <= MAX_PLAUSIBLE_POLY_M2]
     if not geoms:
         return None
     return unary_union(geoms)

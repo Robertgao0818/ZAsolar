@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 import shutil
 import sys
 from dataclasses import dataclass, replace
@@ -41,6 +40,8 @@ from shapely.ops import unary_union
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+
+from core.polygon_validation import geometry_finite  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -98,14 +99,6 @@ def _csv_floats(raw: str | None, fallback: list[float]) -> list[float]:
     return vals or fallback
 
 
-def _finite_bounds(geom) -> bool:
-    try:
-        bounds = geom.bounds
-    except Exception:
-        return False
-    return all(math.isfinite(v) and abs(v) < 1e18 for v in bounds)
-
-
 def _geometry_area_m2(gdf: gpd.GeoDataFrame) -> gpd.GeoSeries:
     return gdf.geometry.area.astype(float)
 
@@ -129,7 +122,7 @@ def _filter_gdf(
     out = gdf.copy()
     valid = out.geometry.notna() & out.geometry.is_valid & ~out.geometry.is_empty
     if valid.any():
-        valid &= out.geometry.apply(_finite_bounds)
+        valid &= out.geometry.apply(geometry_finite)
     out = out[valid].copy()
     stats["after_valid_geometry"] = int(len(out))
 
@@ -295,7 +288,7 @@ def _clean_metric(gdf: gpd.GeoDataFrame, metric_crs: str | None = None) -> gpd.G
         out = out.to_crs(metric_crs)
     valid = out.geometry.notna() & out.geometry.is_valid & ~out.geometry.is_empty
     if valid.any():
-        valid &= out.geometry.apply(_finite_bounds)
+        valid &= out.geometry.apply(geometry_finite)
     return out[valid].reset_index(drop=True)
 
 

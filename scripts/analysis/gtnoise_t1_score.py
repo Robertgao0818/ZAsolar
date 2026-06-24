@@ -37,13 +37,13 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 import detect_and_evaluate as dae  # noqa: E402
+from core.polygon_validation import MAX_PLAUSIBLE_POLY_M2  # noqa: E402
 from core.region_registry import get_region_config  # noqa: E402
 from scripts.analysis.area_aggregate_eval import _gt_spec_for  # noqa: E402
 
 CFG_PATH = REPO / "configs" / "eval" / "gtnoise_t1_ceiling.yaml"
 OUT_ROOT = REPO / "results" / "analysis" / "gtnoise_t1_ceiling"
 IOU = 0.5
-MAX_POLY_M2 = 20_000.0
 
 
 def _clean(g: gpd.GeoDataFrame, metric_crs: str) -> gpd.GeoDataFrame:
@@ -54,7 +54,7 @@ def _clean(g: gpd.GeoDataFrame, metric_crs: str) -> gpd.GeoDataFrame:
     g = g.to_crs(metric_crs)
     g = g[g.geometry.notna() & ~g.geometry.is_empty]
     g.geometry = g.geometry.buffer(0)
-    g = g[(g.geometry.area > 0) & (g.geometry.area <= MAX_POLY_M2)]
+    g = g[(g.geometry.area > 0) & (g.geometry.area <= MAX_PLAUSIBLE_POLY_M2)]
     return g.reset_index(drop=True)
 
 

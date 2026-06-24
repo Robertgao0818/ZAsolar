@@ -154,8 +154,10 @@ docs/
 | `core/region_registry.py` | 加载 regions.yaml 提供 region/grid 查询 API（含 `ModelRunConfig.deprecated`，2026-06-12 起为 deprecated 标记唯一权威） |
 | `core/eval_matching.py` | IoU 匹配内核（`compute_iou` + `iou_matching`）— V1.3 F1 主裁判，纯函数；`detect_and_evaluate.py` 经 shim 复用（2026-06-12 提取） |
 | `core/area_metrics.py` | Tier-1 面积聚合指标内核（`summarize`：σ_Bw/RMSE/agg_F1/thru0_β/R²/bootstrap CI）— Ch3 主裁判（2026-06-12 提取） |
+| `core/polygon_validation.py` | polygon 几何有效性 + 面积上限过滤单一实现（`geometry_finite`/`clean_metric_gdf`/`read_polygons` + canonical `MAX_PLAUSIBLE_POLY_M2=20000`）— "valid polygon" 唯一定义；`area_aggregate_eval` 保 re-export shim（`_geometry_finite`/`_sum_area_m2`/`_read_polys_geom`）；validity-only，policy/统计不入（2026-06-19 收编 8+ 副本） |
 | `core/chip_extraction.py` | chip 裁切 + tile resolve 单一实现（chunked/mosaic 双布局；HN/COCO 导出共用；2026-06-12 收编 4 份副本并修 mosaic 静默丢 HN bug） |
 | `core/training/positive_sources.py` | CT/JHB 正样本 loader + label_source 派生（`review_root` 显式参数；dataset_builder / build_unified_reviewall 共用，2026-06-12 收编） |
+| `core/training/boundary_aware_mask.py` | boundary-aware Mask R-CNN 监督 monkey-patch 包（per-pixel ignore band + per-instance/per-pixel mask weight + per-source box-reg telemetry）；`MaskSupervisionPatch` 生命周期 seam 收口 install → per-batch boundary → teardown，替代 train.py 4 处隐式排序 install，并以 `batch()` 的 `StaleSupervisionError` 断言把 stale-state 泄漏结构性堵死（2026-06-19 候选 #2） |
 | `scripts/validate_registry.py` | 注册表交叉验证（manifest ↔ training_sets ↔ model_registry ↔ regions） |
 | `scripts/analysis/lock_operating_point.py` | leakage-free 工作点锁定（拟合+迁移验收+Platt ablation，见 docs/evaluation_protocol.md §2） |
 | `scripts/analysis/installation_sym_eval.py` | installation_sym 诊断 profile（GT 侧兄弟碎片 dissolve + flip counters，docs/evaluation_protocol.md §4；仅诊断 channel） |

@@ -22,6 +22,7 @@ Outputs (docs/experiments/sseg_kw_calibration_2026-05-10/)
 from __future__ import annotations
 
 import csv
+import sys
 from pathlib import Path
 
 import geopandas as gpd
@@ -36,6 +37,9 @@ ROOT = Path("/home/gaosh/projects/ZAsolar")
 OUTDIR = ROOT / "docs/experiments/sseg_kw_calibration_2026-05-10"
 OUTDIR.mkdir(parents=True, exist_ok=True)
 
+sys.path.insert(0, str(ROOT))
+from core.polygon_validation import MAX_PLAUSIBLE_POLY_M2  # noqa: E402
+
 CT_RUN_DIR = ROOT / "results/cape_town/v3c_targeted_hn_aerial_2025"
 SSEG_CSV = ROOT / "data/sseg_registration_geo.csv"
 TASK_GRID = ROOT / "data/task_grid.gpkg"
@@ -43,7 +47,6 @@ TASK_GRID = ROOT / "data/task_grid.gpkg"
 H3_RES = 9
 WGS84 = "EPSG:4326"
 METRIC_CRS = "EPSG:32734"  # CT region UTM
-MAX_PLAUSIBLE_M2 = 20_000.0
 COMMISSIONED_PREFIX = "1.0 Approved grid-tied installation commissioned"
 
 
@@ -127,7 +130,7 @@ for grid_id in grid_ids:
     # Compute area in metric CRS
     g_metric = g if str(g.crs) == METRIC_CRS else g.to_crs(METRIC_CRS)
     g_metric["area_m2"] = g_metric.geometry.area
-    g_metric = g_metric[(g_metric["area_m2"] > 0) & (g_metric["area_m2"] <= MAX_PLAUSIBLE_M2)]
+    g_metric = g_metric[(g_metric["area_m2"] > 0) & (g_metric["area_m2"] <= MAX_PLAUSIBLE_POLY_M2)]
     if g_metric.empty:
         continue
     # Get centroids in WGS84 for H3 lookup

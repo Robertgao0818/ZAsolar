@@ -20,12 +20,6 @@ import argparse
 import csv
 from pathlib import Path
 
-import math
-
-import geopandas as gpd
-import pyogrio
-from shapely.ops import unary_union
-
 from core.region_registry import (
     get_annotations_dir_for_grid,
     get_model_run,
@@ -52,96 +46,22 @@ def _resolve(path: str) -> Path:
     return p if p.is_absolute() else REPO_ROOT / p
 
 
-# Any single solar installation polygon larger than this in metric area is
-# almost certainly a corrupted geometry (broken coord, grid-tile outline, etc.)
-# and will distort aggregate sums. Residential installs are <~200 m²,
-# commercial <~5000 m². 20 000 m² is a generous upper bound.
-_MAX_PLAUSIBLE_POLY_M2 = 20_000.0
-
-
-def _geometry_finite(geom) -> bool:
-    """Reject polygons with non-finite coordinates (NaN, inf, denormals)."""
-    try:
-        minx, miny, maxx, maxy = geom.bounds
-    except Exception:
-        return False
-    for v in (minx, miny, maxx, maxy):
-        if not math.isfinite(v) or abs(v) > 1e18:
-            return False
-    return True
-
-
-def _sum_area_m2(
-    gpkg_path: Path, metric_crs: str, layer: str | None
-) -> tuple[int, float, float, int]:
-    """Return (n_features_kept, total_area_m2, max_poly_m2, n_dropped).
-
-    Drops polygons with invalid geometries, non-finite coords, or polygon
-    area exceeding _MAX_PLAUSIBLE_POLY_M2. Reprojects to ``metric_crs``.
-    If ``layer`` is specified but missing, falls back to the first layer.
-    """
-    available = [row[0] for row in pyogrio.list_layers(gpkg_path)]
-    chosen: str | None = layer if layer and layer in available else None
-    if chosen is None and available:
-        chosen = available[0]
-    read_kwargs: dict[str, object] = {}
-    if chosen:
-        read_kwargs["layer"] = chosen
-    gdf = gpd.read_file(gpkg_path, **read_kwargs)
-    if gdf.empty:
-        return 0, 0.0, 0.0, 0
-    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid]
-    gdf = gdf[gdf.geometry.apply(_geometry_finite)]
-    if gdf.empty:
-        return 0, 0.0, 0.0, 0
-    if gdf.crs is None or str(gdf.crs) != metric_crs:
-        gdf = gdf.to_crs(metric_crs)
-    areas = gdf.geometry.area
-    keep_mask = areas <= _MAX_PLAUSIBLE_POLY_M2
-    n_dropped = int((~keep_mask).sum())
-    kept = areas[keep_mask]
-    if kept.empty:
-        return 0, 0.0, 0.0, n_dropped
-    return len(kept), float(kept.sum()), float(kept.max()), n_dropped
-
-
-def _read_polys_geom(
-    gpkg_path: Path, metric_crs: str, layer: str | None
-):
-    """Like _sum_area_m2 but also returns the unary_union geometry needed
-    for set-theoretic R/P/F1 / IoU. Required for per-detection outputs where
-    overlapping polygons would inflate naive sum (overlap factor ~1.6 on
-    train20_val5_hn per-det).
-
-    Returns: (n_kept, sum_area_m2, max_poly_m2, n_dropped, union_geom_or_None)
-    """
-    available = [row[0] for row in pyogrio.list_layers(gpkg_path)]
-    chosen: str | None = layer if layer and layer in available else None
-    if chosen is None and available:
-        chosen = available[0]
-    read_kwargs: dict[str, object] = {}
-    if chosen:
-        read_kwargs["layer"] = chosen
-    gdf = gpd.read_file(gpkg_path, **read_kwargs)
-    if gdf.empty:
-        return 0, 0.0, 0.0, 0, None
-    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid]
-    gdf = gdf[gdf.geometry.apply(_geometry_finite)]
-    if gdf.empty:
-        return 0, 0.0, 0.0, 0, None
-    if gdf.crs is None or str(gdf.crs) != metric_crs:
-        gdf = gdf.to_crs(metric_crs)
-    areas = gdf.geometry.area
-    keep_mask = areas <= _MAX_PLAUSIBLE_POLY_M2
-    n_dropped = int((~keep_mask).sum())
-    kept_mask = keep_mask & (areas > 0)
-    kept_geoms = [g for g, k in zip(gdf.geometry, kept_mask) if k]
-    if not kept_geoms:
-        return 0, 0.0, 0.0, n_dropped, None
-    sum_area = float(sum(g.area for g in kept_geoms))
-    max_area = float(max(g.area for g in kept_geoms))
-    u = unary_union(kept_geoms)
-    return len(kept_geoms), sum_area, max_area, n_dropped, u
+# Polygon geometry-validity + area-cap filtering was extracted to
+# core.polygon_validation on 2026-06-19 (ADR-0001 deepening track, handoff
+# 2026-06-19-polygon-validation-extraction.md). Re-exported here so existing
+# by-name callers — `from scripts.analysis.area_aggregate_eval import
+# _read_polys_geom` (validate_checkpoint, lock_operating_point,
+# polygon_conf_sweep, li_count_recall_sweep, eval_xdomain60) and the bare
+# `from area_aggregate_eval import ...` in poly_conf_sweep — keep resolving
+# without code changes (D3: move + shim, never a second implementation).
+# These wrappers are byte-equivalence-verified against the originals across
+# 23 real gpkgs (CT / JHB / Vexcel / predictions); do not re-inline them.
+from core.polygon_validation import (  # noqa: F401  (re-export for backward compat)
+    _MAX_PLAUSIBLE_POLY_M2,
+    _geometry_finite,
+    _read_polys_geom,
+    _sum_area_m2,
+)
 
 
 _GT_PRIORITY_SUFFIXES = ("_SAM2_", "_V4_", "_reviewed", "")

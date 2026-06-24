@@ -36,6 +36,7 @@ from scripts.analysis.area_aggregate_eval import (  # noqa: E402
     _read_polys_geom,
     summarize,
 )
+from core.polygon_validation import clean_metric_gdf  # noqa: E402
 from core.region_registry import get_region_config  # noqa: E402
 from core.negative_pool_leakage import mined_grids_for_region  # noqa: E402
 
@@ -53,29 +54,24 @@ LAYER = {
     "gqeberha": "vexcel_ortho_2026_01",
     "pietermaritzburg": "vexcel_ortho_2025_12",
 }
-MAX_PLAUSIBLE_POLY_M2 = 20_000.0
 
 
 def _clean_polys(path: Path, metric_crs: str, layer=None) -> list:
-    """Return a list of individual valid polygon geometries in metric CRS."""
+    """Return a list of individual valid polygon geometries in metric CRS.
+
+    Validity + finite + area-cap filtering delegated to the canonical
+    ``core.polygon_validation.clean_metric_gdf`` (drop_zero_area=True, matching
+    the original area>0 gate). The original here also ran ``buffer(0)`` repair
+    on invalid geometries; that path is dead on real data (0/2564 GT features
+    invalid across the 60 Vexcel grids) and is dropped to keep one canonical
+    validity definition. The ``crs is None → []`` guard is preserved because
+    the canonical reprojection assumes a CRS is present.
+    """
     g = gpd.read_file(path, layer=layer)
-    if g.empty:
+    if g.empty or g.crs is None:
         return []
-    if g.crs is None:
-        return []
-    g = g.to_crs(metric_crs)
-    out = []
-    for geom in g.geometry:
-        if geom is None or geom.is_empty:
-            continue
-        if not geom.is_valid:
-            geom = geom.buffer(0)
-        if geom.is_empty or not geom.is_valid:
-            continue
-        if geom.area <= 0 or geom.area > MAX_PLAUSIBLE_POLY_M2:
-            continue
-        out.append(geom)
-    return out
+    cleaned, _ = clean_metric_gdf(g, metric_crs=metric_crs, drop_zero_area=True)
+    return list(cleaned.geometry)
 
 
 def _polygon_prf(preds: list, gts: list, iou_thr: float = 0.5) -> dict:

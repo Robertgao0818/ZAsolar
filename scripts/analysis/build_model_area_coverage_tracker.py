@@ -37,6 +37,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from core.grid_utils import get_metric_crs  # noqa: E402
+from core.polygon_validation import clean_metric_gdf  # noqa: E402
 from core.region_registry import get_region_config  # noqa: E402
 from scripts.analysis.build_model_grid_metrics_tracker import (  # noqa: E402
     family_of as _family_of_run,
@@ -53,7 +54,6 @@ OUTPUT_CSV = OUTPUT_DIR / "model_area_coverage_tracker.csv"
 OUTPUT_MD = OUTPUT_DIR / "model_area_coverage_tracker.md"
 
 REGION_KEY = {"ct": "cape_town", "jhb": "johannesburg", "cape_town": "cape_town", "johannesburg": "johannesburg"}
-MAX_PLAUSIBLE_POLY_M2 = 20_000.0
 
 COLUMNS = [
     "region",
@@ -115,29 +115,26 @@ def _fmt(x: Any, digits: int = 3) -> str:
     return f"{v:.{digits}f}"
 
 
-def _geometry_finite(geom) -> bool:
-    try:
-        bounds = geom.bounds
-    except Exception:
-        return False
-    return all(math.isfinite(v) and abs(v) < 1e18 for v in bounds)
-
-
 def _clean_metric_gdf(gdf: gpd.GeoDataFrame, *, assumed_crs: str, metric_crs: str) -> tuple[gpd.GeoDataFrame, int]:
+    """Validity-filter + reproject to ``metric_crs``, returning the cleaned gdf
+    and the total number of dropped features (invalid / non-finite / over-cap).
+
+    Validity is delegated to the canonical ``core.polygon_validation`` pipeline
+    (notna+valid → finite → reproject → area cap ≤ 20000 m², keeping zero-area
+    polygons via ``drop_zero_area=False``). The ``n_dropped`` here keeps this
+    tracker's *all-drops* accounting (``before − after``, surfaced as
+    ``n_dropped_gt`` / ``n_dropped_pred`` in the output CSV), unlike the
+    canonical cap-only count. ``assumed_crs`` fills a missing CRS before the
+    canonical reproject (which assumes a CRS is present). Verified byte-identical
+    to the previous inline implementation across 225 real gpkg calls.
+    """
     if gdf.empty:
         return gdf, 0
     if gdf.crs is None:
         gdf = gdf.set_crs(assumed_crs)
-    if str(gdf.crs) != metric_crs:
-        gdf = gdf.to_crs(metric_crs)
     before = len(gdf)
-    gdf = gdf[gdf.geometry.notna() & gdf.geometry.is_valid & ~gdf.geometry.is_empty].copy()
-    if not gdf.empty:
-        gdf = gdf[gdf.geometry.apply(_geometry_finite)].copy()
-    if not gdf.empty:
-        areas = gdf.geometry.area
-        gdf = gdf[areas <= MAX_PLAUSIBLE_POLY_M2].copy()
-    return gdf.reset_index(drop=True), before - len(gdf)
+    cleaned, _ = clean_metric_gdf(gdf, metric_crs=metric_crs, drop_zero_area=False)
+    return cleaned.reset_index(drop=True), before - len(cleaned)
 
 
 def _read_largest_layer(path: Path) -> tuple[gpd.GeoDataFrame, str | None]:

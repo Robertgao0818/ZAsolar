@@ -48,6 +48,7 @@ REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 import detect_and_evaluate as dae  # noqa: E402
+from core.polygon_validation import MAX_PLAUSIBLE_POLY_M2  # noqa: E402
 from core.region_registry import get_region_config  # noqa: E402
 from scripts.analysis.area_aggregate_eval import _gt_spec_for  # noqa: E402
 
@@ -67,7 +68,6 @@ CT26_RUNS = ["v3c_wave1_perdet", "v3c_wave1_pixelor",
 CLEAN_GT_ROOT = REPO / "data" / "annotations_channel2_clean"
 CT_GT_ROOT = REPO / "data" / "annotations" / "Capetown"
 
-MAX_PLAUSIBLE_POLY_M2 = 20_000.0
 IOU = 0.5
 
 
