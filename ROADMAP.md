@@ -35,14 +35,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-06-14: feat(region): extend CPT regrid to full metro — 2083 cells, L folded into CPT (decision A)
-- 2026-06-14: chore(infra+docs): pre-push test gate, TTA probes, roadmap/plan roll
-- 2026-06-14: refactor(core): architecture optimization landing — eval/area/chip/positive-source extraction (ADR-0001)
-- 2026-06-14: feat(region): CT CPT regrid + namespace-aware registry (ADR-0002)
-- 2026-06-12: docs(plans): optimization checklist 校对 — xhealth-2 done, core-4/cls-6 半收敛裁决
-- 2026-06-12: chore(env): xhealth-2 — regenerate requirements.lock cu126→cu128, pin pytest, hardware header
-- 2026-06-12: docs(handoffs): Tier C pod runbook — unified entry for tomorrow's GPU steps
-- 2026-06-12: feat(analysis): C-3(a) Phase-0 mislabel-rate measurement harness
+- 2026-06-24: feat(training): deepen mask-supervision patch lifecycle
+- 2026-06-24: refactor(analysis): extract core/polygon_validation.py shared module (ADR-0001)
+- 2026-06-23: docs(validation): add complete Chinese validation & robustness methodology
+- 2026-06-16: perf(census): background per-batch Dropbox backup so next batch's detect overlaps upload
+- 2026-06-16: feat(census): split surveyed-empty from failure + per-grid coverage manifest
+- 2026-06-15: fix(census-setup): accept 0-detection grid as valid smoke test outcome for cls step
+- 2026-06-15: fix(detect): guard module-level set_grid_context against retired/missing default grid id
+- 2026-06-15: fix(census): correct unified_A HF repo id to botao0818/zasolar-unified-reviewall-A
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.

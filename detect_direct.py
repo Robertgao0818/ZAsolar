@@ -130,14 +130,23 @@ def resolve_tile_paths(args: argparse.Namespace, region_key: str) -> list[Path]:
     layer = region_registry.get_imagery_layer(region_key, args.imagery_layer)
     grid_id = args.grid_id
 
+    # On-disk tiles stay keyed under the SOURCE grid ID after the CPT regrid
+    # (ADR-0002 §5): CPT1240's tiles live in the G1240 dir, with CPT1240_*
+    # filenames. download_tiles.py:197 and core.grid_utils.resolve_tiles_dir:230
+    # both honor this; this resolver must too, or every regridded (CPT) grid
+    # FileNotFounds. Directory/mosaic paths use source_id; the chip glob keeps the
+    # logical grid_id (filenames are CPT-keyed). For non-regridded regions
+    # resolve_source_grid_id is a no-op (returns grid_id), so JHB etc. are unchanged.
+    source_id = region_registry.resolve_source_grid_id(grid_id, region_key)
+
     # 1) SOLAR_TILES_ROOT fast path (RunPod /dev/shm)
     env_root = os.environ.get("SOLAR_TILES_ROOT")
     chunk_dir = None
     mosaic_path = None
     if env_root:
         env_path = Path(env_root)
-        env_chunk = env_path / grid_id
-        env_mosaic = env_path / f"{grid_id}_mosaic.tif"
+        env_chunk = env_path / source_id
+        env_mosaic = env_path / f"{source_id}_mosaic.tif"
         if layer.file_layout == "chunked" and env_chunk.exists():
             chunk_dir = env_chunk
         elif layer.file_layout == "mosaic" and env_mosaic.exists():
@@ -147,9 +156,9 @@ def resolve_tile_paths(args: argparse.Namespace, region_key: str) -> list[Path]:
     if chunk_dir is None and mosaic_path is None:
         layer_root = region_registry.get_imagery_layer_path(region_key, args.imagery_layer)
         if layer.file_layout == "mosaic":
-            mosaic_path = layer_root / f"{grid_id}_mosaic.tif"
+            mosaic_path = layer_root / f"{source_id}_mosaic.tif"
         else:
-            chunk_dir = layer_root / grid_id
+            chunk_dir = layer_root / source_id
 
     if layer.file_layout == "mosaic":
         if mosaic_path is None or not mosaic_path.exists():

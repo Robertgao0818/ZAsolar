@@ -153,3 +153,12 @@ data/analysis/gemini_review_calib/
 # Local per-machine agent launchers (hardcoded local paths)
 start-*.sh
 start-*.bat
+
+# Job-search case study (shared by email, not tracked — see job_framing_delivery)
+CASE_STUDY.md
+CASE_STUDY.html
+
+# Generated root-level report HTML (regeneratable from scripts/analysis/*)
+/ct_census_report.html
+/ct_census_calibration_appendix.html
+/unified_A_trainset.html

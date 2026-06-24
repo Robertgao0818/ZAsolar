@@ -300,6 +300,22 @@ regions:
           only; JHB Vexcel/GEID keep the Gemini cross-domain reviewer (re-validate
           classify-all large band on JHB CBD 25-grid before extending cross-domain).
           Results: docs/plans/2026-06-08-cls-chip-adaptive-upgrade-RESULTS.md
+      unifiedA_census_perdet:
+        model_version: "exp_unified_reviewall_A"
+        imagery_layer: "aerial_2025"
+        results_path: "results/cape_town/unifiedA_census_perdet"
+        inference_date: "2026-06-16"
+        grid_count: 2083
+        notes: |
+          Cape Town full-census production run (2083 CPT task-grid cells).
+          Detection chain is detect_direct.py -> finalize.py
+          --merge-mode per-detection with v4_canonical postproc, detector
+          score-threshold 0.05, detections-per-img 300, chip/overlap/mask-thr
+          400/0.25/0.3. Post-detection FP suppression is solar_cls adaptive_v1
+          (cls_pv_thermal_v2_dinov2_vits14_adaptive + thresholds_v2_adaptive,
+          aerial_2025 threshold 0.7168, classify-all). Registered so census
+          outputs are physically isolated from legacy flat results/ and the
+          aborted geoai-caliber 221-grid run.
       # Deferred: checkpoints_cleaned (24 grids) and NaN-config (~77 grids)
       # remain under legacy results/ for PR8 triage.
 

@@ -27,8 +27,18 @@ set -uo pipefail   # deliberately NOT -e: one bad grid must not kill the run
 ZAS=${ZAS:-/root/ZAsolar}
 CLS=${CLS:-/root/solar_cls}
 RUN=${RUN:-unifiedA_census_perdet}
+ENGINE_ID=${ENGINE_ID:-detect_direct_finalize_perdet_v4canonical_cls_adaptive_v1}
 DETECTOR_CKPT=${DETECTOR_CKPT:-$ZAS/checkpoints/exp_unified_reviewall_A/best_model.pth}
-CLS_CKPT=${CLS_CKPT:-$CLS/checkpoints/cls_pv_thermal_v2_dinov2_vits14/best_cls.pth}
+# cls = the LOCKED CT winner: adaptive_v1 checkpoint + adaptive thresholds table
+# (cov50 0.829/σ_Bw 0.260, project_cls_chip_adaptive_upgrade). classify_predictions
+# now ALWAYS extracts adaptive_v1 chips, so the non-adaptive fixed-400 checkpoint
+# (cls_pv_thermal_v2_dinov2_vits14) is a train/inference chip-geometry mismatch and
+# MUST NOT be used here. The matched threshold table (aerial_2025 dinov2 = 0.7168,
+# top-level chip_spec_version=adaptive_v1) must be passed explicitly — the DEFAULT
+# thresholds_v2.json is the stale fixed-400 table (0.5396) whose chip_spec_version
+# guard is inert (no top-level key), so it would silently mis-calibrate FP suppression.
+CLS_CKPT=${CLS_CKPT:-$CLS/checkpoints/cls_pv_thermal_v2_dinov2_vits14_adaptive/best_cls.pth}
+CLS_THRESHOLDS=${CLS_THRESHOLDS:-$CLS/configs/classifier/thresholds_v2_adaptive.json}
 POSTPROC=${POSTPROC:-$ZAS/configs/postproc/v4_canonical.json}
 TILES_DISK=${TILES_DISK:-/root/tiles_disk}     # persistent local tile store (kept for cls)
 PARALLEL=${PARALLEL:-6}                         # detect procs (RTX 5090)
@@ -39,15 +49,44 @@ STATE=${STATE:-/root/census_state}
 LOGS=${LOGS:-/root/census_logs}
 GLIST="$STATE/glist.txt"
 
+# Fragmentation guard: N parallel detect_direct procs each load their own Mask R-CNN
+# on one 5090 (32GB). expandable_segments keeps a late dense grid from OOM-ing a
+# long run (feedback_vexcel_inference_parallel_oom). Keep PARALLEL≤6 for CT WMS tiles;
+# do NOT raise to 10 without first reading peak-VRAM off the first batch's log.
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}
+[ "$PARALLEL" -gt 6 ] && echo "WARN: PARALLEL=$PARALLEL > 6 — OOM risk on a 32GB 5090; verify peak VRAM before trusting this." >&2
+
 mkdir -p "$STATE" "$LOGS" "$TILES_DISK"
 [ -f "$GLIST" ] || { echo "no $GLIST — run scripts/ct_census_setup.sh first"; exit 1; }
 [ -f "$DETECTOR_CKPT" ] || { echo "no detector ckpt $DETECTOR_CKPT"; exit 1; }
 [ -f "$CLS_CKPT" ] || { echo "no cls ckpt $CLS_CKPT"; exit 1; }
+[ -f "$CLS_THRESHOLDS" ] || { echo "no cls thresholds table $CLS_THRESHOLDS"; exit 1; }
 
 cd "$ZAS" && source scripts/activate_env.sh
 RESULTS_DIR=$(python -c "from core.grid_utils import get_results_root;print(get_results_root('ct',model_run='$RUN'))")
 TOTAL=$(wc -l < "$GLIST")
 echo "results dir: $RESULTS_DIR | grids: $TOTAL | batch: $BATCH | parallel: $PARALLEL | tiles: $TILES_DISK"
+
+STATE_ENGINE="$STATE/CENSUS_ENGINE"
+EXPECTED_ENGINE="run=$RUN results=$RESULTS_DIR engine=$ENGINE_ID"
+terminal_markers=$(ls "$STATE"/infer_*.ok "$STATE"/infer_*.empty "$STATE"/infer_*.fail 2>/dev/null | wc -l)
+if [ -f "$STATE_ENGINE" ]; then
+  current_engine=$(cat "$STATE_ENGINE")
+  if [ "$current_engine" != "$EXPECTED_ENGINE" ]; then
+    if [ "$terminal_markers" -gt 0 ]; then
+      echo "STATE engine mismatch: $STATE_ENGINE says '$current_engine', expected '$EXPECTED_ENGINE'."
+      echo "Clear old infer_*.{ok,empty,fail} and bk_*.ok markers before restarting this census caliber."
+      exit 1
+    fi
+    echo "$EXPECTED_ENGINE" > "$STATE_ENGINE"
+  fi
+elif [ "$terminal_markers" -gt 0 ]; then
+  echo "STATE has $terminal_markers existing infer markers but no direct-engine stamp."
+  echo "This is likely the aborted geoai-caliber run. Clear infer_*.{ok,empty,fail} and bk_*.ok before restart."
+  exit 1
+else
+  echo "$EXPECTED_ENGINE" > "$STATE_ENGINE"
+fi
 
 now(){ date +%s; }
 log(){ printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
@@ -84,31 +123,75 @@ infer_one(){
   local G=$1
   # terminal states needing no recompute: detected (.ok) OR surveyed-empty (.empty)
   { [ -f "$STATE/infer_$G.ok" ] || [ -f "$STATE/infer_$G.empty" ]; } && return 0
-  SOLAR_TILES_ROOT="$TILES_DISK" python "$ZAS/detect_and_evaluate.py" \
+  local OUT="$RESULTS_DIR/$G"
+  mkdir -p "$OUT"
+  # Start each non-terminal attempt from a clean direct-chain artifact set. This
+  # prevents an interrupted/failed retry from finalizing an old raw_detections.pkl
+  # or preserving a stale gpkg from the previous geoai-caliber run.
+  rm -f "$OUT/raw_detections.pkl" "$OUT/predictions_metric.gpkg" \
+        "$OUT/predictions.geojson" "$OUT/config.json"
+  rm -rf "$OUT/masks" "$OUT/vectors"
+  # ENGINE = direct Mask R-CNN (NO geoai). Two stages, matching the LOCKED CT
+  # baseline `unifiedA_li_perdet` (regions.yaml): detect_direct.py -> finalize.py
+  # --merge-mode per-detection, v4_canonical. detect_direct feeds the GPU via a
+  # DataLoader (workers/prefetch); geoai's path used a num_workers=0 loop that
+  # starved the GPU AND wrote per_detection_geoai output the cls calib never saw.
+  # Params MIRROR run_benchmark.py's direct pipeline that BUILT the baseline.
+  # detect_direct's DIRECT-mode default for detections-per-img is 300 (NOT 100 —
+  # the 100 value only applies under --parity-mode geoai, which we never set).
+  # run_benchmark.py also omits the flag and so also ran at 300, so 300 IS the
+  # baseline. We pass it EXPLICITLY (as every other orchestrator does) so nobody
+  # can "fix" the script toward 100 and silently halve the proposal cap off the
+  # cls calibration. score-thresh 0.05 / raw-mask-storage crop come from defaults
+  # and match the baseline. batch/workers/prefetch are throughput-only (no numeric
+  # effect). detect_direct resolves tiles by SOURCE grid id (CPT→G) since this fix.
+  SOLAR_TILES_ROOT="$TILES_DISK" python "$ZAS/detect_direct.py" \
     --grid-id "$G" --region ct --imagery-layer aerial_2025 \
-    --model-run "$RUN" --model-path "$DETECTOR_CKPT" \
-    --postproc-config "$POSTPROC" --data-scope full_grid --force \
+    --model-run "$RUN" --model-path "$DETECTOR_CKPT" --output-dir "$OUT" \
+    --detections-per-img 300 \
+    --chip-size 400 --overlap 0.25 --mask-threshold 0.3 \
+    --batch-size 4 --num-workers 2 --prefetch-factor 2 --device cuda \
     > "$LOGS/infer_$G.log" 2>&1
-  if [ -f "$RESULTS_DIR/$G/predictions_metric.gpkg" ]; then
-    rm -f "$STATE/infer_$G.fail" "$STATE/infer_$G.empty"; touch "$STATE/infer_$G.ok"
-  elif grep -q '未检测到太阳能板' "$LOGS/infer_$G.log"; then
-    # detector ran over every tile and found zero panels: a VALID census zero
-    # (surveyed, count=0), NOT a failure. Distinct .empty marker so resume skips
-    # it and the coverage manifest counts it as surveyed-empty, not lost/failed.
+  local rc=$?
+  if [ $rc -ne 0 ]; then
+    rm -f "$STATE/infer_$G.ok" "$STATE/infer_$G.empty"
+    touch "$STATE/infer_$G.fail"
+    rm -rf "$OUT/raw_detections.pkl" "$OUT/masks" "$OUT/vectors"
+    return 0
+  fi
+  SOLAR_TILES_ROOT="$TILES_DISK" python "$ZAS/finalize.py" \
+    --input "$OUT/raw_detections.pkl" --output-dir "$OUT" \
+    --postproc-config "$POSTPROC" --merge-mode per-detection \
+    --allow-overwrite-canonical \
+    >> "$LOGS/infer_$G.log" 2>&1
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    rm -f "$STATE/infer_$G.ok" "$STATE/infer_$G.empty"
+    touch "$STATE/infer_$G.fail"
+    rm -f "$OUT/predictions_metric.gpkg" "$OUT/predictions.geojson" "$OUT/config.json"
+    rm -rf "$OUT/raw_detections.pkl" "$OUT/masks" "$OUT/vectors"
+    return 0
+  fi
+  # State machine. ORDER MATTERS: under the direct chain a surveyed-empty grid
+  # (0 detections) STILL writes an EMPTY predictions_metric.gpkg (finalize prints
+  # "no polygons after vectorization — writing empty outputs"), so the empty
+  # signal MUST be tested BEFORE gpkg-exists — unlike the old geoai chain, which
+  # wrote no gpkg on zero detections and was checked the other way round.
+  if grep -q 'no polygons after vectorization' "$LOGS/infer_$G.log"; then
+    # surveyed, count=0: a VALID census zero (surveyed-empty), NOT a failure.
     rm -f "$STATE/infer_$G.fail"; touch "$STATE/infer_$G.empty"
+  elif [ -s "$OUT/predictions_metric.gpkg" ]; then
+    rm -f "$STATE/infer_$G.fail" "$STATE/infer_$G.empty"; touch "$STATE/infer_$G.ok"
   else
-    # no gpkg AND no clean zero-detection line = real failure (crash/OOM/no tiles).
-    # Keep as .fail: retried on resume, flagged 'infer_failed' in the manifest.
+    # no empty-signal AND no gpkg = real failure (detect/finalize crash, OOM, no
+    # tiles). Keep as .fail: retried on resume, flagged 'infer_failed' in manifest.
     touch "$STATE/infer_$G.fail"
   fi
-  # masks/ are intermediate per-tile raster (band1 mask + band2 conf) written
-  # before vectorization. Nothing downstream reads them: the census inventory
-  # lives in predictions_metric.gpkg, cls reads gpkg+tiles, backup ships gpkg,
-  # merge reads gpkg. Drop them the instant a grid is TERMINAL — success OR
-  # zero-detection (the `else` branch above). Zero-detection cells still write a
-  # full set of per-tile mask rasters (~225-440 MB/grid); at this census's grid
-  # count that is the dominant disk leak if left to accumulate.
-  rm -rf "$RESULTS_DIR/$G/masks"
+  # Reap heavy intermediates at TERMINAL state. The direct chain's disk hogs are
+  # raw_detections.pkl (mask crops) + finalize's masks/ + vectors/ dirs; nothing
+  # downstream reads them (inventory = predictions_metric.gpkg; cls reads
+  # gpkg+tiles; backup/merge read gpkg).
+  rm -rf "$OUT/raw_detections.pkl" "$OUT/masks" "$OUT/vectors"
 }
 export -f dl_one infer_one
 
@@ -170,7 +253,8 @@ log "cls classify-all over ${#OK_GRIDS[@]} grids"
 ( cd "$CLS" && source scripts/activate_env.sh
   SOLAR_TILES_ROOT="$TILES_DISK" ZASOLAR_ROOT="$ZAS" python scripts/classifier/classify_predictions.py \
     --grid-ids "${OK_GRIDS[@]}" --region ct --imagery-layer aerial_2025 \
-    --model-path "$CLS_CKPT" --classify-all --results-dir "$RESULTS_DIR" --batch-size 64 \
+    --model-path "$CLS_CKPT" --thresholds-v2 "$CLS_THRESHOLDS" \
+    --classify-all --results-dir "$RESULTS_DIR" --batch-size 64 \
 ) > "$LOGS/cls_finalize.log" 2>&1 || log "WARN cls finalize returned nonzero — check $LOGS/cls_finalize.log"
 
 log "merging -> single CPT census inventory"

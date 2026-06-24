@@ -32,8 +32,11 @@ from pathlib import Path
 
 import pandas as pd
 
-# the line detect_and_evaluate.py prints when every tile yielded zero panels
-ZERO_DETECTION_MARK = "未检测到太阳能板"
+# Log lines printed when every tile yielded zero panels. The direct chain
+# (finalize.py) prints the English line; the legacy geoai monolith
+# (detect_and_evaluate.py) printed the Chinese one. Match EITHER so the
+# .fail->empty reclassification works regardless of which engine produced the log.
+ZERO_DETECTION_MARKS = ("no polygons after vectorization", "未检测到太阳能板")
 
 
 def feat_count(fp: Path):
@@ -57,7 +60,8 @@ def log_says_empty(log_fp: Path) -> bool:
     if not log_fp.exists():
         return False
     try:
-        return ZERO_DETECTION_MARK in log_fp.read_text(errors="ignore")
+        text = log_fp.read_text(errors="ignore")
+        return any(mark in text for mark in ZERO_DETECTION_MARKS)
     except Exception:
         return False
 
