@@ -35,14 +35,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-06-24: docs(validation): validation methodology + CT census GT eval + reproducibility study
+- 2026-06-24: feat(census): CT census reporting, output table, GT eval + ops scripts
 - 2026-06-24: feat(training): deepen mask-supervision patch lifecycle
 - 2026-06-24: refactor(analysis): extract core/polygon_validation.py shared module (ADR-0001)
 - 2026-06-23: docs(validation): add complete Chinese validation & robustness methodology
 - 2026-06-16: perf(census): background per-batch Dropbox backup so next batch's detect overlaps upload
 - 2026-06-16: feat(census): split surveyed-empty from failure + per-grid coverage manifest
 - 2026-06-15: fix(census-setup): accept 0-detection grid as valid smoke test outcome for cls step
-- 2026-06-15: fix(detect): guard module-level set_grid_context against retired/missing default grid id
-- 2026-06-15: fix(census): correct unified_A HF repo id to botao0818/zasolar-unified-reviewall-A
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
