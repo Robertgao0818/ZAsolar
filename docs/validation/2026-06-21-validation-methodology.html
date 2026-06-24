@@ -1,0 +1,537 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ZAsolar — Validation &amp; Robustness Methodology</title>
+<style>
+:root{--ink:#1a1a1a;--mut:#666;--line:#222;--soft:#d8d8d8;--accent:#7a1f1f;}
+*{box-sizing:border-box}
+body{font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+ color:var(--ink);line-height:1.62;margin:0;background:#f4f2ee;font-size:16px;}
+.page{max-width:880px;margin:0 auto;background:#fff;padding:64px 72px 88px;
+ box-shadow:0 1px 30px rgba(0,0,0,.10);}
+.eyebrow{font-variant:small-caps;letter-spacing:.10em;color:var(--accent);font-size:.86rem;font-weight:600;}
+h1{font-size:1.86rem;line-height:1.22;margin:.18em 0 .1em;font-weight:700;letter-spacing:-.01em;}
+.sub{color:var(--mut);font-size:1.02rem;margin:.1em 0 1.0em;}
+.meta{font-size:.82rem;color:var(--mut);border-top:1px solid var(--soft);border-bottom:1px solid var(--soft);
+ padding:9px 0;margin:0 0 30px;display:flex;flex-wrap:wrap;gap:6px 22px;}
+.meta b{color:#333;font-weight:600;}
+h2{font-size:1.28rem;margin:2.0em 0 .5em;padding-bottom:.18em;border-bottom:1.5px solid var(--line);font-weight:700;}
+h2 .snum{display:inline-block;min-width:1.5em;color:var(--accent);}
+h3{font-size:1.04rem;margin:1.5em 0 .35em;font-weight:700;color:#2a2a2a;}
+p{margin:.55em 0;}
+ul,ol{margin:.5em 0 .7em;padding-left:1.4em;}
+li{margin:.28em 0;}
+strong,b{font-weight:700;}
+code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.85em;background:#f0eee9;padding:.05em .35em;border-radius:3px;}
+.abstract{background:#faf8f4;border:1px solid #ece7df;border-left:3px solid var(--accent);
+ padding:14px 20px;margin:0 0 6px;font-size:.97rem;}
+.abstract .alab{font-variant:small-caps;letter-spacing:.08em;color:var(--accent);font-weight:600;font-size:.8rem;display:block;margin-bottom:2px;}
+/* three-line (booktabs) tables */
+.tbl-wrap{margin:1.3em 0 1.7em;}
+.tcap{font-size:.93rem;margin-bottom:.45em;line-height:1.4;}
+.tcap .tnum{font-weight:700;}
+table.bt{border-collapse:collapse;width:100%;font-size:.855rem;
+ font-family:"Iowan Old Style",Palatino,Georgia,serif;font-variant-numeric:tabular-nums;}
+table.bt thead th{border-top:1.6px solid var(--line);border-bottom:1px solid var(--line);
+ padding:6px 9px;font-weight:700;vertical-align:bottom;}
+table.bt tbody td{padding:4.5px 9px;border:0;vertical-align:top;}
+table.bt tbody tr:last-child td{border-bottom:1.6px solid var(--line);}
+table.bt td.r,table.bt th.r{text-align:right;white-space:nowrap;}
+table.bt td.l,table.bt th.l{text-align:left;}
+table.bt td.sp,table.bt th.sp{border:0!important;width:18px;background:#fff;}
+table.bt tbody tr:hover td{background:#fbfaf7;}
+.tnote{font-size:.76rem;color:var(--mut);line-height:1.5;margin-top:.5em;padding-left:.2em;}
+.tnote .nlab{font-style:italic;color:#444;}
+.tsrc{font-size:.71rem;color:#9a958c;margin-top:.25em;font-family:"SF Mono",Menlo,monospace;}
+.badge{font-size:.72rem;font-weight:700;letter-spacing:.04em;padding:1px 7px;border-radius:9px;}
+.badge.confirmed{background:#e7f0e7;color:#256a2a;}
+.badge.corrected{background:#fdf0dd;color:#9a5a00;}
+.badge.unresolved{background:#fbe3e0;color:#a3281c;}
+.corr{background:#faf8f4;border:1px solid #ece7df;border-radius:6px;padding:8px 22px 14px;margin:1em 0;}
+.corr-h{font-variant:small-caps;letter-spacing:.07em;color:var(--accent);font-weight:700;font-size:.86rem;margin:.5em 0 0;}
+.foot{margin-top:46px;border-top:1px solid var(--soft);padding-top:14px;font-size:.78rem;color:var(--mut);}
+.exhibit{border:1.5px solid var(--line);border-radius:4px;margin:1.5em 0 2em;overflow:hidden;}
+.exhibit .xcap{background:#f1ece3;border-bottom:1.5px solid var(--line);padding:9px 16px;font-weight:700;font-size:1rem;}
+.exhibit .xcap .xsub{font-weight:400;color:var(--mut);font-size:.82rem;}
+table.ledger{border-collapse:collapse;width:100%;font-size:.85rem;}
+table.ledger th{text-align:left;background:#faf8f4;border-bottom:1px solid var(--line);padding:7px 12px;font-weight:700;}
+table.ledger td{padding:9px 12px;border-bottom:1px solid #e9e4db;vertical-align:top;line-height:1.5;}
+table.ledger tr:last-child td{border-bottom:0;}
+table.ledger td.step{font-weight:700;white-space:nowrap;color:#2a2a2a;}
+table.ledger td.choice{font-weight:700;color:var(--accent);}
+table.ledger .rej{color:var(--mut);}
+.pick{background:#edf3ed;border-left:3px solid #256a2a;padding:8px 15px;margin:.5em 0 1.3em;font-size:.9rem;line-height:1.5;}
+.pick b{color:#1f5a25;}
+@media print{body{background:#fff}.page{box-shadow:none;max-width:none;padding:0}}
+@media(max-width:760px){.page{padding:30px 18px}}
+</style>
+</head><body><div class="page">
+<div class="eyebrow">ZAsolar · Methodology</div>
+<div class="meta"><b>Date</b> 2026-06-21 &nbsp; <b>Scope</b> Census + install-date robustness &nbsp; <b>Audience</b> collaborator / portfolio</div>
+<h1>ZAsolar — Validation &amp; Robustness Methodology</h1>
+<h2>Executive summary</h2>
+<p>A census figure is only as credible as it is robust to the choices and the noise
+that produced it. This document audits the ZAsolar rooftop-solar inventory the way
+an applied economist would audit an estimate — by asking, of every headline number,
+<em>what could move it, and by how much.</em> Three questions, three answers:</p>
+<table>
+<thead>
+<tr>
+<th>Robustness question</th>
+<th>What it guards against</th>
+<th>Finding</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1. Specification robustness</strong> — is the headline an artifact of a tuned threshold?</td>
+<td>researcher degrees of freedom / oracle leakage</td>
+<td>The operating point is fitted <strong>only on calibration grids disjoint from every reporting suite</strong>, with a ≤1 pp transfer-acceptance gate. Where that gate <em>fails</em> (the production per-detection chain), reporting falls back to a <strong>pre-declared, fail-closed</strong> threshold rather than a swept optimum. The failure is recorded, not hidden.</td>
+</tr>
+<tr>
+<td><strong>2. Computational replicability</strong> — does the same input reproduce the same number?</td>
+<td>silent drift between runs</td>
+<td>Not seeded bit-reproduction of model weights, and we do not claim it. What is guaranteed: a single metric kernel, <strong>config-match output reuse</strong>, a <strong>frozen</strong> evaluation ground truth, and a <strong>locked</strong> merge-mode + operating point — so any number is re-derivable from, and traceable to, its source tiles and model run.</td>
+</tr>
+<tr>
+<td><strong>3. Instrument reliability</strong> — how much does the one stochastic device move the result?</td>
+<td>LLM sampling noise in the install-date layer</td>
+<td>The detector and post-processing are deterministic; the <strong>only</strong> stochastic step is the Gemini date-scorer. A test-retest (642 installations, 3 identical-input reruns) finds <strong>individual</strong> install-dates ~81 % reproducible at the production k = 1 setting; the number is confirmed to belong to the production model (re-scoring with <code>gemini-3-flash</code> is statistically identical, McNemar <em>p</em> ≈ 0.65) and is <strong>not</strong> a loose-decoder artifact (greedy <code>temperature:0</code> is already applied and does not reduce it). The actionable lever is a <strong>majority-of-3 vote</strong>, which a K = 6 certification shows lifts reproducibility to <strong>~0.95</strong> (inventory-weighted) at 3× cost. And the errors are near-mean-zero, so they <strong>wash out under aggregation</strong>: the published install-year cohort histogram reproduces to within <strong>~1.7 % per year</strong> (TVD 0.025) regardless.</td>
+</tr>
+</tbody>
+</table>
+<p>The honest one-line version: <em>individual estimates are noisier than they look, the
+aggregate is more robust than the individual estimates, and the one place a rerun
+could still move a number — the CT per-detection operating point — is flagged as
+fail-closed-pending rather than certified.</em></p>
+<p>Two semantic anchors hold throughout. (i) The Cape Town evaluation ground truth is
+<strong>SAM2 sub-array (Axis-A "A2") annotation, not installation-level gold</strong>, so
+per-polygon F1 is demoted to a diagnostic and model selection runs on
+area-aggregate dispersion (σ_Bw, RMSE). (ii) The target is an <strong>inventory-level
+area/count judgment</strong>, not a per-polygon match.</p>
+<hr>
+<h2>1 · Specification robustness — the calibration is not a tuned constant</h2>
+<p><strong>The threat.</strong> Sweeping a threshold on a reporting suite and then quoting the
+swept number on that same suite is oracle leakage — the estimate flatters itself.
+This is not hypothetical here: on the 2026-06-07 evaluation face the model ranking
+<em>flipped</em> with the sweep caliber — at one fixed threshold v3c wins; at each model's
+own best threshold unified_A wins. A threshold tuned on the evaluation set is
+therefore not a defensible operating point.</p>
+<p><strong>The control: a leakage-checked lock.</strong> An operating point is fitted <strong>only on a
+calibration grid set disjoint from every reporting suite</strong>, then validated for
+transfer (<code>scripts/analysis/lock_operating_point.py</code>). Three guarantees are
+enforced mechanically, not by convention:</p>
+<ul>
+<li>Calibration grids must not intersect any registered reporting suite — the script
+  raises <code>[LEAKAGE]</code> on intersection (<code>lock_operating_point.py:283–290</code>).</li>
+<li>Acceptance = the locked point's <code>agg_area_F1</code> is within <strong>1 pp</strong> of the oracle
+  sweep maximum <strong>on every</strong> validation suite, else the lock fails
+  (<code>ACCEPT_GAP = 0.01</code>, gate at <code>:325–327</code>).</li>
+<li>Validation suites are read-only — used to <em>check</em> transfer, never to <em>fit</em>
+  (<code>operating_point_calibration.yaml</code> rule 4).</li>
+</ul>
+<p>Each fit records its calibration roster, ranking rule, per-suite transfer gap, an
+<code>all_suites_pass</code> boolean, and the run's <code>git_head</code>.</p>
+<p><strong>The honest result — the gate has teeth.</strong> It has failed, and the failure is on
+the production chain:</p>
+<table>
+<thead>
+<tr>
+<th>lock</th>
+<th>merge-mode</th>
+<th style="text-align: right;">transfer gap</th>
+<th>verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ct_aerial_2025_v3c</code></td>
+<td>pixel-or</td>
+<td style="text-align: right;"><strong>0.00 pp</strong></td>
+<td>clean lock</td>
+</tr>
+<tr>
+<td><code>ct_aerial_2025_v3c_perdet</code></td>
+<td>per-detection</td>
+<td style="text-align: right;"><strong>5.22 pp</strong></td>
+<td><strong>fails acceptance</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The per-detection lock fails even after the whole calibration chain was re-run in
+per-detection mode to remove the merge-mode confound — the gap stays at 5.22 pp.
+The diagnosis is structural: on the per-detection chain the ranking rule (σ_Bw +
+RMSE) prefers a high threshold while the acceptance metric (agg_F1) peaks lower
+(t ≈ 0.925), because per-detection predictions carry no over-paint to trim, so the
+two metrics diverge. <strong>Disposition: fail-closed.</strong> Production per-detection
+reporting uses a <em>pre-declared</em> threshold from the 2026-06-07 trade-off analysis,
+never a value swept on the reporting suite. The unified_A × CT lock that would
+replace that pre-declared threshold with a certified one is registered with a
+leakage-clean calibration set (53 Li-KML grids, ≥23.5 km from all training/reporting
+cells) but is <strong>not yet fitted</strong> — its tiles are pending download. That gap is the
+section's load-bearing caveat, stated rather than papered over.</p>
+<p><strong>Two levers that an auditor must not conflate.</strong></p>
+<ol>
+<li>
+<p><em>Polygon-confidence is calibrated; the pipeline's pixel <code>post_conf</code> is fixed.</em>
+   The locked lever is a per-polygon <code>(confidence, area_m²)</code> cut applied at
+   consumption time on <code>predictions_metric.gpkg</code> (<code>polygon_conf_sweep.py:54–57</code>),
+   area-aware so the dominant false-positive archetype (small, low-confidence
+   blobs) can be cut harder than large installations. It is <strong>distinct</strong> from the
+   coarse fixed <code>post_conf_threshold = 0.85</code> baked into the finalizer
+   (<code>core/postproc.py:1064–1066</code>). Conflating them mis-attributes the calibration.
+   The census deliberately keeps the detector permissive — raising polygon-conf to
+   the σ_Bw-optimal 0.97 would cost ~15 pp of count-recall (documented in the
+   calibration appendix) — and delegates false-positive removal to the in-domain
+   <code>solar_cls</code> classifier instead of the confidence knob.</p>
+</li>
+<li>
+<p><em>Merge-mode is a first-class, model-dependent lever.</em> <code>v4_canonical.json</code> (the
+   cross-experiment comparability anchor) carries <strong>seven</strong> post-processing keys and
+   <strong>no <code>merge_mode</code> field</strong> — it was stripped under the 2026-06-12
+   architecture-optimization landing, and callers must now pass <code>--merge-mode</code>
+   explicitly; <code>finalize.py</code> raises on a CLI-vs-JSON mismatch. This matters because
+   the same model under the two modes posts materially different dispersion (on the
+   wave-1 face unified_A is σ_Bw 0.270 / RMSE 395 m² per-detection vs 0.361 / 588 m²
+   pixel-or), so pixel-or and per-detection are <strong>separate locks with separate
+   calibration runs</strong>. Numbers are always reported at a stated merge-mode, never as
+   a max-over-modes headline.</p>
+</li>
+</ol>
+<hr>
+<h2>2 · Computational replicability — traceable, not bit-seeded</h2>
+<p><strong>What is <em>not</em> claimed.</strong> The pipeline does not offer seeded bit-for-bit
+reproduction of model outputs. Stating that plainly is part of the contract.</p>
+<p><strong>What <em>is</em> guaranteed</strong> is that any reported number can be re-derived from, and
+traced back to, its inputs through four locked artifacts:</p>
+<ul>
+<li><strong>One metric kernel.</strong> The executable definition of "model–ground-truth
+  agreement" is a single pure, side-effect-free function, <code>summarize()</code> in
+  <code>core/area_metrics.py:84</code> — extracted on 2026-06-12 as "byte-for-byte the same
+  logic" so every caller computes identical statistics. It consumes set-theoretic
+  union areas per grid (A = pred, B = GT, A∩B) and emits the Tier-1 suite:
+  <code>agg_area_F1</code>, <code>bulk_pred_gt_ratio</code>, <code>std_ratio_Bw</code> (σ_Bw, the B-weighted
+  dispersion that is the primary deploy judge), <code>std_logratio</code>, <code>rmse_m2</code>,
+  <code>thru0_slope</code>, and <code>ols_r2</code>. The <strong>only</strong> seeded component anywhere is the
+  bootstrap-CI (<code>seed=0</code>) — it governs the confidence intervals, not the model
+  outputs. (Note: <code>cov50</code> is a CT-census coverage figure from a <em>separate</em> script,
+  not emitted by this kernel — it is not attributed to the Tier-1 suite.)</li>
+<li><strong>Config-match output reuse.</strong> Inference reuses a prior result only when its
+  <code>results/&lt;grid&gt;/config.json</code> matches current code + parameters; <code>--force</code> is
+  required to override. A number cannot silently come from a stale run with
+  different settings.</li>
+<li><strong>A frozen evaluation ground truth.</strong> Model selection on the JHB CBD face is
+  locked to a frozen <code>clean_gt</code>; drifting the eval GT to Li GT or micro-T1 is
+  barred. The comparison surface does not move under the models being compared.</li>
+<li><strong>A locked merge-mode + operating point</strong> (§1), plus per-grid provenance fields
+  (<code>imagery_layer_id</code>, <code>model_run_id</code>) that tie every number to specific source
+  tiles and a specific inference batch.</li>
+</ul>
+<p>So "reproducible" here means <strong>trace-and-rederive under locked configuration</strong>, not
+deterministic replay. That is the honest and the useful claim: a second analyst,
+given the same config and frozen GT, recomputes the same summary — and can point at
+the exact tiles and run behind any cell.</p>
+<hr>
+<h2>3 · Instrument reliability — the one stochastic step, measured</h2>
+<p>The detector (Mask R-CNN), the post-processing, and the area metrics are all
+deterministic given fixed weights. The install-date layer adds <strong>one</strong> stochastic
+device: a Gemini vision model that reads a time-sequence of aerial chips per
+installation and calls, for each date, whether PV is present — yielding a presence
+<em>pattern</em> and a derived <em>install-date</em>. It is the only place in the pipeline where a
+rerun on identical inputs could return a different answer. Note this is <strong>not</strong> a
+loose-temperature artifact: the scorer already requests greedy <code>temperature:0</code>
+decoding (<code>gemini_solar_image_review.py:404</code>); the residual variance comes from the
+model being a <em>thinking</em> model whose internal reasoning trace is sampled (no fixed
+seed). This section measures how much that moves the result, and what removes it.</p>
+<p><strong>Design — test-retest on identical inputs.</strong> From the 15,859-anchor JHB inventory
+we stratified-sampled <strong>244 anchors / 642 installations</strong>, deliberately
+<em>oversampling</em> the ambiguous strata (non-monotonic, no-recent-anchor,
+gemini-failed) where LLM noise is most likely to bite; the headline is then
+<strong>re-weighted to the inventory's true stratum mix</strong>. Each installation's chips were
+rendered <strong>once</strong> (a fixed 8-date window, 2018–2025) and frozen, then scored
+<strong>three times</strong> on those byte-identical images. Reliability is the rep-to-rep
+agreement; the input is held constant so this isolates the model's own sampling
+variance. The chips and the scoring calls are <strong>freshly generated for this
+experiment</strong> — only the anchor list and its production status-stratum are reused
+(for stratification and inventory re-weighting); no production install-dates are
+recycled. (<code>solar_backdating/scripts/validation/llm_reliability_{sample,analyze}.py</code>;
+raw + summary under <code>results/analysis/llm_consistency/reliability/</code>.)</p>
+<p>The headline run scored through the env-default <code>gemini-3-flash-agent</code>. Production,
+however, produced <strong>almost all</strong> of its dates with the plain <code>gemini-3-flash</code> alias
+(round types <code>initial</code>/<code>bisection</code>/<code>tail</code>/<code>walk_back</code> plus the 2023-census step);
+<code>gemini-3-flash-agent</code> was used only for the narrow <code>anchor_recovery</code> round. To
+confirm the number is a property of the <em>production</em> instrument and not of the
+agent alias, we re-scored a 150-installation stratified slice of the <strong>same frozen
+chips</strong> ×3 through <code>gemini-3-flash</code> — see "Model parity" below.</p>
+<p><strong>Per-installation reliability — moderate.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Stratum</th>
+<th style="text-align: right;">n</th>
+<th style="text-align: right;">P(install-date identical ×3)</th>
+<th style="text-align: right;">P(pattern identical ×3)</th>
+<th style="text-align: right;">inventory weight</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>done_appears (clean)</td>
+<td style="text-align: right;">148</td>
+<td style="text-align: right;">0.818</td>
+<td style="text-align: right;">0.777</td>
+<td style="text-align: right;">0.689</td>
+</tr>
+<tr>
+<td>ambiguous · no-recent-anchor</td>
+<td style="text-align: right;">168</td>
+<td style="text-align: right;">0.792</td>
+<td style="text-align: right;">0.738</td>
+<td style="text-align: right;">0.164</td>
+</tr>
+<tr>
+<td>ambiguous · non-monotonic</td>
+<td style="text-align: right;">130</td>
+<td style="text-align: right;">0.823</td>
+<td style="text-align: right;">0.715</td>
+<td style="text-align: right;">0.130</td>
+</tr>
+<tr>
+<td>installed-during-census</td>
+<td style="text-align: right;">62</td>
+<td style="text-align: right;">0.839</td>
+<td style="text-align: right;">0.758</td>
+<td style="text-align: right;">0.011</td>
+</tr>
+<tr>
+<td>already-present bound</td>
+<td style="text-align: right;">53</td>
+<td style="text-align: right;">0.830</td>
+<td style="text-align: right;">0.755</td>
+<td style="text-align: right;">0.004</td>
+</tr>
+<tr>
+<td>gemini-failed</td>
+<td style="text-align: right;">81</td>
+<td style="text-align: right;">0.840</td>
+<td style="text-align: right;">0.728</td>
+<td style="text-align: right;">0.002</td>
+</tr>
+<tr>
+<td><strong>inventory-weighted</strong></td>
+<td style="text-align: right;"></td>
+<td style="text-align: right;"><strong>0.814</strong></td>
+<td style="text-align: right;"><strong>0.762</strong></td>
+<td style="text-align: right;"></td>
+</tr>
+<tr>
+<td><em>sample (unweighted)</em></td>
+<td style="text-align: right;">642</td>
+<td style="text-align: right;">0.818</td>
+<td style="text-align: right;">0.745</td>
+<td style="text-align: right;"></td>
+</tr>
+</tbody>
+</table>
+<p>So <strong>~81 %</strong> of installations get the identical install-date on a rerun and <strong>~76 %</strong>
+the identical presence pattern. Reliability is notably <em>uniform</em> across strata — the
+hard cases are barely worse than the clean ones — which already says the noise is a
+property of the marginal date-call, not of a few pathological installations. But the
+headline alone is a worst-case, k = 1 reading; three further cuts of the <em>same</em> three
+reps (no new API; <code>…/reliability/recut/reliability_recut.json</code>) reframe how bad it
+actually is.</p>
+<p><strong>Model parity — the number is a property of the production model, not the agent
+alias.</strong> Re-scoring the 150-installation slice of frozen chips ×3 through the
+production <code>gemini-3-flash</code> reproduces install-dates at <strong>0.807</strong>, statistically
+indistinguishable from the agent alias's <strong>0.820</strong> on the identical targets (paired
+McNemar χ² = 0.20, <em>p</em> ≈ 0.65; 9 vs 11 discordant of 150). On the dominant clean
+stratum the two are likewise close (flash 0.925 vs agent 0.85 on n = 40), and the
+inventory-weighted slice figure is, if anything, slightly <em>higher</em> under flash
+(~0.87). The headline therefore transfers to the model that actually produced the
+inventory — it is neither inflated nor deflated by the choice of alias.
+(<code>results/analysis/llm_consistency/reliability/parity/parity_compare.json</code>.)</p>
+<p><strong>Anatomy of the ~18 % that disagrees — it is wider than a single-step flip, and it
+cannot be filtered away by the obvious knobs.</strong> Of the 117 disagreeing installations:</p>
+<ul>
+<li><strong>41 % (48) are present-vs-absent flips</strong>, not dating errors: on a faint
+  installation the model flips between "never visible in 2018–2025" and "appears at
+  date X." This is a detection-margin wobble at the threshold of visibility.</li>
+<li><strong>33 % (39) shift by exactly one imagery step</strong> (~12 months — the headline median):
+  57 % of the 69 <em>date-only</em> disagreers.</li>
+<li><strong>26 % (30) jump two or more years</strong>; these multi-step jumps concentrate in the
+  small flagged-ambiguous tail.</li>
+</ul>
+<p>Coarsening to install-year buys <strong>nothing</strong> here, and it is important to say <em>why</em>:
+the 8-date window is year-spaced (8 dates falling in 8 distinct years), so
+install-year agreement equals exact-date agreement for <strong>every</strong> target <em>by
+construction</em> — verified, not assumed. Year-level reporting is therefore no more
+individually reliable than the exact date. Two diagnostics confirm the noise is
+structural rather than gateable: it concentrates in the ~8 % of installs already flagged
+non-monotonic/uncertain (rerun-flip rate <strong>0.35 vs 0.17</strong> for clean monotonic
+sequences), yet <strong>confidence cannot screen it</strong> — 637 of 642 targets self-report
+confidence ≥ 0.9, and the disagreers' mean confidence (0.933) is barely below the
+agreers' (0.958). The model stays confident even when it is about to flip, so a
+confidence cut is not the lever.</p>
+<p><strong>Lever 1 — vote, don't trust one sample (certified).</strong> Production scores each
+installation <strong>once</strong> (k = 1), which is precisely the worst case measured above.
+Across the three reps a <strong>well-defined majority (≥ 2 of 3) already exists for
+98.4 %</strong> of installations; only <strong>1.6 % (10 of 642)</strong> are irrecoverable three-way
+splits. To certify the <em>denoised</em> answer's reproducibility — not just "is a majority
+defined" — we extended the production-model (<code>gemini-3-flash</code>) reps to <strong>K = 6</strong> on
+the frozen slice and compared two <strong>independent</strong> majority-of-3 draws across all ten
+disjoint 3∣3 splits. Result: a single draw reproduces at <strong>0.910</strong> inventory-weighted
+(two independent draws agree), while a <strong>majority-of-3 vote reproduces at 0.951</strong>
+(0.980 on the dominant clean stratum) — a <strong>+4.1 pp</strong> lift for <strong>3× the calls</strong>.
+A majority-of-k denoiser is therefore not merely plausible but <strong>measured</strong>: it lifts
+effective install-date reproducibility into the mid-90s. (A fully grounded
+majority-of-5 needs 10 reps; the 6-rep proxy already pins the modal answer in ≥ 4/6
+reps for 92 % of installations. <code>…/reliability/parity/majority_k.json</code>.)</p>
+<p><strong>Lever 2 — pin the decoder: tested, and it is <em>not</em> the fix.</strong> The natural
+hypothesis is that the variance is a loose-temperature artifact. It is not. The
+native scorer path already sends greedy <strong><code>temperature:0</code></strong> unconditionally
+(<code>gemini_solar_image_review.py:404</code>), so both reliability runs were <em>already</em> greedy.
+And <code>gemini-3-flash</code> — a direct, non-agent alias — is <strong>just as variable</strong> as the
+agent alias (0.807 vs 0.820 above) despite that greedy request. The residual
+rep-to-rep movement is intrinsic to a <em>thinking</em> vision-model whose reasoning trace
+is sampled on marginal-visibility date calls, not a decoder that was left un-pinned.
+This closes off the cheap "config fix" story: the honest levers are the <strong>vote</strong>
+(Lever 1) and the <strong>aggregation</strong> (below), not a temperature flag.</p>
+<p><strong>Aggregate reliability — high (the published quantity is robust).</strong> The economic
+deliverable is not any single install-date; it is the <strong>install-year cohort
+distribution</strong> (how many installations appear each year). Because the per-target
+errors are near-mean-zero, they cancel under aggregation. Across the three reruns:</p>
+<table>
+<thead>
+<tr>
+<th>install-year</th>
+<th style="text-align: right;">rep 1</th>
+<th style="text-align: right;">rep 2</th>
+<th style="text-align: right;">rep 3</th>
+<th style="text-align: right;">max swing</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2022</td>
+<td style="text-align: right;">70</td>
+<td style="text-align: right;">69</td>
+<td style="text-align: right;">67</td>
+<td style="text-align: right;">3</td>
+</tr>
+<tr>
+<td>2023</td>
+<td style="text-align: right;">95</td>
+<td style="text-align: right;">87</td>
+<td style="text-align: right;">96</td>
+<td style="text-align: right;">9</td>
+</tr>
+<tr>
+<td>2024</td>
+<td style="text-align: right;">280</td>
+<td style="text-align: right;">291</td>
+<td style="text-align: right;">284</td>
+<td style="text-align: right;">11</td>
+</tr>
+</tbody>
+</table>
+<p>The full-distribution agreement is <strong>total-variation distance 0.025</strong> between
+reruns, and the <strong>largest</strong> per-year cohort count moves by only <strong>~1.7 %</strong> of the
+sample. In economist's terms: the instrument is a noisy ruler at the individual
+reading, but the <em>histogram it produces</em> — the quantity that enters any downstream
+adoption-rate or policy analysis — is reproducible to within a couple of percent.
+That is the bound on how much an independent re-estimation of the backdated
+inventory could move the published cohort numbers from LLM stochasticity.</p>
+<hr>
+<h2>4 · What is and is not guaranteed</h2>
+<p>Stated plainly, so a reader can calibrate trust:</p>
+<ul>
+<li><strong>Guaranteed.</strong> Leakage-checked operating-point selection (§1); a single,
+  extracted, traceable metric kernel and config-match reuse (§2); a measured,
+  inventory-weighted bound on LLM-induced aggregate variance (§3).</li>
+<li><strong>Fail-closed, not certified.</strong> The CT production per-detection operating point
+  could not be locked at ≤1 pp transfer, so it ships on a <strong>pre-declared</strong> threshold;
+  the unified_A × CT certifying lock is <strong>registered but unfitted</strong> (tiles pending).
+  A portfolio reader should not infer the CT operating point is leakage-certified —
+  it is fail-closed pending that fit.</li>
+<li><strong>Documented, not re-derived here.</strong> The ~15 pp count-recall cost of the 0.97
+  confidence optimum, and the Platt/temperature-scaling ablation, trace to the
+  calibration appendix's own records rather than to a fresh run in this document.</li>
+<li><strong>Scope of the reliability number.</strong> §3 measures the JHB install-date scorer with a
+  fixed 8-date window; it bounds <em>sampling</em> variance on frozen inputs, not the
+  additional variance an end-to-end rerun would add from re-fetching imagery or
+  re-running the <em>adaptive</em> date-search (the headline used a fixed window where
+  production uses per-anchor adaptive windows). Those would only add variance, so §3
+  is a <em>lower</em> bound on total re-run movement — though the aggregate margin (1.7 %)
+  leaves ample room. The ~81 % figure is the <strong>k = 1</strong> production setting and
+  oversamples the ambiguous strata. Two follow-ups flagged earlier have now been
+  <strong>executed</strong> (2026-06-23): a model-parity re-score confirmed the number is the
+  production model's, not the agent alias's; a greedy-decoding check showed
+  <code>temperature:0</code> is already applied and does <strong>not</strong> reduce the variance; and a
+  K = 6 majority-of-3 certification measured the denoiser lift (→ ~0.95
+  inventory-weighted). The one remaining un-run check is a window-faithfulness
+  re-score on each anchor's <em>own</em> adaptive dates.</li>
+</ul>
+<hr>
+<h2>Appendix — Provenance table (claim → source)</h2>
+<table>
+<thead>
+<tr>
+<th>Claim area</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Leakage-checked lock, ≤1 pp acceptance, <code>[LEAKAGE]</code> guard</td>
+<td><code>scripts/analysis/lock_operating_point.py:283–290, 325–327</code>; <code>configs/eval/operating_point_calibration.yaml</code></td>
+</tr>
+<tr>
+<td>Locked CT points (pixel-or PASS 0.00 pp / per-det FAIL 5.22 pp)</td>
+<td><code>configs/eval/locked_operating_points.json</code></td>
+</tr>
+<tr>
+<td>Polygon-conf sweep vs fixed <code>post_conf</code></td>
+<td><code>scripts/analysis/polygon_conf_sweep.py:54–57</code>; <code>core/postproc.py:1064–1066</code></td>
+</tr>
+<tr>
+<td>v4_canonical = 7 keys, no <code>merge_mode</code> (CLI-explicit)</td>
+<td><code>configs/postproc/v4_canonical.json</code>; <code>finalize.py</code> merge-mode guard</td>
+</tr>
+<tr>
+<td>Tier-1 metric kernel + emitted keys + seed=0 bootstrap</td>
+<td><code>core/area_metrics.py:84</code> (<code>summarize</code>), <code>:70–81</code></td>
+</tr>
+<tr>
+<td>Config-match reuse / frozen clean_gt / provenance fields</td>
+<td><code>docs/evaluation_protocol.md</code>; per-grid <code>results/&lt;grid&gt;/config.json</code></td>
+</tr>
+<tr>
+<td>LLM test-retest design + headline numbers</td>
+<td><code>solar_backdating/scripts/validation/llm_reliability_sample.py</code>, <code>llm_reliability_analyze.py</code>; <code>results/analysis/llm_consistency/reliability/{reliability_summary,aggregate_stability}.json</code></td>
+</tr>
+<tr>
+<td>Sample scale (244 anchors / 642 installations / 15,859 population, seed 42)</td>
+<td><code>~/zasolar_data/geid_temporal/llm_reliability_20260622/sample/sample_manifest.json</code> (<code>n_anchors_sampled</code>, <code>n_targets</code>, <code>population_total</code>)</td>
+</tr>
+<tr>
+<td>Majority-of-3 (98.4 %), disagreement geometry, abstain/confidence cuts, year≡date</td>
+<td><code>solar_backdating/scripts/validation/llm_reliability_recut.py</code>; <code>results/analysis/llm_consistency/reliability/recut/reliability_recut.json</code></td>
+</tr>
+<tr>
+<td>Model parity: flash 0.807 vs flash-agent 0.820, McNemar χ²=0.20; production model routing (<code>cheap_model=gemini-3-flash</code>, <code>anchor_recovery</code>→agent)</td>
+<td><code>results/analysis/llm_consistency/reliability/parity/{parity_compare,FINDINGS}.{json,md}</code>; <code>~/zasolar_data/geid_temporal/jhb_full382_fpcut_scan_2026-06-02/run.log</code> (<code>[CFG]</code> line)</td>
+</tr>
+<tr>
+<td>Greedy <code>temperature:0</code> already applied (not a fixable lever)</td>
+<td><code>solar_backdating/scripts/validation/gemini_solar_image_review.py:404</code></td>
+</tr>
+<tr>
+<td>Majority-of-3 certification: k=1 0.910 → maj-3 0.951 inv-wtd, K=6, 10 disjoint splits</td>
+<td><code>solar_backdating</code>-rendered reps under <code>~/zasolar_data/geid_temporal/llm_reliability_20260622/parity_flash/</code>; <code>results/analysis/llm_consistency/reliability/parity/majority_k.json</code></td>
+</tr>
+<tr>
+<td>Inventory scale (15,859 anchors / 41,393 dated installations)</td>
+<td><code>~/zasolar_data/geid_temporal/jhb_full382_fpcut_scan_2026-06-02/</code></td>
+</tr>
+</tbody>
+</table>
+</div></body></html>

@@ -1,0 +1,209 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Install-Date 复现性 → Event-Study 测量设计 · 思路备忘</title>
+<style>
+:root{--ink:#1a1a1a;--mut:#666;--line:#222;--soft:#d8d8d8;--accent:#7a1f1f;
+ --blue:#1f4e7a;--green:#256a2a;--amber:#9a5a00;--red:#a3281c;}
+*{box-sizing:border-box}
+body{font-family:"Noto Serif CJK SC","Source Han Serif SC","Songti SC",STSong,
+ "Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+ color:var(--ink);line-height:1.7;margin:0;background:#f4f2ee;font-size:16px;}
+.page{max-width:900px;margin:0 auto;background:#fff;padding:60px 70px 86px;
+ box-shadow:0 1px 30px rgba(0,0,0,.10);}
+.eyebrow{font-variant:small-caps;letter-spacing:.10em;color:var(--accent);font-size:.86rem;font-weight:600;}
+h1{font-size:1.74rem;line-height:1.3;margin:.16em 0 .12em;font-weight:700;letter-spacing:.005em;}
+.sub{color:var(--mut);font-size:1.0rem;margin:.1em 0 1.0em;}
+.meta{font-size:.82rem;color:var(--mut);border-top:1px solid var(--soft);border-bottom:1px solid var(--soft);
+ padding:9px 0;margin:0 0 26px;display:flex;flex-wrap:wrap;gap:6px 22px;}
+.meta b{color:#333;font-weight:600;}
+h2{font-size:1.24rem;margin:2.0em 0 .55em;padding-bottom:.18em;border-bottom:1.5px solid var(--line);font-weight:700;}
+h2 .snum{display:inline-block;min-width:1.6em;color:var(--accent);}
+h3{font-size:1.04rem;margin:1.4em 0 .35em;font-weight:700;color:#2a2a2a;}
+p{margin:.6em 0;}
+ul,ol{margin:.5em 0 .8em;padding-left:1.5em;}
+li{margin:.34em 0;}
+strong,b{font-weight:700;}
+em{font-style:normal;background:linear-gradient(transparent 62%,#f3e6b8 62%);padding:0 .05em;}
+code{font-family:"SF Mono",Menlo,Consolas,monospace;font-size:.84em;background:#f0eee9;padding:.05em .35em;border-radius:3px;}
+.tldr{background:#faf8f4;border:1px solid #ece7df;border-left:3px solid var(--accent);
+ padding:16px 22px;margin:0 0 8px;font-size:1.0rem;}
+.tldr .alab{font-variant:small-caps;letter-spacing:.08em;color:var(--accent);font-weight:700;font-size:.8rem;display:block;margin-bottom:4px;}
+/* callout boxes */
+.box{border-radius:6px;padding:12px 20px 14px;margin:1.1em 0;font-size:.96rem;}
+.box .blab{font-weight:700;font-size:.82rem;letter-spacing:.03em;display:block;margin-bottom:3px;}
+.box.insight{background:#eef4f9;border:1px solid #d4e2ee;border-left:3px solid var(--blue);}
+.box.insight .blab{color:var(--blue);}
+.box.trap{background:#fcefe9;border:1px solid #f0d6c9;border-left:3px solid var(--red);}
+.box.trap .blab{color:var(--red);}
+.box.good{background:#edf3ed;border:1px solid #d2e2d2;border-left:3px solid var(--green);}
+.box.good .blab{color:var(--green);}
+/* booktabs table */
+.tbl-wrap{margin:1.3em 0 1.6em;}
+.tcap{font-size:.9rem;margin-bottom:.45em;line-height:1.45;color:#333;}
+.tcap .tnum{font-weight:700;}
+table.bt{border-collapse:collapse;width:100%;font-size:.87rem;font-variant-numeric:tabular-nums;}
+table.bt thead th{border-top:1.6px solid var(--line);border-bottom:1px solid var(--line);
+ padding:7px 10px;font-weight:700;vertical-align:bottom;text-align:left;}
+table.bt tbody td{padding:6px 10px;border:0;vertical-align:top;}
+table.bt tbody tr:last-child td{border-bottom:1.6px solid var(--line);}
+table.bt td.r,table.bt th.r{text-align:right;white-space:nowrap;}
+table.bt tbody tr:hover td{background:#fbfaf7;}
+.tnote{font-size:.78rem;color:var(--mut);line-height:1.55;margin-top:.5em;}
+/* variance-layer stack */
+.layers{margin:1.3em 0 1.6em;}
+.layer{border:1.4px solid var(--line);border-radius:5px;padding:10px 16px;margin:7px 0;position:relative;}
+.layer .ln{font-variant:small-caps;letter-spacing:.05em;font-weight:700;font-size:.74rem;color:var(--accent);}
+.layer .lt{font-weight:700;font-size:.97rem;margin:1px 0 2px;}
+.layer .ld{font-size:.88rem;color:#444;line-height:1.55;}
+.layer.l1{background:#fcefe9;}
+.layer.l2{background:#fbf4e6;}
+.layer.l3{background:#f3f0e8;}
+.layer.l4{background:#eef4f9;}
+.layer .tag{position:absolute;top:10px;right:14px;font-size:.72rem;font-weight:700;border-radius:9px;padding:1px 9px;}
+.tag.red{background:#f6d8d0;color:var(--red);}
+.tag.amb{background:#f5e2c2;color:var(--amber);}
+.tag.blue{background:#d6e4f0;color:var(--blue);}
+/* ledger / priority table */
+table.ledger{border-collapse:collapse;width:100%;font-size:.9rem;margin:1.1em 0 1.4em;}
+table.ledger th{text-align:left;background:#faf8f4;border-bottom:1.4px solid var(--line);padding:8px 12px;font-weight:700;}
+table.ledger td{padding:10px 12px;border-bottom:1px solid #e9e4db;vertical-align:top;line-height:1.55;}
+table.ledger tr:last-child td{border-bottom:1.4px solid var(--line);}
+table.ledger td.rank{font-weight:700;color:var(--accent);white-space:nowrap;text-align:center;width:2.4em;}
+table.ledger td.demote{color:var(--mut);}
+.kv{font-size:.86rem;color:var(--mut);font-family:"SF Mono",Menlo,monospace;}
+.foot{margin-top:46px;border-top:1px solid var(--soft);padding-top:14px;font-size:.78rem;color:var(--mut);line-height:1.6;}
+.q{background:#f7f4ef;border:1px dashed #cfc7b8;border-radius:6px;padding:12px 18px;margin:1.0em 0;font-size:.94rem;}
+.q b{color:var(--accent);}
+@media print{body{background:#fff}.page{box-shadow:none;max-width:none;padding:0}}
+@media(max-width:760px){.page{padding:30px 18px}}
+</style>
+</head><body><div class="page">
+
+<div class="eyebrow">ZAsolar · solar_backdating · 思路备忘</div>
+<h1>从「逐检测复现」到「Event-Study 测量设计」</h1>
+<div class="sub">为什么 install-date 无法完全复现、换 ViT backbone 到底买到什么、以及当最终目的是地理聚合 event-study 时该担心什么</div>
+<div class="meta"><b>日期</b> 2026-06-24 &nbsp; <b>范围</b> install-date 端到端复现性 + event-study 测量设计 &nbsp; <b>状态</b> 思路梳理（非最终方法学）</div>
+
+<div class="tldr"><span class="alab">一句话</span>
+逐检测日期不可能完全复现，因为这条链最底层的原语——单次 LLM 调用——本身是随机变量，而自适应搜索把它<em>放大</em>而非<em>平均</em>。换确定性 ViT 能买到「路径一致性」，但对一个聚合到地理层级的 event-study，<b>一致性既不是瓶颈也不是识别威胁</b>：真正决定结论的是「日期 vs 真值」的系统性偏差和影像 cadence，这两样换 backbone 都不解决，确定化反而把前者藏得更深。</div>
+
+<h2><span class="snum">1.</span>测试拿到了什么</h2>
+<p>3 次完整生产链从零重跑（L0 → L1 → L_census 2023-narrowing → merge_three_layers --with-census → flatten），1:1 复现生产操作、同款模型路由，nothing frozen。脚手架零-API 自检通过、拼接逐字节验证。</p>
+
+<div class="tbl-wrap">
+<div class="tcap"><span class="tnum">表 1.</span> 端到端复现一致性（非加权 / 库存加权）。</div>
+<table class="bt">
+<thead><tr><th>口径</th><th class="r">非加权</th><th class="r">库存加权</th><th>含义</th></tr></thead>
+<tbody>
+<tr><td>单次重跑 vs 生产（精确区间）</td><td class="r">0.45–0.47</td><td class="r">0.57–0.61</td><td>分母错：生产不是真值</td></tr>
+<tr><td>过程自洽 rep↔rep（精确区间）</td><td class="r">0.62–0.66</td><td class="r">0.74–0.75</td><td>同分布互比，诚实数</td></tr>
+<tr><td>3-way mutual</td><td class="r">0.53</td><td class="r">0.66</td><td>三方交集</td></tr>
+<tr><td>年份直方图 TVD（发表量）</td><td class="r" colspan="2" style="text-align:center">0.037–0.063 rep-to-rep</td><td>聚合高度可复现</td></tr>
+</tbody>
+</table>
+<div class="tnote">生产定档 434 / 重跑 ~375（多 ~16%）。§3「冻结输入」测试得 0.81，结构性看不见自适应搜索（46% 路由翻转）。已验证是真实信号，非 harness bug。</div>
+</div>
+
+<div class="box good"><span class="blab">三句话</span>
+① <b>聚合量稳</b>——安装年份分布几乎不动（TVD 0.04），个体抖但聚合抵消；这是论文主张该用的稳健性证据。<br>
+② <b>个体精确区间一般</b>——两次独立重跑 ~0.74（加权），对生产只 ~0.60，因为生产是高覆盖的幸运抽样。<br>
+③ <b>自适应搜索是主方差源</b>，冻结输入的测试看不见它。</div>
+
+<h2><span class="snum">2.</span>为什么不可能「完全一致」——四层非确定性</h2>
+<p>完全一致复现不是工程没做到位，是这条链<em>结构上</em>就做不到。四层噪声从下往上叠，且它们是「相乘 / 分叉」不是「相加」：</p>
+
+<div class="layers">
+<div class="layer l1"><span class="tag red">不可约</span><span class="ln">Layer 1 · 根因</span>
+<div class="lt">单次 LLM 调用是随机变量</div>
+<div class="ld">即使 temp=0，<code>f(同图,同prompt)</code> 也不保证同答案：GPU 浮点非结合性、服务端 batch 组成、MoE 路由、网关无 seed。§3 的 0.81 测的就是这层——啥都冻住，打分器还跟自己 ~19% 不一致。</div></div>
+
+<div class="layer l2"><span class="tag amb">放大器</span><span class="ln">Layer 2 · 架构</span>
+<div class="lt">自适应搜索把抖动放大成分叉</div>
+<div class="ld">下一年抓哪张图依赖上一轮答案 → 边界附近翻一次，整条轨迹送进另一分支（混沌敏感）。指标又是 change-point / argmin（无→有那一帧），极值量天生比均值高方差，翻一帧推动整整一个影像年份。<b>abstain 随机化</b>是最大单一分叉源：同帧时而模糊时而判定，把轨迹随机踢进 undated 吸收态。</div></div>
+
+<div class="layer l3"><span class="tag amb">输入漂移</span><span class="ln">Layer 3 · 影像</span>
+<div class="lt">抓图集本身也在变</div>
+<div class="ld">GEHI/Wayback 可得 vintage、phantom date、<code>--allow-nearest</code> 每次不完全一样。连喂给打分器的图都不是固定的。</div></div>
+
+<div class="layer l4"><span class="tag blue">概念</span><span class="ln">Layer 4 · 没有真值</span>
+<div class="lt">过程定义的是分布，不是点</div>
+<div class="ld">rep1/2/3 是同一分布的 iid 抽样；生产是这个分布里一个<b>偏高覆盖的尾部抽样</b>。要求「完全一致」= 要求一个本质随机的估计量给出可复现的<em>点</em>估计——数学上不成立。你能复现的是它的<em>分布</em>（年份 TVD 0.04 就是证据）。</div></div>
+</div>
+
+<div class="box insight"><span class="blab">为什么 rep↔rep 0.74 &gt; vs生产 0.60，而投票救不了生产</span>
+你甚至不用换模型——把 Gemini 响应缓存回放，rep↔rep 立刻是 1.0。现在不是 1.0，<b>恰恰因为它在如实采样随机性</b>。生产多定的 16% 不是「更对」，是这一抽恰好少撞几个 abstain 吸收态（survivorship）。majority-of-3 收敛到<b>过程分布的中心</b>，而生产不在中心 → 投票把你拉离生产。<br>
+<span style="color:var(--blue)">⟂ 与 §3 正好相反</span>：§3 里图冻住，投票去向「固定输入上的 scorer 众数」，生产那次也采同一输入 → 投票拉向生产。<b>同一个「投票」动作，在 §3 帮你匹配生产，在端到端帮你匹配过程——靶心根本不是同一个点。</b>值得在论文点明。</div>
+
+<h2><span class="snum">3.</span>两个必须分清的概念</h2>
+<h3>复现-by-replay　vs　复现-by-resample</h3>
+<ul>
+<li><b>Replay</b>（缓存每个 <code>(图,prompt)→答案</code> 再回放）：能 bit-identical，但只是把<em>某一次抽样钉死</em>，关于稳健性什么都没说。</li>
+<li><b>Resample</b>（你做的：nothing frozen 真重跑）：看到方差，因为它测的是估计量本身的随机性。<b>你选了 resample——这对稳健性论文是正确的</b>，0.74/0.60 不是失败，是 replay 永远看不见的真实方差谱。</li>
+</ul>
+<h3>可约方差　vs　不可约方差</h3>
+<ul>
+<li><b>可约</b>（确定化/投票能救）：打分器自抖、随机 abstain。</li>
+<li><b>不可约</b>（任何模型都救不了）：真实安装日落在两个稀疏影像 vintage 之间——从根上不可识别，由<b>影像时间稀疏性</b>设了一个地板。</li>
+</ul>
+<div class="box trap"><span class="blab">核心陷阱</span>确定化把「可约方差」消成 0，但真实不确定性活在<b>像素里</b>（一张糊的 2016 历史瓦片上那块小板到底有没有）——换 backbone 不改变像素信息量。它做的是：把「这帧是抛硬币」从「两次给不同答案（你看得见）」变成「两次给同一个稳定但可能错的答案（你看不见）」。<b>方差没消失，它变成了偏差；而 3-rep 散布是你目前唯一能看见不可约不确定性的窗口，确定化会把它焊死。</b></div>
+
+<h2><span class="snum">4.</span>换 ViT / DINOv3-SAT backbone：买到什么、买不到什么</h2>
+<p><b>纯就「路径一致性」：能，可能从 rep↔rep 0.74 拉到接近 1.0。</b>机制：本地分类器可做确定性（固定 seed、deterministic algos、argmax 固定 head）→ Layer 1 塌向 1.0；固定 abstain 带（如 <code>0.4&lt;p&lt;0.6</code>）让<b>弃权确定化</b>，吸收态入口不再随机分叉——这是你直觉对的部分，且收益最大。再缓存影像（Layer 3）→ 整条链趋近确定函数。</p>
+<p>但代价与盲点：</p>
+<ul>
+<li><b>转方差为偏差</b>（见 §3 陷阱）：一致性是廉价的，缓存 Gemini 也能得 1.0；它对「对不对」零信息。</li>
+<li><b>领域硬证据</b>：solar_zerov2 Phase 0 里 frozen DINOv3-SAT + M2F 即使 sweep 后<b>输给 V3-C floor</b>，头号嫌疑是 GSD 域差（0.6m→6.7cm）。这里影像更糟——多 vintage 历史图、GSD 跨年漂、恰是要靠 abstain 的老糊帧。frozen 几乎一定标定差 → 要么 over-abstain（覆盖崩）要么自信判错。要能用得<b>跨 vintage fine-tune</b>，需带 vintage 标签的 present/absent 对（真实标注成本）。</li>
+<li><b>阈值变成新方差旋钮</b>：abstain 带是手设的，直接决定 undated 率 = 覆盖率 = 年份分布。给定阈值可复现，但头条数字现在敏感依赖一个任意标定选择 → 需独立的阈值灵敏度分析。run-to-run 方差换成了阈值敏感性。</li>
+<li><b>单帧丢比较信号</b>：变化检测的信号本质是成对的（帧 t vs t+1）。单帧 present/absent 弱——项目里 Gemini FP-review 也是<b>多尺度双图</b>才过 bar。</li>
+</ul>
+<div class="box good"><span class="blab">这个想法真正好的版本（steelman）</span>别框成「ViT 替 Gemini 做判断」，框成<b>「帧 t vs t+1 变没变」是一个窄、定义清晰、ViT 该比 LLM 强且能确定化的任务</b>——遥感 <b>change-detection（siamese ViT）</b>是成熟范式，成对输入保留比较信号。✅ 值得做：pairwise-CD + 跨 vintage fine-tune + 验证 differential 标定。❌ 不值得：frozen DINOv3-SAT 单帧 present/absent。</div>
+
+<h2><span class="snum">5.</span>真正的目的是 event-study —— 这把问题翻过来了</h2>
+<p>目标：把 install-date 聚合到不同地理层级，做 event-study，看大停电（load-shedding）/ 大规模 PV 安装的影响。一旦想清楚，分析单元根本<b>不是逐装机日期，而是「地理格 × 时间窗内的新增装机数」</b>。换 backbone 的 ROI 排序随之翻转。</p>
+
+<div class="box trap"><span class="blab">最关键的一句：event-study 清晰度由「日期 vs 真值」决定，复现性碰不到它</b></span>
+event-study 的核心产出是 <b>event-time 动态曲线</b>。随机时序噪声会把「事件后陡升」抹成「缓坡」——在 event-time 上摊平、衰减。而这个抹平来自<b>日期 vs 真值</b>的误差，<u>不是</u> run-to-run 抖动。确定化消的是 run-to-run 抖动，消不掉 date-vs-truth——那块由影像 cadence + 标定决定，确定性模型照样有。<b>所以：你可以拿到完美 rep↔rep 1.0，同时 event-study 被抹得稀烂。两件事脱钩。</b></div>
+
+<h3>真正威胁识别（identification）的两件事，换 backbone 都不解决</h3>
+<div class="tbl-wrap">
+<table class="bt">
+<thead><tr><th>威胁</th><th>为什么致命</th><th>backbone swap 的作用</th></tr></thead>
+<tbody>
+<tr><td><b>① 与处理相关的系统性时序偏差</b></td><td>停电最狠的区往往更密/更穷/板更小/影像更糊 → 装机被系统性<b>定晚</b> → 「停电→装机」响应被人为推后，测到的是测量伪迹不是行为。误差与处理变量相关 = 有偏，不只是噪声。</td><td>零帮助；确定化反而把它<b>藏得更深</b>（干净、可复现、但有偏的图）。</td></tr>
+<tr><td><b>② undated 非随机缺失</b></td><td>~16% 未定档。若 undated-ness 与地理相关（糊影像/小板区 abstain 多），直接丢 = 选择偏差。</td><td>改变 undated 的<b>集合</b>，不让缺失随机化；固定阈值可能更空间系统化。</td></tr>
+</tbody>
+</table>
+<div class="tnote">这两件都是 date-vs-truth / missingness 层面，3-rep 测试本身看不见，backbone 也修不了。随机噪声（若经典）只摊平 event-time 曲线；<b>系统性、与处理相关</b>的误差才偏移系数——这才是会沉船的那个。</div>
+</div>
+
+<div class="box insight"><span class="blab">cadence = 你的时间分辨率硬上限</span>
+停电是 2022–2023 逐步加剧的多年现象。关键可行性问题：<b>影像 vintage 间隔能否分辨你要识别的处理变异？</b>若 vintage 年级，你只能说「2022 拍 与 2023 拍 之间装的」，无法放进「Stage 6 那次之前/之后」。任何模型都不改变这个上限。<b>好消息</b>：停电是多年 staggered 的强度变量，年级 bin + 按区强度的 staggered event-study / DiD 多半够用——前提是<em>承认 cadence</em>，别假装有月级日期。</div>
+
+<h2><span class="snum">6.</span>行动优先级（backbone swap 掉到第 5）</h2>
+<table class="ledger">
+<thead><tr><th class="rank">#</th><th>动作</th><th>理由</th></tr></thead>
+<tbody>
+<tr><td class="rank">1</td><td><b>估计量改成 interval-censored，别用点日期</b>。每个装机「出现在 vintage t_a 与 t_{a+1} 之间」，用离散时间 hazard / interval-censored survival。</td><td>拥抱不可约的 cadence 限制，而不是把它藏进假精确的点日期。</td></tr>
+<tr><td class="rank">2</td><td><b>Aggregate-first 回归</b>。因变量直接是「(地理格 × 影像窗) 新增装机数」，不是逐装机日期。</td><td>已知稳的量（TVD 0.04）直接当 Y；DeepSolar 那一课搬到计量。</td></tr>
+<tr><td class="rank">3</td><td><b>在真实聚合分辨率上测 cell 级复现性</b>。把 3 reps 重算成 ward×year / municipality×year 计数，看 rep↔rep。</td><td>全国 0.04 稳 ≠ 小 cell 稳。<b>先测这个数再决定换不换 backbone。</b></td></tr>
+<tr><td class="rank">4</td><td><b>建带 vintage 标签的金标，查 differential bias（不是查复现性）</b>。检验：定档误差是否与板大小/地区/影像质量相关、小板是否聚在处理区。</td><td>这才是能沉船的检验，且 3-rep 完全看不见。同时用来分离可约/不可约方差。</td></tr>
+<tr><td class="rank">4b</td><td><b>把 undated 当非随机缺失建模</b>。按 cell 报 undated 率，检验是否与处理强度相关；相关则不能直接丢（interval-censored 天然容纳）。</td><td>防选择偏差。</td></tr>
+<tr><td class="rank demote">5</td><td class="demote"><b>（可选，最后）确定性 ViT</b>——且只上 pairwise-CD、跨 vintage fine-tune、验证过 differential 标定的版本，定位为「对 cell 计数的经典噪声做方差缩减」。</td><td class="demote">你所有问题里最轻的一个；仅当第 3 步真的太吵才做。</td></tr>
+</tbody>
+</table>
+
+<div class="box good"><span class="blab">一句话回到原问题</span>
+换 ViT 能不能获得更好的路径一致性？<b>能。</b>但对一个聚合到地理层级的 event-study，路径一致性既不是瓶颈也不是识别威胁所在。瓶颈是影像 cadence 和 date-vs-truth 的系统性偏差——前者任何模型都不动，后者要靠金标查 differential bias 来防，确定化反而会把它藏得更深。把预算从「换 backbone 追一致性」挪到「interval-censored 估计量 + cell 级复现实测 + differential-bias 金标 + undated 缺失建模」，对这篇 paper 的回报高一个量级。</div>
+
+<h2><span class="snum">7.</span>两个待定参数（确定后能把设计收得更紧）</h2>
+<div class="q"><b>(a)</b> 处理强度和地理层级各定在什么分辨率？<span class="kv">ward / 自治市 / 省 ？ &nbsp; 年 / 季 ？</span></div>
+<div class="q"><b>(b)</b> 影像 vintage 在研究期内典型间隔多久？<span class="kv">决定 §5 那个 cadence 可行性判断往哪边落</span></div>
+
+<div class="foot">
+ZAsolar · solar_backdating · install-date 复现性与 event-study 测量设计 · 思路梳理稿，2026-06-24。<br>
+关联：<code>docs/validation/2026-06-21-validation-methodology.html</code>（§3 端到端复现已 executed）·
+记忆 <code>endtoend_reproducibility_test</code> · <code>zerov2_phase0_gate</code>（DINOv3-SAT GSD 域差证据）。<br>
+本稿为思路组织用，非最终方法学；表 1 数值取自 <code>analysis_3rep/endtoend_summary.json</code>。
+</div>
+
+</div></body></html>
