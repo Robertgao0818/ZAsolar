@@ -158,6 +158,10 @@ start-*.bat
 CASE_STUDY.md
 CASE_STUDY.html
 
+# Data symlinks into ~/zasolar_data (2026-07-10 in-repo data migration; targets are gitignored data)
+/checkpoints_cleaned
+/data/buildings
+
 # Generated root-level report HTML (regeneratable from scripts/analysis/*)
 /ct_census_report.html
 /ct_census_calibration_appendix.html

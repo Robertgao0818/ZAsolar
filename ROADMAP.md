@@ -35,14 +35,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-07-10: chore(cleanup): archive concluded one-off scripts/docs; migrate orphaned in-repo data
+- 2026-07-09: docs(plans): storyline v2 tech plan + ESSD draft workspace
 - 2026-07-09: fix(analysis): enforce area_m2 == geometry.area after SAM refine + posthoc merge
 - 2026-07-05: fix(postproc): D5 ruling — unify conf/elong tier semantics to first-match (#6)
 - 2026-07-05: fix(arch-review): land ready-for-agent defect fixes #3/#4/#5
 - 2026-06-24: docs(validation): validation methodology + CT census GT eval + reproducibility study
 - 2026-06-24: feat(census): CT census reporting, output table, GT eval + ops scripts
 - 2026-06-24: feat(training): deepen mask-supervision patch lifecycle
-- 2026-06-24: refactor(analysis): extract core/polygon_validation.py shared module (ADR-0001)
-- 2026-06-23: docs(validation): add complete Chinese validation & robustness methodology
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
@@ -195,7 +195,7 @@ Re-annotated all 3 Cape Town grids with SAM2.1 (GeoSAM plugin in QGIS), retraine
 - [x] GT resolution: `core/grid_utils.py` auto-selects SAM2 annotations for evaluation
 - [x] Full-grid evaluation on all 3 grids with SAM2 GT
 - [x] Primary metric switched from F1@IoU0.1 to **F1@IoU0.5**
-- [x] Model-assisted annotation script (`scripts/annotations/export_hints.py`)
+- [x] Model-assisted annotation script (`scripts/archive/annotations/export_hints.py`, archived 2026-07-10)
 
 ### Training Data
 - G1238: 248 polygons (SAM2.1, layer `SAM_Residential_merged`)

@@ -117,6 +117,7 @@ scripts/
   annotations/
     bootstrap_manifest.py      — 从 GPKG 生成初始 annotation manifest
     prepare_jhb_grids.py       — JHB grid 准备
+  archive/                     — 已归档的一次性分析/战役脚本（2026-07-10 审计移入；按战役分子目录，索引见 scripts/archive/README.md；新代码禁止 import）
 configs/
   datasets/
     regions.yaml               — 权威区域注册表（grids、CRS、paths、grid_id_pattern）
