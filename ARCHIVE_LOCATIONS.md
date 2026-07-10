@@ -21,6 +21,7 @@ archive root: `dropbox:ZAsolar_archive/ARCHIVE_INDEX.md`.
 | `vexcel_eval_60_osm_stratified_seed42_2x2.tar` | `tiles/vexcel_eval_60_osm_stratified_seed42_2x2/` | ~4.1G | Orphaned xdomain Vexcel eval tiles; **0 live code/config refs**; violated the "in-repo `tiles/` = placeholder only" rule. |
 | `gemini_review_calib_no_prelaunch.tar` | `data/analysis/gemini_review_calib/` (all except `prelaunch/`) | ~2.5G | Regeneratable Gemini FP-review chips/eval artifacts. **`prelaunch/` KEPT in repo** — it is a live test dependency (`tests/analysis/test_two_stage_failclosed_data.py`). |
 | `results.tar` | `results/` (entire tree) | ~12G | Concluded census/eval outputs (CT + JHB + analysis + xdomain vexcel). Newest file was 2026-06-24; no active writes. Human-review `*_reviewed.gpkg` were already exported to `data/annotations/` (the canonical GT, which stays). |
+| `models/other_detector_checkpoints.tar` | `~/zasolar_data/models/{v1_ft_cs400_tileval_20260317_r4, v2_sam2_260320, exp003_C_targeted_hn, exp004_v4_hn, exp005_v4_1_hn, exp006_v4_2_jhb_ft, checkpoints_cleaned}/` (symlinked into `checkpoints/`) | ~2.5G | Non-production detector checkpoints (benchmark/reproducibility history). `configs/model_registry.yaml` still lists their `checkpoints/…/best_model.pth` paths — now **dangling by design**; `run_benchmark.py` on these model ids needs a restore. `validate_registry.py` does NOT assert `.pth` existence, so registry validation still passes. **Production `exp_unified_reviewall_A` and all backbones (sam2, sam_vit_l, dinov2_floor, dinov3_sat×2) were kept local** (production-critical / re-downloadable). |
 
 ### Consequence of archiving `results/` (intentional, user-approved)
 
@@ -42,6 +43,10 @@ rclone cat dropbox:ZAsolar_archive/ARCHIVE_INDEX.md   # full manifest
 # pull one unit back and unpack in place
 rclone copy dropbox:ZAsolar_archive/results.tar /home/gaosh/zasolar_data/_restore/ --progress
 tar xf /home/gaosh/zasolar_data/_restore/results.tar -C /home/gaosh/projects/ZAsolar   # recreates results/
+
+# non-production detector checkpoints → unpack into the models root the symlinks point at
+rclone copy dropbox:ZAsolar_archive/models/other_detector_checkpoints.tar /home/gaosh/zasolar_data/_restore/ --progress
+tar xf /home/gaosh/zasolar_data/_restore/other_detector_checkpoints.tar -C /home/gaosh/zasolar_data/models
 ```
 
 Tarballs were created with the source dir as a top-level member (`tar cf X.tar -C <parent> <dir>`),
