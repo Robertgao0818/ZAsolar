@@ -71,7 +71,9 @@ tiles/                        — 项目目录占位符（实际数据禁止放 
 #   G1630 等在 CT 和 JHB 都有真实、独立的地理覆盖。**永远** 用
 #   (region, imagery_layer) 定位,不要靠 grid_id 猜 region。
 
-results/
+results/    — ⚠️ 2026-07-11 整树归档到 dropbox:ZAsolar_archive/results.tar 后删本地 (释放 12G)。
+             仅存 tracked 占位 README_ARCHIVED.md。代码仍读 BASE_DIR/results (RESULTS_ROOT),
+             新 run 会重填此目录；要复现旧配方先 restore。指针: 仓库根 ARCHIVE_LOCATIONS.md
   analysis/
     ct_wms_coverage_probe/    — CT WMS blank-probe 结果（probe.csv: grid_id, covered, blank_fraction 等; threshold=0.05, 2026-06-12）
 results/<region>/<model_run>/<GridID>/  — 检测结果按 region × model_run 分组

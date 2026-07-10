@@ -35,6 +35,7 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-07-10: chore(archive): back up historical results/tiles/gemini-chips to Dropbox, reclaim ~18.6G local
 - 2026-07-10: chore(cleanup): archive concluded one-off scripts/docs; migrate orphaned in-repo data
 - 2026-07-09: docs(plans): storyline v2 tech plan + ESSD draft workspace
 - 2026-07-09: fix(analysis): enforce area_m2 == geometry.area after SAM refine + posthoc merge
@@ -42,7 +43,6 @@
 - 2026-07-05: fix(arch-review): land ready-for-agent defect fixes #3/#4/#5
 - 2026-06-24: docs(validation): validation methodology + CT census GT eval + reproducibility study
 - 2026-06-24: feat(census): CT census reporting, output table, GT eval + ops scripts
-- 2026-06-24: feat(training): deepen mask-supervision patch lifecycle
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.

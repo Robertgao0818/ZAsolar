@@ -53,3 +53,28 @@ No files were modified, moved, or deleted during this audit.
 Companion action landed the same day: 69 concluded one-off scripts/docs archived to
 `scripts/archive/` + `docs/experiment-archive/` (audit manifest: workflow
 `zasolar-cleanup-audit`, 2026-07-10).
+
+---
+
+## Resolution
+
+**2026-07-10 (migrate off repo tree → `~/zasolar_data/`, same physical disk):**
+`checkpoints/` + `checkpoints_cleaned/` (2.7G, symlinked back; still **no off-site
+copy**), `data/coco_v1_ft_*` r2/r3, `data/coco_train20_val5_qa`, `probes/`,
+`mosaics/`, `data/buildings/` (symlinked), and legacy per-grid `results/` dirs.
+Same-disk move → reclaims repo tree, **not** physical disk.
+
+**2026-07-11 (off-site Dropbox archive → then delete local, real disk reclaim):**
+tar → `dropbox:ZAsolar_archive/` → verify remote byte-size == local → delete local.
+Manifest: `dropbox:ZAsolar_archive/ARCHIVE_INDEX.md`; repo pointer:
+`ARCHIVE_LOCATIONS.md`.
+
+- [x] `tiles/vexcel_eval_60_osm_stratified_seed42_2x2/` (4.1G) → `…seed42_2x2.tar` (4,345,364,480 B). Deleted.
+- [x] `results/` **entire tree** (12G — analysis, cape_town, johannesburg, vexcel, grid_previews, validation, legacy `G*`/diag, all `*/review/*_reviewed.gpkg`) → `results.tar` (12,545,976,320 B). Deleted; replaced by tracked placeholder `results/README_ARCHIVED.md`. Config `results/...` refs now dangling **by design** (user-approved; models already trained).
+- [x] `data/analysis/gemini_review_calib/` minus `prelaunch/` (2.6G) → `gemini_review_calib_no_prelaunch.tar` (2,741,985,280 B). Deleted. `prelaunch/` **kept** (live test dep `tests/analysis/test_two_stage_failclosed_data.py`).
+
+**Still open (not disaster-recovered):** production checkpoint
+`exp_unified_reviewall_A` and its siblings live only on the same physical disk
+(`~/zasolar_data/models/`, symlinked into repo) — a real off-site/RunPod copy is
+still owed. `~/zasolar_data/**` working big data (tiles/coco/models/geid_temporal)
+is likewise same-disk only.
