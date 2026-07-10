@@ -47,11 +47,21 @@ tar xf /home/gaosh/zasolar_data/_restore/results.tar -C /home/gaosh/projects/ZAs
 Tarballs were created with the source dir as a top-level member (`tar cf X.tar -C <parent> <dir>`),
 so `tar xf` into the right parent recreates the original path exactly.
 
-## What was NOT archived (still local / in-repo)
+## Off-site backup of the LIVE production model (kept local, also copied out)
 
-- `data/annotations/` — canonical GT (also mirrored to `dropbox:RA_Solar/Gao/`).
+The production detector `exp_unified_reviewall_A/best_model.pth` (the current
+census model — cited across `configs/datasets/regions.yaml` CT+JHB model_runs)
+now has a durable off-site copy. It is **still live** in `~/zasolar_data/models/`
+(symlinked into `checkpoints/`) — this is a backup, not an archive-and-delete.
+
+- Off-site: `dropbox:ZAsolar_archive/models/exp_unified_reviewall_A/best_model.pth`
+  (176,243,385 bytes, uploaded + byte-verified 2026-07-11).
+- Restore: `rclone copy dropbox:ZAsolar_archive/models/exp_unified_reviewall_A/best_model.pth /home/gaosh/zasolar_data/models/exp_unified_reviewall_A/`
+
+## What was NOT backed up (still local only / in-repo)
+
+- `data/annotations/` — canonical GT (already mirrored to `dropbox:RA_Solar/Gao/`).
 - `data/analysis/gemini_review_calib/prelaunch/` — live test dependency.
-- `~/zasolar_data/**` — live working big data (tiles/coco/models/geid_temporal…),
-  managed separately; **not** yet off-site backed up (same-disk only).
-- Production checkpoints (`checkpoints/` symlinks → `~/zasolar_data/models/`):
-  still **no off-site copy** — a same-disk move is not disaster recovery.
+- `~/zasolar_data/**` — live working big data (tiles/coco/geid_temporal + the
+  **other, non-production** checkpoints): same-disk only, no off-site copy. Only
+  the production checkpoint above was pushed off-site (per user scope).
