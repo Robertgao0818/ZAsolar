@@ -68,8 +68,8 @@ set -euo pipefail
 # /root/ZAsolar and tiles on local NVMe, not /workspace).
 REMOTE_WORKSPACE="${REMOTE_WORKSPACE:-/workspace/ZAsolar}"
 REMOTE_TILES="${REMOTE_TILES:-/workspace/tiles}"
-LOCAL_RESULTS="${LOCAL_RESULTS:-/home/gaosh/zasolar_data/results}"
-LOCAL_TILES="${LOCAL_TILES:-/home/gaosh/zasolar_data/tiles}"
+LOCAL_RESULTS="${LOCAL_RESULTS:-/home/gao/zasolar_data/results}"
+LOCAL_TILES="${LOCAL_TILES:-/home/gao/zasolar_data/tiles}"
 
 # --- Parse args: pull flags out, keep positionals (MODE, grid_list_file) ---
 REGION=""

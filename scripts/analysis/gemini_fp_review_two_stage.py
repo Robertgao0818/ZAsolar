@@ -389,7 +389,7 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--dry-run", action="store_true", help="Do not call Gemini or write outputs; print the planned summary.")
 
     # Gemini client options mirror gemini_fp_review_multiscale.py.
-    ap.add_argument("--env-file", type=Path, default=Path("/home/gaosh/projects/solar_backdating/.env.gemini.local"))
+    ap.add_argument("--env-file", type=Path, default=Path("/home/gao/projects/solar_backdating/.env.gemini.local"))
     ap.add_argument("--base-url")
     ap.add_argument("--api-key")
     ap.add_argument("--model", default="gemini-3-flash-agent")

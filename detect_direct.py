@@ -2,7 +2,7 @@
 """Direct Mask R-CNN inference (no geoai wrapper).
 
 Produces a raw detection artifact (`raw_detections.pkl`) consumed by
-``finalize.py``. See `/home/gaosh/.claude/plans/opengeoai-detector-sam-...md`
+``finalize.py``. See `/home/gao/.claude/plans/opengeoai-detector-sam-...md`
 (plan v1.4) for design.
 
 Stage 1 of the production direct pipeline:

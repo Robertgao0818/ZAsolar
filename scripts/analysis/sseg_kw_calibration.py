@@ -33,7 +33,7 @@ import pandas as pd
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 
-ROOT = Path("/home/gaosh/projects/ZAsolar")
+ROOT = Path("/home/gao/projects/ZAsolar")
 OUTDIR = ROOT / "docs/experiments/sseg_kw_calibration_2026-05-10"
 OUTDIR.mkdir(parents=True, exist_ok=True)
 

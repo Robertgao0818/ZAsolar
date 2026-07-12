@@ -166,7 +166,7 @@ class MaskSupervisionSpec:
 
 @dataclass
 class OutputSpec:
-    root: str = "${SOLAR_ARTIFACT_ROOT:-/home/gaosh/zasolar_data}"
+    root: str = "${SOLAR_ARTIFACT_ROOT:-/home/gao/zasolar_data}"
     name_template: str = "coco_{name}_{date}"
 
 
@@ -661,7 +661,7 @@ def _parse_raw(raw: dict[str, Any]) -> DatasetSpec:
         ),
         hard_negatives=hn_entries,
         output=OutputSpec(
-            root=str(out_raw.get("root", "${SOLAR_ARTIFACT_ROOT:-/home/gaosh/zasolar_data}")),
+            root=str(out_raw.get("root", "${SOLAR_ARTIFACT_ROOT:-/home/gao/zasolar_data}")),
             name_template=str(out_raw.get("name_template", "coco_{name}_{date}")),
         ),
         # v2-only fields (validate() gates these on schema_version >= 2)

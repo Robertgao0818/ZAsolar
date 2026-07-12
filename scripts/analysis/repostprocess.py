@@ -42,19 +42,19 @@ def _results_root_candidates(region: str | None = None) -> list[Path]:
     region = normalize_region(region)
     if region == "jhb":
         roots = [
-            Path("/home/gaosh/zasolar_data/results/johannesburg/v4_aerial_2023"),
+            Path("/home/gao/zasolar_data/results/johannesburg/v4_aerial_2023"),
             PROJECT_ROOT / "results_joburg",
         ]
     elif region == "ct":
         roots = [
-            Path("/home/gaosh/zasolar_data/results"),
+            Path("/home/gao/zasolar_data/results"),
             PROJECT_ROOT / "results",
         ]
     else:
         roots = [
-            Path("/home/gaosh/zasolar_data/results"),
+            Path("/home/gao/zasolar_data/results"),
             PROJECT_ROOT / "results",
-            Path("/home/gaosh/zasolar_data/results/johannesburg/v4_aerial_2023"),
+            Path("/home/gao/zasolar_data/results/johannesburg/v4_aerial_2023"),
             PROJECT_ROOT / "results_joburg",
         ]
     seen = []

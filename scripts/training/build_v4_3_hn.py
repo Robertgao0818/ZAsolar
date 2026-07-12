@@ -12,14 +12,14 @@ detector to suppress real PV.
 
 Usage:
     python scripts/training/build_v4_3_hn.py \
-        --base-coco /home/gaosh/zasolar_data/coco/coco_v4_2_jhb_ft \
-        --output-dir /home/gaosh/zasolar_data/coco/coco_v4_3_hn \
+        --base-coco /home/gao/zasolar_data/coco/coco_v4_2_jhb_ft \
+        --output-dir /home/gao/zasolar_data/coco/coco_v4_3_hn \
         --jhb-fp-pool results/analysis/v4_3_hn/jhb_fp_pool.gpkg \
         --ct-shortlist results/analysis/small_fp/taxonomy_run/hn_small_fp_shortlist.csv
 
     # Guardrail 10% variant:
     python scripts/training/build_v4_3_hn.py ... \
-        --output-dir /home/gaosh/zasolar_data/coco/coco_v4_3_hn_10pct \
+        --output-dir /home/gao/zasolar_data/coco/coco_v4_3_hn_10pct \
         --subsample-frac 0.71  # 0.71 * 1143 -> ~810 chips -> ~10% ratio
 """
 

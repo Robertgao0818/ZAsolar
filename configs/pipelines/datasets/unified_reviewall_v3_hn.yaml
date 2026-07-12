@@ -200,5 +200,5 @@ hard_negatives:
 init_weights: v3c
 
 output:
-  root: ${SOLAR_ARTIFACT_ROOT:-/home/gaosh/zasolar_data}
+  root: ${SOLAR_ARTIFACT_ROOT:-/home/gao/zasolar_data}
   name_template: "coco_{name}_{date}"

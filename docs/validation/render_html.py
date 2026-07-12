@@ -9,7 +9,7 @@ implies (tables, fenced_code, sane_lists). Verified by diffing an unchanged sect
 import re, sys
 import markdown
 
-DOC = "/home/gaosh/projects/ZAsolar/docs/validation/2026-06-21-validation-methodology"
+DOC = "/home/gao/projects/ZAsolar/docs/validation/2026-06-21-validation-methodology"
 md_text = open(DOC + ".md").read()
 old_html = open(DOC + ".html").read()
 

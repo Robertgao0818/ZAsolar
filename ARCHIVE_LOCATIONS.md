@@ -41,12 +41,12 @@ rclone lsl dropbox:ZAsolar_archive/
 rclone cat dropbox:ZAsolar_archive/ARCHIVE_INDEX.md   # full manifest
 
 # pull one unit back and unpack in place
-rclone copy dropbox:ZAsolar_archive/results.tar /home/gaosh/zasolar_data/_restore/ --progress
-tar xf /home/gaosh/zasolar_data/_restore/results.tar -C /home/gaosh/projects/ZAsolar   # recreates results/
+rclone copy dropbox:ZAsolar_archive/results.tar /home/gao/zasolar_data/_restore/ --progress
+tar xf /home/gao/zasolar_data/_restore/results.tar -C /home/gao/projects/ZAsolar   # recreates results/
 
 # non-production detector checkpoints → unpack into the models root the symlinks point at
-rclone copy dropbox:ZAsolar_archive/models/other_detector_checkpoints.tar /home/gaosh/zasolar_data/_restore/ --progress
-tar xf /home/gaosh/zasolar_data/_restore/other_detector_checkpoints.tar -C /home/gaosh/zasolar_data/models
+rclone copy dropbox:ZAsolar_archive/models/other_detector_checkpoints.tar /home/gao/zasolar_data/_restore/ --progress
+tar xf /home/gao/zasolar_data/_restore/other_detector_checkpoints.tar -C /home/gao/zasolar_data/models
 ```
 
 Tarballs were created with the source dir as a top-level member (`tar cf X.tar -C <parent> <dir>`),
@@ -61,7 +61,7 @@ now has a durable off-site copy. It is **still live** in `~/zasolar_data/models/
 
 - Off-site: `dropbox:ZAsolar_archive/models/exp_unified_reviewall_A/best_model.pth`
   (176,243,385 bytes, uploaded + byte-verified 2026-07-11).
-- Restore: `rclone copy dropbox:ZAsolar_archive/models/exp_unified_reviewall_A/best_model.pth /home/gaosh/zasolar_data/models/exp_unified_reviewall_A/`
+- Restore: `rclone copy dropbox:ZAsolar_archive/models/exp_unified_reviewall_A/best_model.pth /home/gao/zasolar_data/models/exp_unified_reviewall_A/`
 
 ## What was NOT backed up (still local only / in-repo)
 

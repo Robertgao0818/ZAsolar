@@ -18,7 +18,7 @@ regions:
       # PR3 (2026-04-19): tiles moved to tiles/cape_town/aerial_2025.
       # tiles_root now points to the region subtree; individual layers live
       # under imagery_layers[*].path.
-      tiles_root: "/home/gaosh/zasolar_data/tiles/cape_town"
+      tiles_root: "/home/gao/zasolar_data/tiles/cape_town"
       results_root: "results"
       annotations_dir: "data/annotations/Capetown"
       # CPT regrid (2026-06-12, ADR-0002 §5): the region's primary task grid is
@@ -106,7 +106,7 @@ regions:
 
     imagery_layers:
       aerial_2025:
-        path: "/home/gaosh/zasolar_data/tiles/cape_town/aerial_2025"
+        path: "/home/gao/zasolar_data/tiles/cape_town/aerial_2025"
         source: "aerial"
         vintage: "2025"
         census_imagery_mid_date: "2025-06-30"  # mid-year fallback
@@ -360,7 +360,7 @@ regions:
     paths:
       # PR3 (2026-04-19): tiles moved to tiles/johannesburg/<layer>/.
       # Individual layers live under imagery_layers[*].path.
-      tiles_root: "/home/gaosh/zasolar_data/tiles/johannesburg"
+      tiles_root: "/home/gao/zasolar_data/tiles/johannesburg"
       results_root: "results/johannesburg"
       annotations_dir: "data/annotations/Joburg"
       task_grid: "data/jhb_task_grid_unified.gpkg"  # 106 legacy (JHB01-06 + 100 G*) + 382 JNB Vexcel 1km cells
@@ -381,7 +381,7 @@ regions:
     # anything JHB-historical.
     imagery_layers:
       aerial_2023:
-        path: "/home/gaosh/zasolar_data/tiles/johannesburg/aerial_2023"
+        path: "/home/gao/zasolar_data/tiles/johannesburg/aerial_2023"
         source: "aerial"
         vintage: "2023"
         census_imagery_mid_date: "2023-06-30"  # mid-year fallback; refine if exact aerial flight metadata becomes available
@@ -404,7 +404,7 @@ regions:
           G1634,
         ]
       geid_2024_02:
-        path: "/home/gaosh/zasolar_data/tiles/johannesburg/geid_2024_02"
+        path: "/home/gao/zasolar_data/tiles/johannesburg/geid_2024_02"
         source: "geid"
         vintage: "2024-02"
         census_imagery_mid_date: "2024-02-15"  # specific month known
@@ -436,7 +436,7 @@ regions:
         provenance: "Legacy manual GT pilot grids. Native raster CRS is Web Mercator (EPSG:3857) per rasterio inspection 2026-05-05."
         coverage_grids: [JHB01, JHB02, JHB03, JHB04, JHB05, JHB06]
       vexcel_2024:
-        path: "/home/gaosh/zasolar_data/tiles/johannesburg/vexcel_2024"
+        path: "/home/gao/zasolar_data/tiles/johannesburg/vexcel_2024"
         source: "vexcel"
         vintage: "2024"
         census_imagery_mid_date: "2024-03-18"  # FALLBACK ONLY: true midpoint of the real flight window 2024-02-17..2024-04-19. For install-date present-side clamping use the PER-GRID real flight date (capture_date_range_* + /ortho/dates), not this single value. Dominant flight (~80% of area) is 2024-02-21; eastern strip is 2024-04-19. Verified via /ortho/dates API 2026-06-04 (was nominal 2024-06-30, ~3-4mo too late).
@@ -468,7 +468,7 @@ regions:
           RAW M2F masks, per-detection merge mode, conf_threshold 0.5,
           chip 512 / overlap 0.25 — NO SAM refinement, NO polygon-conf
           sweep. Source gpkgs symlinked from
-          /home/gaosh/projects/solar_zerov2/outputs/infer/phase_0_jhb25/<grid>/per_detection/.
+          /home/gao/projects/solar_zerov2/outputs/infer/phase_0_jhb25/<grid>/per_detection/.
           Fair raw-vs-raw comparator is v3c_vexcel_2024 (V3-C raw per-det);
           locked baseline-to-beat is V3-C+SAM (agg_F1 0.821 / σ_Bw 0.180 /
           RMSE 1066). Architecture-alive gate only — not a production run.
@@ -712,14 +712,14 @@ regions:
     crs_metric: "EPSG:32736"
     crs_exchange: "EPSG:4326"
     paths:
-      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/pietermaritzburg"
+      tiles_root: "/home/gao/zasolar_data/tiles/vexcel/pietermaritzburg"
       results_root: "results/vexcel/pietermaritzburg"
       annotations_dir: "data/annotations/Vexcel/pietermaritzburg"
       task_grid: "data/vexcel_task_grids/pietermaritzburg_task_grid.gpkg"
     grid_id_pattern: "PMB\\d{4}"
     imagery_layers:
       vexcel_ortho_2025_12:
-        path: "/home/gaosh/zasolar_data/tiles/vexcel/pietermaritzburg/ortho"
+        path: "/home/gao/zasolar_data/tiles/vexcel/pietermaritzburg/ortho"
         source: "vexcel"
         vintage: "2025-12-16"
         file_layout: "chunked"
@@ -737,14 +737,14 @@ regions:
     crs_metric: "EPSG:32736"
     crs_exchange: "EPSG:4326"
     paths:
-      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/durban"
+      tiles_root: "/home/gao/zasolar_data/tiles/vexcel/durban"
       results_root: "results/vexcel/durban"
       annotations_dir: "data/annotations/Vexcel/durban"
       task_grid: "data/vexcel_task_grids/durban_task_grid.gpkg"
     grid_id_pattern: "DBN\\d{4}"
     imagery_layers:
       vexcel_ortho_2025_12_2026_01:
-        path: "/home/gaosh/zasolar_data/tiles/vexcel/durban/ortho"
+        path: "/home/gao/zasolar_data/tiles/vexcel/durban/ortho"
         source: "vexcel"
         vintage: "2025-12-17..2026-01-06"
         file_layout: "chunked"
@@ -762,14 +762,14 @@ regions:
     crs_metric: "EPSG:32735"
     crs_exchange: "EPSG:4326"
     paths:
-      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/east_london"
+      tiles_root: "/home/gao/zasolar_data/tiles/vexcel/east_london"
       results_root: "results/vexcel/east_london"
       annotations_dir: "data/annotations/Vexcel/east_london"
       task_grid: "data/vexcel_task_grids/east_london_task_grid.gpkg"
     grid_id_pattern: "ELS\\d{4}"
     imagery_layers:
       vexcel_ortho_2026_01:
-        path: "/home/gaosh/zasolar_data/tiles/vexcel/east_london/ortho"
+        path: "/home/gao/zasolar_data/tiles/vexcel/east_london/ortho"
         source: "vexcel"
         vintage: "2026-01-07..2026-01-08"
         file_layout: "chunked"
@@ -787,14 +787,14 @@ regions:
     crs_metric: "EPSG:32735"
     crs_exchange: "EPSG:4326"
     paths:
-      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/gqeberha"
+      tiles_root: "/home/gao/zasolar_data/tiles/vexcel/gqeberha"
       results_root: "results/vexcel/gqeberha"
       annotations_dir: "data/annotations/Vexcel/gqeberha"
       task_grid: "data/vexcel_task_grids/gqeberha_task_grid.gpkg"
     grid_id_pattern: "GQB\\d{4}"
     imagery_layers:
       vexcel_ortho_2026_01:
-        path: "/home/gaosh/zasolar_data/tiles/vexcel/gqeberha/ortho"
+        path: "/home/gao/zasolar_data/tiles/vexcel/gqeberha/ortho"
         source: "vexcel"
         vintage: "2026-01-11..2026-01-21"
         file_layout: "chunked"
@@ -812,14 +812,14 @@ regions:
     crs_metric: "EPSG:32735"
     crs_exchange: "EPSG:4326"
     paths:
-      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/bloemfontein"
+      tiles_root: "/home/gao/zasolar_data/tiles/vexcel/bloemfontein"
       results_root: "results/vexcel/bloemfontein"
       annotations_dir: "data/annotations/Vexcel/bloemfontein"
       task_grid: "data/vexcel_task_grids/bloemfontein_task_grid.gpkg"
     grid_id_pattern: "BFN\\d{4}"
     imagery_layers:
       vexcel_ortho_2026_01:
-        path: "/home/gaosh/zasolar_data/tiles/vexcel/bloemfontein/ortho"
+        path: "/home/gao/zasolar_data/tiles/vexcel/bloemfontein/ortho"
         source: "vexcel"
         vintage: "2026-01-18"
         file_layout: "chunked"
@@ -837,14 +837,14 @@ regions:
     crs_metric: "EPSG:32735"
     crs_exchange: "EPSG:4326"
     paths:
-      tiles_root: "/home/gaosh/zasolar_data/tiles/vexcel/pretoria"
+      tiles_root: "/home/gao/zasolar_data/tiles/vexcel/pretoria"
       results_root: "results/vexcel/pretoria"
       annotations_dir: "data/annotations/Vexcel/pretoria"
       task_grid: "data/vexcel_task_grids/pretoria_task_grid.gpkg"
     grid_id_pattern: "PTA\\d{4}"
     imagery_layers:
       vexcel_ortho_2026_02:
-        path: "/home/gaosh/zasolar_data/tiles/vexcel/pretoria/ortho"
+        path: "/home/gao/zasolar_data/tiles/vexcel/pretoria/ortho"
         source: "vexcel"
         vintage: "2026-02-05..2026-02-08"
         file_layout: "chunked"
