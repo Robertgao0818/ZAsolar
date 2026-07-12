@@ -1,11 +1,11 @@
 # ESSD Data Descriptor — draft workspace
 
-**Status**: v0 draft in progress (2026-07-06). NOT committed; location `docs/paper/essd/`
-is the handoff suggestion — confirm with owner before first commit (and update
-`docs/architecture.md` in the same commit per repo doc-sync rules).
+**Status**: v0 census sections drafted (REBUILT 2026-07-12 — the 2026-07-06 draft
+and its `/tmp` handoffs were lost in the WSL→Fedora migration, never committed).
+Location `docs/paper/essd/` confirmed by owner; update `docs/architecture.md` in
+the same commit that first adds these files (repo doc-sync rules).
 
 **Master reference**: `docs/plans/2026-07-06-storyline-tech-plan-v2.md` (draft v3).
-Handoff: `/tmp/handoff_essd_draft_2026-07-06.md`.
 
 ## Scope decisions (as drafted)
 
@@ -32,21 +32,23 @@ the GT-ceiling decomposition replaces them.
 
 ## Files
 
-- `essd_draft_v0.md` — the manuscript draft (English).
-- `research_verification_memo_2026-07-06.md` — deep-research results for the five
-  pre-submission [H] clusters (global product positioning, Vexcel license,
-  Overture/GOB lineage, ESSD mechanics, load-shedding/SARS series). Written from
-  workflow `wf_51286802-2e8` output.
+- `essd_draft_v0.md` — the manuscript draft (English). Census sections drafted
+  2026-07-12; per-number source paths in HTML comments; open items in the draft's
+  own PENDING register (P1–P8).
+- `research_verification_memo_2026-07-06.md` — **LOST** (was written to `/tmp`
+  from workflow `wf_51286802-2e8`, never committed, gone with the machine
+  migration). The five pre-submission [H] clusters (global product positioning,
+  Overture/GOB lineage, ESSD mechanics, load-shedding/SARS series — Vexcel now
+  resolved, see below) need a fresh deep-research pass; tracked as draft P1/P2.
 
 ## Known blocking items (tracked in draft as PENDING blocks)
 
-- **Vexcel derived-vector license**: the public September 2024 Vexcel EULA defines
-  Derivatives as extracted features/attributes and licenses them for *Internal Use
-  only*; "Commercial Purpose" explicitly includes "use in any books, news
-  publication, or journal", and Derivatives must be destroyed on termination
-  (§2.1(c), §2.2(c), definitions). Under that baseline, publishing JHB polygons
-  CC-BY is **not permitted** — the actual Customer Agreement terms must be checked
-  and/or written permission obtained from Vexcel before submission. CT (municipal
-  WMS) is unaffected.
+- ~~**Vexcel derived-vector license**~~ **RESOLVED (owner, 2026-07-12)**: the
+  imagery was obtained under a Vexcel **academic partnership programme**; citing
+  the programme per its terms suffices for publishing derived vectors. The public
+  September 2024 EULA analysis (Internal-Use-only Derivatives) does not apply to
+  this dataset. Remaining action = draft P3: exact credit line from the agreement
+  + keep a copy on file with the DOI deposit. CT (municipal WMS) unaffected.
 - ESSD requires the dataset deposited with DOI before/at submission — Zenodo record
-  must exist first (verify exact requirement in research memo).
+  must exist first (draft P2; the memo that verified exact mechanics is lost,
+  re-verify).
