@@ -26,8 +26,11 @@ aggregate-first, caliber-disciplined framework. The Cape Town inventory contains
 area calibration ratio 1.083 against ground truth on 99 GT-bearing census cells)
 <!-- [F] docs/validation/2026-06-24-ct-census-gt-validation.md;
      results/analysis/ct_census_gt_eval/ct_census_gt_summary.csv -->
-across 2,083 census cells; the Johannesburg inventory contains 41,393 installations
-across 382 one-kilometre grid cells (aggregate area calibration 0.995 on the 25-grid
+across 2,083 census cells, with a count-caliber calibration placing the delivered
+count within [0.90, 1.27]× of installation-level truth
+<!-- [F] §4.3 count calibration, two GT-count conventions -->; the Johannesburg
+inventory contains 41,393 installations (1.29 km² of panel area) across 382
+one-kilometre grid cells (aggregate area calibration 0.995 on the 25-grid
 CBD ground-truth face)
 <!-- [F] ~/zasolar_data/geid_temporal/.../summary.json n_targets=41393;
      results/analysis/full382_merge01_2026-05-15/spatial_eval_summary.json bulk=0.9948 -->.
@@ -159,12 +162,22 @@ two-track:
   0.7168, classify-all mode, adaptive chip extraction).
   <!-- [F] memory cls_v2_protocol; threshold from 2026-06-24 validation report -->
 
-For Johannesburg an additional LLM-based FP review (Gemini) was applied to the
-merged inventory, removing 6,072 detections (47,465 → 41,393) with all 9
-pre-registered acceptance gates passing.
-<!-- [F] memory jhb_fp_cut_sweep; deliverable
-     results/analysis/full382_merge01_2026-05-15/jhb_full382_unified_A_merge01_c0925_fpcut_2026-06-01.gpkg
-     PENDING: link the 9-gate definition doc explicitly -->
+For Johannesburg an additional LLM-based FP review (Gemini, two-stage fail-closed
+protocol) was applied to the merged inventory, removing 6,072 detections
+(47,465 → 41,393; 12.8 % of polygons, 8.9 % of panel area — the cut skews toward
+small spurious detections). The review mechanism was validated against five
+pre-registered criteria (fail-closed integrity, TP-protection recall 0.936,
+FP-cut recall 0.851, stage-2 overfit check, concurrency soak) before launch, and
+the production sweep ran as 9 batches (362 grids), each independently passing the
+fail-closed data-integrity gate with zero violations and zero undecided rows.
+<!-- [F] mechanism validation: docs/experiment-archive/jhb_fp_cut_sweep_2026-05-31/
+     2026-05-31-jhb-two-stage-fp-review-production.md (5-criterion gate table);
+     production sweep: .../2026-06-01-jhb-fp-cut-inventory-delivery.md (9/9 batch
+     PASS table); gate script: scripts/analysis/check_two_stage_failclosed.py.
+     Area removed: 1,415,007→1,288,695 m² geometric, verified 2026-07-12.
+     NOTE the earlier draft phrase "9 pre-registered acceptance gates" was wrong —
+     9 = sweep batches passing ONE gate; the pre-registered criteria are the five
+     above. -->
 
 ### 3.4 Per-source post-processing calibration
 
@@ -271,10 +284,25 @@ slope 0.979, R² 0.961, within ±20 % 0.800; agg_area_F1 on the same face 0.821
 **Headline discipline.** The raw installation counts (111,801 CT / 41,393 JHB)
 never appear without their area-calibration ratio and its caliber: bulk is an
 *area* caliber measured *on the GT-bearing subset* (CT: net area over-estimate
-≈ 8 %). Area bulk must not be used to deflate counts; a count-caliber calibration
-interval is [PENDING: to be derived — candidate approach: cov50 + per-cell count
-regression on the 99-cell face].
-<!-- [F] storyline v2 §1.2 round-3 correction -->
+≈ 8 %). Area bulk must not be used to deflate counts. A separate **count-caliber
+calibration** on the same 99-cell face brackets the delivered count between two
+GT-count conventions: against the raw A2 sub-array annotation — finer-grained
+than installation level by construction, hence an upper bound on installation
+count — the aggregate count ratio is 0.95 (cell-bootstrap 95 % CI 0.90–1.00);
+against a sibling-fragment-dissolved approximation of installation-level GT
+(1 m gap, the dissolve parameter previously selected in the F1-gap review) the
+ratio is 1.21 (95 % CI 1.15–1.27). The dissolve is a proximity heuristic, not
+adjudicated installation labels, so neither convention is an unbiased
+installation-count estimator; taken together they place the count-calibration
+multiplier plausibly within [0.90, 1.27] — the delivered count is within roughly
+a quarter of installation-level truth, and the area bulk (1.08) must not be
+read as a count proxy. cov50 count recall on the same face is 0.856.
+<!-- [F] storyline v2 §1.2 round-3 correction; count calibration:
+     results/analysis/ct_census_gt_eval/ct_census_count_calibration{.csv,_summary.json}
+     (verified 2026-07-12: 6470/6787=0.953 raw, 6470/5351=1.209 dissolved@1m;
+     dissolve helper = scripts/analysis/installation_sym_eval.py dissolve_gt(),
+     gap provenance docs/plans/2026-06-10-rcnn-f1-gap-review.md; GT-side
+     fragmentation 1.268 consistent with the review's 1.25) -->
 
 **Dispersion asymmetry, read correctly.** CT per-cell dispersion (σ_Bw 0.52) is
 3× JHB's (0.16). This is a GT-face-composition effect, not a quality regression:
@@ -322,7 +350,14 @@ not part of this census release; see §7.)
 | File | Contents | CRS | Format |
 |---|---|---|---|
 | `ct_full_inventory_2026-06-21_merged` | 111,801 installation polygons, Cape Town | EPSG:32734 | GeoParquet + GPKG |
-| `jhb_full382_..._fpcut_2026-06-01` | 41,393 installation polygons, Johannesburg | EPSG:32735 | GeoParquet + GPKG |
+| `jhb_full382_..._fpcut_2026-06-01` | 41,393 installation polygons (1.29 km² panel area, geometric), Johannesburg | EPSG:32735 | GeoParquet + GPKG |
+<!-- [F] verified 2026-07-12: n=41,393, geometric area 1,288,695 m². KNOWN ARTIFACT
+     (draft P9): the stored area_m2 attribute exceeds geometric area by 6.4 %
+     overall — the gap lives entirely in the 30,975 unmerged singleton rows
+     (per-row few m², consistent with grid-boundary clipping at city-wide combine;
+     merged clusters match geometry exactly; same gap exists pre-FP-cut).
+     Recompute area_m2 from geometry before deposit; geometric area is
+     authoritative everywhere in this paper. -->
 | per-cell aggregates | cell id, installation count, panel area (m²) | — | CSV/Parquet |
 | validation pack | per-cell GT comparison tables (§4.3) | — | CSV |
 
@@ -401,8 +436,9 @@ planned as an ESSD living-data update to this dataset.
 | P1 | Global-product positioning literature check (§1.2 numbers) | §1.2 stays [H] until done | research memo lost with /tmp — re-run deep-research pass |
 | P2 | Zenodo deposit + DOI; confirm ESSD deposit mechanics | §5, §8 | |
 | P3 | Vexcel academic-programme credit line + agreement on file | §2, §8 | license question resolved 2026-07-12 (academic partnership); only citation text pending |
-| P4 | Count-caliber calibration interval (headline discipline, §4.3) | abstract/§4.3 | new analysis, cheap: 99-cell count regression |
+| P4 | ~~Count-caliber calibration interval~~ **DONE 2026-07-12** — [0.90, 1.27]× bracket landed in §4.3 + abstract; outputs `results/analysis/ct_census_gt_eval/ct_census_count_calibration*` | — | verified: aggregate ratios reproduce from per-cell table |
 | P5 | JHB dates: confirm withhold vs ship-with-caveat | §5 | draft assumes withhold |
-| P6 | Freeze released schema column list | §5 | |
-| P7 | 9-gate FP-cut definition doc linked explicitly | §3.3 | locate/verify gate doc path |
-| P8 | JHB installation-count area total after FP-cut | §5 table | compute from fpcut gpkg (pre-fpcut merged area was 1.415 km² at c0.925 <!-- [F] spatial_eval_summary.json merge_totals --> ) |
+| P6 | Freeze released schema column list | §5 | must incorporate P9 fix |
+| P7 | ~~9-gate doc link~~ **DONE 2026-07-12** — wording corrected in §3.3 (9 = sweep batches × one fail-closed gate; 5 pre-registered mechanism criteria separate); both docs linked | — | |
+| P8 | ~~JHB post-FP-cut totals~~ **DONE 2026-07-12** — 41,393 polygons / 1,288,695 m² geometric; landed in §5 + abstract | — | |
+| P9 | **NEW**: JHB `area_m2` attribute exceeds geometric area by 6.4 % (singleton rows only; pre-existing combine artifact, also in pre-FP-cut file) — recompute the column from geometry before Zenodo deposit | §5 | root cause already fixed pipeline-side (commit `d90fd7f`, 2026-07-09: enforce area_m2 == geometry.area) — the 2026-06-01 deliverable predates it; deposit copy just needs the column regenerated |
