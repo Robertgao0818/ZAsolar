@@ -173,7 +173,9 @@ def extract_negative_pool_hn(
     Pass ``False`` only for diagnostics / breadth audits over the full pool.
 
     NOTE: the pool is a provenance manifest — chips are derived on demand
-    (rule 08-runpod-large-files).  Rows without a populated ``bbox_geo_wkt``
+    (derived data is built from tiles on demand, never stored twice; see
+    .claude/skills/runpod-ops/reference/file-transfer.md).  Rows without a
+    populated ``bbox_geo_wkt``
     cannot be cropped and are skipped with a logged count; if no row carries
     geometry this returns ``n_chips=0``.
     """

@@ -35,6 +35,7 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-07-12: chore(migration): repoint hardcoded /home/gaosh paths to /home/gao (WSL→Fedora)
 - 2026-07-10: chore(archive): back up non-production detector checkpoints to Dropbox, reclaim 2.5G
 - 2026-07-10: docs(archive): record off-site backup of production checkpoint exp_unified_reviewall_A
 - 2026-07-10: chore(archive): back up historical results/tiles/gemini-chips to Dropbox, reclaim ~18.6G local
@@ -42,7 +43,6 @@
 - 2026-07-09: docs(plans): storyline v2 tech plan + ESSD draft workspace
 - 2026-07-09: fix(analysis): enforce area_m2 == geometry.area after SAM refine + posthoc merge
 - 2026-07-05: fix(postproc): D5 ruling — unify conf/elong tier semantics to first-match (#6)
-- 2026-07-05: fix(arch-review): land ready-for-agent defect fixes #3/#4/#5
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
