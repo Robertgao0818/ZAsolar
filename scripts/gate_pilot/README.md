@@ -28,6 +28,16 @@ tmux new -d -s yolo_gate_step1 'cd /home/gao/projects/ZAsolar && python3 -u scri
 
    步骤 1 的 chip 窗口和影像匹配都通过之后才跑。给六个格写 chip PNG；YOLO 框只写四个训练格。留出格如果已经有 `labels/` 目录，脚本会停。
 
+4. `/home/gao/venvs/yolo_gate/bin/python scripts/gate_pilot/step3_train.py`
+
+   只在四个训练格上训。折外阈值写入 `~/zasolar_data/gate_pilot_2026-09/frozen_gate.json` 之后，才允许跑步骤 5。
+
+5. `/home/gao/venvs/yolo_gate/bin/python scripts/gate_pilot/step5_holdout.py`
+
+   用冻结阈值给 CPT1238 和 E_test 打一次分。退出码 2 表示预注册的三条没有同时过。
+
+   步骤 1 的 chip 窗口和影像匹配都通过之后才跑。给六个格写 chip PNG；YOLO 框只写四个训练格。留出格如果已经有 `labels/` 目录，脚本会停。
+
 ## 留出格
 
 CPT1238 和抽中的 E_test 可以下载影像，也可以做 Mask R-CNN 一致性重跑。冻结文件写好之前，门的任何版本都不能在这两格的 chip 上推理。
