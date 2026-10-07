@@ -41,3 +41,7 @@ tmux new -d -s yolo_gate_step1 'cd /home/gao/projects/ZAsolar && python3 -u scri
 ## 留出格
 
 CPT1238 和抽中的 E_test 可以下载影像，也可以做 Mask R-CNN 一致性重跑。冻结文件写好之前，门的任何版本都不能在这两格的 chip 上推理。
+
+## 德班小批对照（2026-10-08，尚未开跑）
+
+`python3 scripts/gate_pilot/pregate_pair.py print-plan --grids DBN#### --model-path <检测器权重>` 只打印命令。`run` 才做两次检测。它不下载底图，不删瓦片，也没有全城开关。说明见 `docs/experiments/2026-09-yolo-gate-pilot/PLAN-durban-pregate-pair-2026-10-08.md`。这不是留出格打分，也不写 frozen_tau。
