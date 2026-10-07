@@ -164,8 +164,14 @@ def _check_chip_index(grid_id: str, chips: gpd.GeoDataFrame, log) -> pd.DataFram
     return frame
 
 
-def _write_images(grid_id: str, paths: list[Path], n_expected: int, log) -> None:
-    image_dir = CHIP_ROOT / grid_id / "images"
+def _write_images(
+    grid_id: str,
+    paths: list[Path],
+    n_expected: int,
+    log,
+    chip_root: Path | None = None,
+) -> None:
+    image_dir = (CHIP_ROOT if chip_root is None else chip_root) / grid_id / "images"
     image_dir.mkdir(parents=True, exist_ok=True)
     dataset = SlidingWindowDataset(
         paths, chip_size=CHIP_SIZE, overlap=OVERLAP, window_origin_mode="anchored",
@@ -189,8 +195,13 @@ def _write_images(grid_id: str, paths: list[Path], n_expected: int, log) -> None
         raise RuntimeError(f"{grid_id} png count {n_png}, expected {n_expected}")
 
 
-def _write_yolo(grid_id: str, chips: gpd.GeoDataFrame, pre_hits: pd.DataFrame) -> None:
-    label_dir = CHIP_ROOT / grid_id / "labels"
+def _write_yolo(
+    grid_id: str,
+    chips: gpd.GeoDataFrame,
+    pre_hits: pd.DataFrame,
+    chip_root: Path | None = None,
+) -> None:
+    label_dir = (CHIP_ROOT if chip_root is None else chip_root) / grid_id / "labels"
     label_dir.mkdir(parents=True, exist_ok=True)
     grouped = {int(k): g for k, g in pre_hits.groupby("chip_index")} if len(pre_hits) else {}
     for row in chips.itertuples(index=False):
