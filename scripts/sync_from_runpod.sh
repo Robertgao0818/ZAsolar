@@ -120,8 +120,7 @@ SSH_OPTS="-p $SSH_PORT -i $SSH_KEY -o StrictHostKeyChecking=accept-new"
 # so no per-grid SSH round trip (CT census is ~2083 grids).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LOCAL_PY="$REPO_ROOT/.venv/bin/python"
-[ -x "$LOCAL_PY" ] || LOCAL_PY="python3"
+LOCAL_PY="${PYTHON:-python3}"
 export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 # grid_id matching MUST go through core.region_registry.matches_any_region_pattern
