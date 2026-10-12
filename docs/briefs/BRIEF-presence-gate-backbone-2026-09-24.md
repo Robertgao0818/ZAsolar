@@ -1,7 +1,9 @@
 # BRIEF — 存在性门下一轮：换小 ViT，还是给 YOLO 喂更多格
 
 日期：2026-09-24
-状态：**已决策 2026-09-24 — 版本 C（门线挂起）**。负责人答复：下一座城在可见的时间内不开工。事后分析已作为附录写进 RESULT.md。下一座城选定时从 §3 第 1 步重新打开。
+状态：**2026-09-24 选了版本 C（门线挂起）**。负责人当时答复：下一座城在可见的时间内不开工。事后分析已作为附录写进 RESULT.md。
+
+**2026-09-28 重开版本 B 的第 2 步，只加数据、不换骨干。** 负责人要求继续训普查前面的 YOLO / ViT，并考虑加训练集。学习曲线的抽样和取数记在 [`../experiments/2026-09-yolo-gate-pilot/RUN-learning-curve-2026-09-28.md`](../experiments/2026-09-yolo-gate-pilot/RUN-learning-curve-2026-09-28.md)。第 1 步（生产机读图天花板）仍未做，所以这一轮不能转产，也不能改锁定的 Mask R-CNN。同一天德班普查采纳版本 B（solar_backdating `docs/briefs/BRIEF-durban-census-goal-2026-09-28.md`）：先做 10 格锁定链探针。那次扫描不以这扇门通过为前提。
 仓库：ZAsolar
 上游：[`BRIEF-census-detector-speed-2026-09-23.md`](BRIEF-census-detector-speed-2026-09-23.md) → 试点方案 [`../plans/2026-09-23-yolo-presence-gate-pilot.md`](../plans/2026-09-23-yolo-presence-gate-pilot.md) → 结果 [`../experiments/2026-09-yolo-gate-pilot/RESULT.md`](../experiments/2026-09-yolo-gate-pilot/RESULT.md)（试点失败：锁定阈值 0，放行率 100%）
 

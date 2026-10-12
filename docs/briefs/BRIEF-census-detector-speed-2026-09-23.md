@@ -160,4 +160,4 @@ FPN 浅层 1×1 早退省不下这段时间。早退发生在骨干网络之后�
 
 步骤 3–5 结果（2026-09-24）：折外阈值锁在 0。留出测试放行率 100%，G3 未过，试点失败。见 `docs/experiments/2026-09-yolo-gate-pilot/RESULT.md`。
 
-事后分析与下一轮决策（2026-09-24）：边缘截断按面积基本不丢；低分集中在只有 179 张阳性 chip 的那一折，不是低对比。换 ViT 还是加数据的备忘：`docs/briefs/BRIEF-presence-gate-backbone-2026-09-24.md`。2026-09-24 负责人选择 C：门线挂起，等选定下一座城再重新打开。
+事后分析与下一轮决策（2026-09-24）：边缘截断按面积基本不丢；低分集中在只有 179 张阳性 chip 的那一折，不是低对比。换 ViT 还是加数据的备忘：`docs/briefs/BRIEF-presence-gate-backbone-2026-09-24.md`。2026-09-24 负责人选择 C：门线挂起，等选定下一座城再重新打开。2026-09-28：下一座城定为德班，并采纳「先做 10 格锁定链探针、过线才做航拍足迹库存」；年份面板不在这一步。德班扫描不把存在性门当前提。同一天门的学习曲线在开普敦数据上另行重开，只加数据、不能转产，见 `docs/experiments/2026-09-yolo-gate-pilot/RUN-learning-curve-2026-09-28.md`。德班决策见 solar_backdating `docs/briefs/BRIEF-durban-census-goal-2026-09-28.md`。

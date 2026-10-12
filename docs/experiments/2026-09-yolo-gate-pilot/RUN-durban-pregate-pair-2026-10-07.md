@@ -94,7 +94,7 @@ Pod `exotic_beige_harrier`（`x6yhvn6rs3vuuu`），EU-RO-1，一张 RTX 4090，�
 
 同一天负责人接着决定：全城不跑 solar_cls，检测前使用存在性门，规则仍是四份折外头最高分 ≥ 0.45。后处理仍是 `v4_canonical`、按单次检测合并。不开门的全城对照不跑。
 
-这和 2026-09-28 备忘里的锁定链不同。那条链要分类器，并且写明全城不用这扇门。新产物是开门之后、分类之前的多边形。它不能拿去算备忘第 4 节的 bulk、σ_Bw 和空格 94 m²。单格推理在 2026-10-07 01:10 已经写好，上面 10 格用的就是它。`detect_direct.py` 负责开门，`pregate_pair.py` 负责后处理，两边都不调用 solar_cls。`pregate_pair.py` 默认最多 10 格，而且每次都先跑不开门。`scripts/ct_census_run.sh` 是开普敦脚本：不传 `--pregate-head`，并且在检测之前就因缺少 `best_cls.pth` 退出。RunPod 模板还没改。全城循环在下面这一节。2026-10-07 05:16 UTC 已经在这台 Pod 上开跑，还没跑完。
+这和 2026-09-28 备忘里的锁定链不同。那条链要分类器，并且写明全城不用这扇门。新产物是开门之后、分类之前的多边形。它不能拿去算备忘第 4 节的 bulk、σ_Bw 和空格 94 m²。单格推理在 2026-10-07 01:10 已经写好，上面 10 格用的就是它。`detect_direct.py` 负责开门，`pregate_pair.py` 负责后处理，两边都不调用 solar_cls。`pregate_pair.py` 默认最多 10 格，而且每次都先跑不开门。`scripts/ct_census_run.sh` 是开普敦脚本：不传 `--pregate-head`，并且在检测之前就因缺少 `best_cls.pth` 退出。RunPod 模板还没改。全城循环在下面这一节。2026-10-07 05:16 UTC 已经在这台 Pod 上开跑。06:12:53 UTC 进程自己退出，719 格失败，见文末「全城扫描已自行退出」。
 
 2026-10-07 在这台 4090 的网络盘上点过底图：`/workspace/tiles/durban/vexcel_2026` 有 846 个格目录、3,372 张 `*_geo.tif`、69.13 GiB。834 格是 4 张，12 格只有 3 张：DBN0025、DBN0064、DBN0119、DBN0418、DBN0546、DBN0590、DBN0611、DBN0669、DBN0721、DBN0736、DBN0766、DBN0790。`/dev/shm` 可用约 28 GB，装不下全部瓦片。检测器权重和四份 `head.pt` 已在盘上。本机和这台 Pod 上都没有 `best_cls.pth`；按这个决定，全城不再等它。
 
@@ -120,4 +120,58 @@ python -u scripts/gate_pilot/durban_citywide.py print-plan \
   --tile-root /workspace/tiles/durban/vexcel_2026
 ```
 
-2026-10-07 本机用假瓦片测了调度、续跑、临时盘删除不会碰到原件，以及读图工人能从 forkserver 读出一张小图且不初始化 CUDA。修正「后处理结束才删拷贝」之后，上面三份测试共 48 项通过。`detect_direct.py` 和这份脚本已在 Pod 上，哈希与本机一致。2026-10-07 这批代码已提交到 ZAsolar 分支 `durban-citywide-pregate`：门、单格推理和全城驱动在 `344a1a1`，训练四份折外头的 learning-curve 代码在 `dac7e97`。提交里的 `durban_citywide.py` 哈希仍是 `3588fdb6…`，就是 Pod 上正在跑的那一份。846 格的第二次启动还在 tmux `durban_citywide` 里跑。输出目录是 `/workspace/zasolar_data/gate_pilot_2026-09/durban_citywide_pregate_20261008/`，日志是同级的 `durban_citywide_pregate_20261008.log`。Pod `exotic_beige_harrier`（`x6yhvn6rs3vuuu`）仍按每小时 0.74 美元计费，这次没有关。全市时间仍按 10 格对照外推，大约 6 小时的计算量；刚跑过的格子很空，不能拿它们的十几秒去改这个外推。忽略「还在跑、还没出全市多边形」，就会把一份中途目录当成普查结果。
+2026-10-07 本机用假瓦片测了调度、续跑、临时盘删除不会碰到原件，以及读图工人能从 forkserver 读出一张小图且不初始化 CUDA。修正「后处理结束才删拷贝」之后，上面三份测试共 48 项通过。`detect_direct.py` 和这份脚本已在 Pod 上，哈希与本机一致。2026-10-07 这批代码已提交到 ZAsolar 分支 `durban-citywide-pregate`：门、单格推理和全城驱动在 `344a1a1`，训练四份折外头的 learning-curve 代码在 `dac7e97`。提交里的 `durban_citywide.py` 哈希仍是 `3588fdb6…`，就是 Pod 上这次跑的那一份。846 格的第二次启动在 2026-10-07 06:12:53 UTC 自行退出，tmux 已经不在。输出目录是 `/workspace/zasolar_data/gate_pilot_2026-09/durban_citywide_pregate_20261008/`，日志是同级的 `durban_citywide_pregate_20261008.log`。Pod `exotic_beige_harrier`（`x6yhvn6rs3vuuu`）仍按每小时 0.74 美元计费，这次没有关。健康段大约每小时 210 格；若不停，全市大约 4 小时，比 10 格外推的 6 小时短。这次没有跑完。忽略文末的退出记录，就会把 719 个失败格当成已经普查过。
+
+## 全城扫描已自行退出
+
+2026-10-07 06:12:53 UTC，第二次启动自己写下 `done ok=116 empty=9 fail=719 skip=2` 后退出。tmux 会话 `durban_citywide` 当时已经不在。这不是显卡进程中途退出：整份日志里没有 `GPU worker exited`。盯梢在 06:08 到 06:12 仍看到显存停在 11732 MiB，06:13 进程退出后才回到 1 MiB。
+
+第一条失败是 05:53:20 的 DBN0128：`RuntimeError: Pin memory thread exited unexpectedly`，traceback 里是 `RuntimeError: received 0 items of ancdata`。下一格 05:53:22 的 DBN0129 是 `OSError: [Errno 24] Too many open files`。719 个失败里，713 个是打开文件太多，5 个是 `ConnectionRefusedError: [Errno 111] Connection refused`，1 个是上面的 pin memory。这 719 个格都没有 `raw_detections.pkl`。盘上 `infer_*.ok` 116 个、`infer_*.empty` 11 个、`infer_*.fail` 719 个，加起来 846。11 个 empty 含启动时跳过的 2 个。`citywide_counts.json` 与 done 行一致。
+
+健康段从 05:17:20 的 DBN0002 到 05:52:46 的 DBN0125，123 格成功，间隔 2126 秒，大约每小时 207 格。05:43:27 之后到这格又成功 33 格，大约每小时 213 格。两次采样原定隔 30 分钟，崩溃发生在第一次采样后大约 10 分钟，所以没有凑满 30 分钟的健康窗口。05:43 的机器采样：nproc 32，负载 4.25，CPU 空闲约 76%；只含 `batch_wait=` 的最近 50 格是读图等待 20%、存在性门 46%、检测 33%；后处理在途约 1 格；显卡占用大多 70%–88%，显存整段停在 11732 MiB。按提速表，瓶颈在显卡上的存在性门和检测，`--num-workers`、`--finalize-workers`、`--stage-ahead` 都不改。新开的 SSH 会话里 `ulimit -n` 是 1024。已经退出的进程读不到它自己的上限，但错误号 24 说明它碰到了上限。第一条失败出在 Thread-119，和跑过大约 120 格之后句柄积满的量级相符。同样的命令续跑会先再完成大约 120 格，然后再次连环失败。
+
+这次没有续跑，没有改代码、0.45 阈值或 RunPod 模板，也没有关 Pod。Pod 仍按每小时 0.74 美元计费，06:12 之后显卡已经空着。12 个只有 3 张瓦片的格里，DBN0025 和 DBN0064 是 ok，DBN0119 是 empty，其余 9 个是这次连环失败里的 fail，不是因为少一张瓦片。忽略这份 done，就会把 719 个失败格当成没有光伏，或者当成已经普查完。
+
+## 句柄泄漏已修，续跑已开
+
+泄漏在 `detect_direct._shutdown_loader`。forkserver 每起一个读图工人，父进程留着 sentinel 和数据管道写入端的副本，一共两个管道句柄。PyTorch 的 `_shutdown_workers` 只等工人退出，不调用 `Process.close()`，DataLoader 又一直引用这些对象，垃圾回收收不掉。4 个工人就是每格 8 个句柄。软上限 1024 时，大约第 120 格用完。单格命令行每次都是新进程，所以以前看不出来。
+
+2026-10-07 06:43:14 UTC 用原来的命令、原来的输出目录续跑。三处改动：工人退出后调用 `Process.close()`；显卡进程把打开文件的软上限调到硬上限，并写进日志；连续 5 格失败就停下，还没跑到的格不写成 fail。本机 `tests/gate_pilot/` 下三份测试共 52 项通过。句柄回归测试用 CPU，连续开关 5 次 DataLoader，打开的文件数不增长。Pod 上两份文件的哈希与本机一致：`detect_direct.py` 是 `7241939a9edd35639b44f341e4ab5f18ea97e25348d98a916ad4cb493f3dba70`，`durban_citywide.py` 是 `a1dfaa361507ef514db89563b7115958bd8935b90663ee18d7f36e496660f36f`。
+
+续跑前的 `print-plan`：`n_skip` 127，等于盘上 ok 116 加 empty 11；`n_detect` 719；`n_finalize_only` 0；12 个只有 3 张瓦片的格还在列表里。`ENGINE.json` 和这次口径一致，没有改阈值，没有改输出目录。上一次的主日志拷在同目录 `durban_citywide_pregate_20261008.log.fd-cascade`（1,405,930 字节），新日志覆盖了原来的主日志。
+
+06:44:11 UTC，上次第一条失败的 DBN0128 写成 ok。日志里是 `nofile soft=1048576 hard=1048576`。06:44:25 到 06:45:35，完成格从 2 增到 6，显卡进程的管道句柄停在 32，没有按每格 8 个增加。这次续跑的日志里没有新的 fail。阈值仍是 0.45，RunPod 模板没改。Pod `x6yhvn6rs3vuuu` 仍按每小时 0.74 美元计费。忽略「句柄已经稳住」，就会在大约 120 格之后再把剩下的城市写成失败。
+
+## 全城扫描结束
+
+2026-10-07 09:53:46 UTC，续跑写下 `done ok=685 empty=34 fail=0 skip=127` 后退出。`citywide_counts.json` 是同一组数：685 + 34 + 127 = 846，fail = 0。盘上独立数过，`infer_*.ok` 801、`infer_*.empty` 45、`infer_*.fail` 0。801 等于崩溃前已经成功的 116 加上这次新成功的 685；45 等于崩溃前的 11 个 empty 加上这次新的 34。801 个 ok 格的 `predictions_metric.gpkg` 都不是空文件，目录里没有留下 `raw_detections.pkl`。12 个只有 3 张瓦片的格都跑完了：DBN0025、DBN0064、DBN0418、DBN0546、DBN0721、DBN0790 是 ok，DBN0119、DBN0590、DBN0611、DBN0669、DBN0736、DBN0766 是 empty。empty 是这条流水线跑完后没有留下多边形，不是 06:12 那 719 个失败格。那 719 格在这次续跑里重新检测过了。
+
+这次续跑从 06:43:14 UTC 到 09:53:46 UTC，用了 3 小时 10 分 32 秒，新完成 719 格，大约每小时 226 格，每格大约 16 秒。10 格对照的外推是 846 格乘 26 秒，大约 6.1 小时。那 26 秒把后处理算进每一格的等待里。全城循环让后处理和下一格的检测重叠，所以按这次的速度，846 格大约 3.7 小时，比外推短大约 2.4 小时。从 05:16:43 的第一次有效启动到 09:53:46，日历上是 4 小时 37 分，里面有大约 56 分钟的崩溃段和大约 30 分钟的空等。忽略这个差别，就会按 6 小时去估下一次同口径的费用。
+
+显存没有按格子往上漏。nvidia-smi 在 06:51 是 11428 MiB，07:21 到 08:52 停在 12170 MiB，09:22 是 12546 MiB，09:53 是 12926 MiB。每格日志里的峰值一直在 1.1 到 2.6 GB。同一个显卡进程被看了 316 次，管道句柄最多 33 个；09:53:40、完成数 718 的时候是 14 个。没有一次达到每格加 8 个，也没有越过 20000 MiB。这个高度是框架把用过的显存留着复用。退出日志里有几行 `Exception ignored in atexit callback`：PyTorch 在进程退出时又去看已经 `close()` 过的读图工人，Python 忽略了这个回调。`done` 行写在这些行之后，846 格的标记当时已经落盘。
+
+本机副本在 `~/zasolar_data/gate_pilot_2026-09/durban_citywide_pregate_20261008/`，同级还有 `durban_citywide_pregate_20261008.log`、`.log.first-run` 和 `.log.fd-cascade`。目录里 6771 个文件、1,244,735,491 字节，三份日志合计 3,999,646 字节。第二次用校验和比对，没有一个文件需要再传。
+
+Pod `x6yhvn6rs3vuuu` 在 2026-10-07 10:05 UTC 停止。停止调用返回 status `EXITED`，当时 `runtime.uptime` 是 29932 秒；随后再读一次，status 仍是 `EXITED`，`runtime` 已空。从 01:45 UTC 创建到停止大约 8.3 小时，按每小时 0.74 美元大约 6.15 美元，这里面包含搭环境、10 格对照、两次失败的启动和这次跑完的全城。显卡计费到此结束。网络盘 `e01cvtcih8` 还在，没有 terminate。阈值仍是 0.45，RunPod 模板没改。
+
+产物里 predictions_metric.gpkg 的 source_tif 列指向 /dev/shm/durban_pregate_tiles/…，这些拷贝已经删除。以后补跑 solar_cls 或其他需要回读瓦片的步骤时，要先把 SOLAR_TILES_ROOT 指到瓦片目录，或者改写这一列。这批多边形开了存在性门，也没有经过分类器，所以不能拿去算 2026-09-28 备忘里的 bulk、σ_Bw 和空格 94 m²。即使以后补跑 solar_cls，也仍然不能。
+
+## 本机面积对照
+
+2026-10-07 在本机把全城 10 格的多边形面积，对上了 `pair_report.json` 里不开门参照的面积。没有新开 Pod。开普敦 2026-09-23 的影像一致性要求两套多边形按交并比（IoU，重叠面积除以并集面积）≥ 0.5 做严格一对一，两个方向的配上率都 ≥ 95%，个数差不超过参照个数的 5%（`scripts/gate_pilot/step1_imagery_parity.py` 的 `parity_decision`）。德班这边同流水线的参照是 10 格开门臂。那 10 份 `on/<GRID>/predictions_metric.gpkg` 只在网络盘 `e01cvtcih8` 上。本机 `~/zasolar_data/gate_pilot_2026-09/durban_pregate_pair_20261008/` 只有 `pair_report.json`、`pair_coverage.csv`、`pair_timing.csv`。本机没有德班瓦片，`source_tif` 仍指向已经删除的 `/dev/shm` 拷贝，检测器不能在本机重跑。所以那条形状及格线这次没有计算，也不能写成通过。
+
+本机能算的是面积一对一。全城 `predictions_metric.gpkg` 的坐标系是 EPSG:32736，几何面积和 `area_m2` 一致。每块全城多边形去配对照报告里一块还没用过的参照，距离取参照自身面积和它与开门并集相交面积里更近的那个。容差 0.015 平方米，略高于对照自己的 0.01 平方米碎边。10 格合计 1,229 块全城多边形、72,355.10 m²，配上 1,202 块。其中 980 块差距小于 0.001 平方米，另外 222 块在 0.001 到 0.015 之间。1,205 块被保住的参照配上 1,193 块。26 块被切小的参照只配上 9 块：切小的相交面积是不开门多边形被盖住的那一块，不是一整块开门多边形的面积，配不上不等于全城文件缺了它。88 块被判整块漏掉的参照，没有一块被全城多边形配上。0.015 平方米这一档里，1,202 块已经配上的多边形中有 224 块附近还有第二块参照也落在容差内，所以这是面积配上，不是点名哪一块就是哪一块。
+
+四格的保住参照全部配上，全城也没有多出来的块：DBN0090（11 块，最大差距 0）、DBN0380（6 块，最大差距 0）、DBN0037（12 块，最大差距 0.0042 m²）、DBN0660（11 块，最大差距 0.0042 m²）。没有配上的 12 块保住参照在 DBN0039（6）、DBN0264（5）、DBN0215（1）。没有配上的全城多边形是 27 块：DBN0039 有 13，DBN0264 有 8，DBN0215 有 2，DBN0638 有 2，DBN0381 和 DBN0382 各 1。容差放到 0.05 平方米再配上 10 块，还剩 17 块。这 17 块里，最近的参照还差 0.07 到 1.66 平方米；DBN0215 有一块 30.4 平方米，离最近的保住参照差 352 平方米。个数相对「保住加切小」：DBN0039 是 662 对 665（0.45%），DBN0215 是 91 对 90（1.11%），其余八格是 0。保住加切小不是开门臂的多边形个数。不要用 `covered_area_m2 + gated_only_area_m2` 去减全城面积：相交面积按每块参照累加，参照彼此重叠时会算重。
+
+这说的是四格小格上，全城文件复现了对照里被门保住的多边形面积，碎边不超过对照自己的 0.01 平方米。两块大格还有对不上的面积，对照报告里的漏检清单不能原样说成全城文件里缺的就是那些块。如果把这 27 块当成已经对上，或者把这次面积对照写成开普敦那种形状通过，后面就会用一套没有形状证据的配上率去读全城产物。这批多边形仍然不能拿去算 bulk、σ_Bw 和空格 94 m²。
+
+## 交付
+
+2026-10-08 按开普敦 `dropbox:RA_Solar/Gao/ct_census/` 的摆法，把这套德班多边形交到 `dropbox:RA_Solar/Gao/durban_census/`。每格三件是 `config.json`、`predictions.geojson`、`predictions_metric.gpkg`，放在 `results/durban_citywide_pregate/DBN####/`。上面还有粘合前的全市文件 `durban_census_inventory.gpkg`、交并比大于 0.1 的粘合文件 `durban_census_inventory_merged_iou010.gpkg`、846 格的 `durban_census_coverage.csv` 和 `.gpkg`、简报 `durban_census_report.html`、`README.md`、`delivery_manifest.json`、`SHA256SUMS.txt`。芯片分数表、计时和日志留在本机运行目录，没有放进 Dropbox。`source_tif` 没有改写。
+
+粘合前是 65,040 块、3,043,582.55 m²。粘合后是 36,654 块、1,927,374.39 m²。块数少了 43.6%，面积少了 36.7%，少掉的是相邻检测窗的重复描边。最大的一块在 DBN0776，79 个检测收成 5,022 m²。有多边形的格是 748 个。另外 53 格的标记是 ok，后处理把框滤光了。45 格是矢量化之后没有多边形。失败格是 0。续跑进程的 ok 685 只计后半段，不是有板的格数。存在性门跳过了 2,212,555 个窗里的 88.2%。这个比例不是省下的时间。
+
+DBN0434（1 块、29.8 m²）和 DBN0652（1 块、5.9 m²）的多边形在粘合后记到了相邻格，地图上这两格是 0。四月空格 DBN0402、DBN0403 对应 DBN0380、DBN0381，这次留下 6 块、59.7 m² 和 7 块、327.2 m²。这仍然不是 94 m² 那条线的结果。
+
+`rclone check --size-only`：目录顶上 8 个文件 0 差异，每格 2,538 个文件 0 差异。远端再数过，`predictions_metric.gpkg`、`predictions.geojson`、`config.json` 各 846 个。远端一共 2,546 个对象、1,611,581,512 字节。校验比的是文件大小，没有把 Dropbox 上的字节再下载回来算 sha256。本机 `SHA256SUMS.txt` 里，简报是 `b2f7a5a3b92f65e67eaef22057830a869c88d8f75446c98a0e430c2d03550f76`，粘合前全市文件是 `436b74f07ce7b870d913867bfe6d297258d4d49064ce57a9a3c5d002e025403d`，粘合后是 `0c99af8daf325087ed99005ca9432c7d9470be1a1495eef264dee003c0a07d81`。本机建造目录是 `~/zasolar_data/gate_pilot_2026-09/durban_census_delivery_20261008/`。忽略大小核对已经通过，就会在 Dropbox 限流的空档里把已经交齐的 2,538 个格文件当成没传完。

@@ -79,8 +79,8 @@ tmux new -d -s durban_pregate_pair 'cd /home/gao/projects/ZAsolar && source scri
 
 ## 还不能做的事
 
-- 不在配对脚本里打开全城。单格推理已在 2026-10-07 01:10 写好，而且不调用 solar_cls。全城循环在 `scripts/gate_pilot/durban_citywide.py`。2026-10-07 05:16 UTC 已在 Pod `x6yhvn6rs3vuuu` 的 tmux `durban_citywide` 里开跑，还没跑完；运行记录见 [`RUN-durban-pregate-pair-2026-10-07.md`](RUN-durban-pregate-pair-2026-10-07.md)。不把这个循环写进这一份配对计划。RunPod 模板到写这份状态时还没改。
-- 不把这次小批写成全城零漏检。
+- 不在配对脚本里打开全城。单格推理已在 2026-10-07 01:10 写好，而且不调用 solar_cls。全城循环在 `scripts/gate_pilot/durban_citywide.py`。2026-10-07 05:16 UTC 已在 Pod `x6yhvn6rs3vuuu` 的 tmux `durban_citywide` 里开跑，06:12:53 UTC 因句柄泄漏自行退出（fail 719），06:43 UTC 修好后续跑，09:53:46 UTC 结束（fail 0，846 格齐）。产物已拷回 `~/zasolar_data/gate_pilot_2026-09/durban_citywide_pregate_20261008/`，Pod 于 10:05 UTC 停止。运行记录见 [`RUN-durban-pregate-pair-2026-10-07.md`](RUN-durban-pregate-pair-2026-10-07.md)。不把这个循环写进这一份配对计划。RunPod 模板到写这份状态时还没改。
+- 不把这次小批写成全城零漏检。2026-10-07 的本机面积对照写在 [`RUN-durban-pregate-pair-2026-10-07.md`](RUN-durban-pregate-pair-2026-10-07.md)，那不是开普敦交并比 ≥ 0.5 的形状通过。
 - 不把跳过的小图比例写成节省的总时间。
 - 不在这套代码里下载或删底图。
 - 不重训门，不跑第五折，不写 frozen_tau。
