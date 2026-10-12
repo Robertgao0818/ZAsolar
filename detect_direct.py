@@ -343,12 +343,48 @@ def close_runtime(runtime: LoadedRuntime) -> None:
         torch.cuda.empty_cache()
 
 
+def _close_worker_process(worker) -> None:
+    """Release the parent's forkserver pipes.
+
+    ``Process.join`` leaves the sentinel and the duplicated write end open.
+    Those two descriptors close only in ``Process.close``. The DataLoader
+    keeps the worker objects alive, so garbage collection does not close
+    them either. One citywide process would otherwise leak 8 pipes per grid.
+    """
+    close = getattr(worker, "close", None)
+    if close is None:
+        return
+    try:
+        close()
+        return
+    except ValueError:
+        pass
+    terminate = getattr(worker, "terminate", None)
+    if terminate is not None:
+        try:
+            terminate()
+        except Exception:
+            pass
+    join = getattr(worker, "join", None)
+    if join is not None:
+        join(timeout=5)
+    try:
+        close()
+    except ValueError:
+        pass
+
+
 def _shutdown_loader(loader: DataLoader) -> None:
     iterator = getattr(loader, "_iterator", None)
-    if iterator is not None:
-        shutdown = getattr(iterator, "_shutdown_workers", None)
-        if shutdown is not None:
-            shutdown()
+    if iterator is None:
+        return
+    # Copy first. Shutdown joins the workers but does not drop the list.
+    workers = list(getattr(iterator, "_workers", []) or [])
+    shutdown = getattr(iterator, "_shutdown_workers", None)
+    if shutdown is not None:
+        shutdown()
+    for worker in workers:
+        _close_worker_process(worker)
 
 
 def dataloader_context():

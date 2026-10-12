@@ -53,6 +53,9 @@ GRID_RE = re.compile(r"DBN\d{4}")
 EXPECTED_TILES = 4
 EMPTY_MARK = "no polygons after vectorization"
 ENGINE_NAME = "ENGINE.json"
+# One bad grid is retried on the next resume. Five failures in a row means
+# the worker itself is broken, and the remaining grids must not be marked fail.
+CONSECUTIVE_FAIL_STOP = 5
 READING = (
     "One GPU process loads the detector and the presence pregate once. "
     "Tile staging and finalize run on CPU beside that process. Staging keeps "
@@ -376,13 +379,34 @@ def _start_dataloader_forkserver() -> None:
     ctx = mp.get_context("forkserver")
     proc = ctx.Process(target=_forkserver_warmup)
     proc.start()
-    proc.join(timeout=60)
-    if proc.is_alive():
-        proc.terminate()
-        proc.join(timeout=10)
-        raise RuntimeError("dataloader forkserver did not start within 60s")
-    if proc.exitcode != 0:
-        raise RuntimeError(f"dataloader forkserver exited {proc.exitcode}")
+    try:
+        proc.join(timeout=60)
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=10)
+            raise RuntimeError("dataloader forkserver did not start within 60s")
+        if proc.exitcode != 0:
+            raise RuntimeError(f"dataloader forkserver exited {proc.exitcode}")
+    finally:
+        # Same pipe pair as a DataLoader worker. Close it once the warmup exits.
+        try:
+            proc.close()
+        except ValueError:
+            pass
+
+
+def _raise_nofile_limit() -> tuple[int, int]:
+    """Lift the soft open-file cap to the hard cap. The hard cap stays put."""
+    import resource
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft < hard:
+        try:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (hard, hard))
+        except (ValueError, OSError):
+            pass
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    return int(soft), int(hard)
 
 
 def _prepare_gpu_env(shm_root: str) -> None:
@@ -405,6 +429,8 @@ def _boot_gpu_runtime(detect_args: dict):
 def gpu_process_main(detect_args: dict, shm_root: str, jobs, results) -> None:
     """Load both models once and detect grids as their ids arrive."""
     _die_with_parent()
+    soft, hard = _raise_nofile_limit()
+    print(f"[durban_citywide] nofile soft={soft} hard={hard}", flush=True)
     _prepare_gpu_env(shm_root)
     detect_direct, runtime = _boot_gpu_runtime(detect_args)
     try:
@@ -519,17 +545,26 @@ def run_pipeline(plan: dict, *, detect, finalize, stage, release, log=_log) -> d
     detect_fut = None
     detect_grid = None
     counts = {"ok": 0, "empty": 0, "fail": 0, "skip": plan["n_skip"]}
+    consecutive_fails = 0
+    stopped = False
 
     def held_bytes() -> int:
         return sum(int(grid["bytes"]) for grid in held.values()) if do_stage else 0
 
     def finish(grid_id: str, result: dict) -> None:
+        nonlocal consecutive_fails, stopped
         if result.get("rc"):
             write_sentinel(state_dir, grid_id, "fail")
             counts["fail"] += 1
+            consecutive_fails += 1
             error = result.get("error") or ""
             log(f"fail {grid_id} {error}".rstrip())
+            if not stopped and consecutive_fails >= CONSECUTIVE_FAIL_STOP:
+                stopped = True
+                log(f"stop: {consecutive_fails} consecutive failures")
             return
+        if not stopped:
+            consecutive_fails = 0
         kind = "empty" if result.get("empty") else "ok"
         write_sentinel(state_dir, grid_id, kind)
         counts[kind] += 1
@@ -548,8 +583,15 @@ def run_pipeline(plan: dict, *, detect, finalize, stage, release, log=_log) -> d
             ThreadPoolExecutor(max_workers=1) as detect_pool, \
             ThreadPoolExecutor(max_workers=int(plan["finalize_workers"])) as fin_pool:
         while pending or stage_futs or ready or detect_fut is not None or fin_futs:
+            if stopped:
+                # Grids not yet detected stay unmarked so a later resume can
+                # retry them. Copies already staged are deleted here.
+                pending.clear()
+                while ready:
+                    dropped = ready.popleft()
+                    release_after(held.pop(dropped["grid_id"], None))
             progressed = False
-            while pending and len(held) < stage_ahead:
+            while pending and not stopped and len(held) < stage_ahead:
                 grid = pending[0]
                 if do_stage and held and held_bytes() + int(grid["bytes"]) > budget:
                     break
@@ -584,12 +626,15 @@ def run_pipeline(plan: dict, *, detect, finalize, stage, release, log=_log) -> d
                 if grid is None:
                     finish(grid_id, {"rc": 1, "error": "stage finished without a held copy"})
                     continue
+                if stopped and grid["action"] != "finalize_only":
+                    release_after(held.pop(grid_id, None))
+                    continue
                 if grid["action"] == "finalize_only":
                     log(f"finalize {grid['grid_id']}")
                     fin_futs[grid["grid_id"]] = fin_pool.submit(finalize, grid)
                 else:
                     ready.append(grid)
-            if detect_fut is None and ready:
+            if detect_fut is None and ready and not stopped:
                 detect_grid = ready.popleft()
                 log(f"detect {detect_grid['grid_id']}")
                 detect_fut = detect_pool.submit(detect, detect_grid)
