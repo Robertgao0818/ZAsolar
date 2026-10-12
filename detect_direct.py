@@ -147,6 +147,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pregate-rescue-min-score", type=float, default=0.3,
                    help="Score a kept detection needs before it can trigger "
                         "--pregate-rescue.")
+    p.add_argument("--pregate-rescue-require-edge", action="store_true",
+                   help="With --pregate-rescue, a kept box triggers a rejected "
+                        "chip only when it also touches that kept chip's "
+                        "valid-window edge on the side facing the rejected "
+                        "chip. Off by default, which keeps the overlap-only "
+                        "trigger.")
+    p.add_argument("--pregate-rescue-edge-px", type=int, default=2,
+                   help="How close, in kept-chip pixels, a box must be to the "
+                        "facing valid-window edge. Used only with "
+                        "--pregate-rescue-require-edge. Default 2.")
     p.add_argument("--stage-timing", action="store_true",
                    help="Write stage_timing.json beside the raw artifact. "
                         "Implied when a pregate head is set.")
@@ -577,6 +587,11 @@ def infer_grid(args: argparse.Namespace, runtime: LoadedRuntime) -> int:
                 raise ValueError(
                     f"pregate rescue min score must be inside [0, 1], got {min_score}"
                 )
+            edge_px = int(getattr(args, "pregate_rescue_edge_px", 2))
+            if edge_px < 0:
+                raise ValueError(
+                    f"pregate rescue edge px must be >= 0, got {edge_px}"
+                )
             n_candidates, n_rescued, rescue_s, added = _rescue_rejected_chips(
                 args, dataset, model, device, all_chips, decision_rows, min_score,
             )
@@ -585,10 +600,12 @@ def infer_grid(args: argparse.Namespace, runtime: LoadedRuntime) -> int:
                 clock.n_rescued = n_rescued
                 clock.rescue_s = rescue_s
                 clock.n_detections = n_detections
+            require_edge = bool(getattr(args, "pregate_rescue_require_edge", False))
             print(
                 "[detect_direct] pregate_rescue "
                 f"n_candidates={n_candidates} n_rescued={n_rescued} "
-                f"rescue_s={rescue_s:.3f}"
+                f"rescue_s={rescue_s:.3f} "
+                f"require_edge={int(require_edge)} edge_px={edge_px}"
             )
         elif bool(getattr(args, "pregate_rescue", False)):
             print("[detect_direct] pregate_rescue ignored: pregate is off")
@@ -735,6 +752,7 @@ def _rescue_rejected_chips(args, dataset, model, device, all_chips, decision_row
             "chip_index": chip_index,
             "tif_index": chip.source_tif,
             "window": tuple(int(value) for value in chip.window),
+            "valid_window": tuple(int(value) for value in chip.valid_window),
         })
         if chip_index in rejected_set:
             continue
@@ -744,7 +762,11 @@ def _rescue_rejected_chips(args, dataset, model, device, all_chips, decision_row
                 "score": float(det.score),
                 "box_chip_xyxy": tuple(float(value) for value in det.box_chip_xyxy),
             })
-    chosen = rescue_candidates(windows, kept_dets, rejected, min_score)
+    chosen = rescue_candidates(
+        windows, kept_dets, rejected, min_score,
+        require_edge=bool(getattr(args, "pregate_rescue_require_edge", False)),
+        edge_px=int(getattr(args, "pregate_rescue_edge_px", 2)),
+    )
     ordered = sorted(chosen)
     done: set[int] = set()
     rescue_s = 0.0

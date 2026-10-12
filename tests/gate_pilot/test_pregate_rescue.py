@@ -127,6 +127,85 @@ def test_no_cascade_from_a_rejected_chip():
     assert chosen == {1}
 
 
+def test_require_edge_ignores_a_box_that_only_sits_in_the_overlap():
+    """100px of stride overlap is not a truncation. The flag is opt-in."""
+    windows = [
+        _window(0, "tif-a", (0, 0), size=(400, 400)),
+        _window(1, "tif-a", (300, 0), size=(400, 400)),
+    ]
+    # Tile x=310..350 overlaps the rejected window, and the box is 50px
+    # inside the kept chip's right edge.
+    margin = [_det(0, 0.8, (310, 10, 350, 40))]
+    assert rescue_candidates(
+        windows, margin, rejected=[1], min_score=0.3, require_edge=True,
+    ) == set()
+    assert rescue_candidates(
+        windows, margin, rejected=[1], min_score=0.3,
+    ) == {1}
+
+
+def test_require_edge_triggers_only_the_facing_side():
+    windows = [
+        _window(0, "tif-a", (0, 0), size=(400, 400)),
+        _window(1, "tif-a", (300, 0), size=(400, 400)),
+    ]
+    # x2=399 is within 2px of the kept chip's right edge, and the rejected
+    # window continues past that edge.
+    facing = [_det(0, 0.8, (360, 10, 399, 40))]
+    assert rescue_candidates(
+        windows, facing, rejected=[1], min_score=0.3, require_edge=True,
+    ) == {1}
+    # The same box one pixel further inside does not meet edge_px=2.
+    short = [_det(0, 0.8, (360, 10, 397, 40))]
+    assert rescue_candidates(
+        windows, short, rejected=[1], min_score=0.3, require_edge=True,
+    ) == set()
+    # Touches the left edge and still overlaps the right-hand neighbour,
+    # but that edge does not face the neighbour.
+    opposite = [_det(0, 0.8, (0, 10, 350, 40))]
+    assert rescue_candidates(
+        windows, opposite, rejected=[1], min_score=0.3, require_edge=True,
+    ) == set()
+    assert rescue_candidates(
+        windows, opposite, rejected=[1], min_score=0.3, require_edge=False,
+    ) == {1}
+
+
+def test_require_edge_uses_the_vertical_facing_side():
+    windows = [
+        _window(0, "tif-a", (0, 0), size=(400, 400)),
+        _window(1, "tif-a", (0, 300), size=(400, 400)),
+    ]
+    assert rescue_candidates(
+        windows, [_det(0, 0.8, (10, 360, 40, 399))],
+        rejected=[1], min_score=0.3, require_edge=True,
+    ) == {1}
+    assert rescue_candidates(
+        windows, [_det(0, 0.8, (10, 0, 40, 350))],
+        rejected=[1], min_score=0.3, require_edge=True,
+    ) == set()
+
+
+def test_require_edge_uses_valid_window_when_the_chip_is_padded():
+    """The padded window is wider than the real raster. The edge is the valid one."""
+    kept = _window(0, "tif-a", (0, 0), size=(400, 400))
+    kept["valid_window"] = (0, 0, 100, 400)
+    # Reaches the pad, so a box on the padded border still overlaps. That
+    # border is not the valid edge at x=100.
+    far = _window(1, "tif-a", (90, 0), size=(400, 400))
+    assert rescue_candidates(
+        [kept, far], [_det(0, 0.8, (390, 10, 399, 40))],
+        rejected=[1], min_score=0.3, require_edge=True,
+    ) == set()
+    # Stops before the padded border (right=290) but past the valid edge
+    # (right=100). Facing is decided from the valid rect.
+    near = _window(1, "tif-a", (90, 0), size=(200, 400))
+    assert rescue_candidates(
+        [kept, near], [_det(0, 0.8, (80, 10, 99, 40))],
+        rejected=[1], min_score=0.3, require_edge=True,
+    ) == {1}
+
+
 def test_irregular_window_offsets():
     windows = [
         _window(0, "tif-a", (10, 20), size=(50, 40)),

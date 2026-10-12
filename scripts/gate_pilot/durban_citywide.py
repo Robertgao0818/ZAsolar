@@ -165,6 +165,8 @@ def engine_record(plan: dict) -> dict:
     if plan.get("pregate_rescue"):
         record["pregate_rescue"] = True
         record["pregate_rescue_min_score"] = float(plan["pregate_rescue_min_score"])
+        record["pregate_rescue_require_edge"] = bool(plan.get("pregate_rescue_require_edge", False))
+        record["pregate_rescue_edge_px"] = int(plan.get("pregate_rescue_edge_px", 2))
     return record
 
 
@@ -286,6 +288,8 @@ def _detect_args(args: argparse.Namespace, heads: tuple[Path, ...], output_root:
         "profile": False,
         "pregate_rescue": bool(getattr(args, "pregate_rescue", False)),
         "pregate_rescue_min_score": float(getattr(args, "pregate_rescue_min_score", 0.3)),
+        "pregate_rescue_require_edge": bool(getattr(args, "pregate_rescue_require_edge", False)),
+        "pregate_rescue_edge_px": int(getattr(args, "pregate_rescue_edge_px", 2)),
     }
 
 
@@ -371,11 +375,18 @@ def build_plan(args: argparse.Namespace) -> dict:
         "reap_raw": bool(getattr(args, "reap_raw", False)),
         "pregate_rescue": bool(getattr(args, "pregate_rescue", False)),
         "pregate_rescue_min_score": float(getattr(args, "pregate_rescue_min_score", 0.3)),
+        "pregate_rescue_require_edge": bool(getattr(args, "pregate_rescue_require_edge", False)),
+        "pregate_rescue_edge_px": int(getattr(args, "pregate_rescue_edge_px", 2)),
     }
     if plan["pregate_rescue"] and not (0.0 <= plan["pregate_rescue_min_score"] <= 1.0):
         raise ValueError(
             "pregate rescue min score must be inside [0, 1], "
             f"got {plan['pregate_rescue_min_score']}"
+        )
+    if plan["pregate_rescue"] and plan["pregate_rescue_edge_px"] < 0:
+        raise ValueError(
+            "pregate rescue edge px must be >= 0, "
+            f"got {plan['pregate_rescue_edge_px']}"
         )
     plan["detect_args"] = _detect_args(args, heads, output_root)
     plan["engine"] = engine_record(plan)
@@ -796,6 +807,12 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
                              "neighbour detection overlaps its window. Off by default.")
     parser.add_argument("--pregate-rescue-min-score", type=float, default=0.3,
                         help="Score a kept detection needs to trigger --pregate-rescue.")
+    parser.add_argument("--pregate-rescue-require-edge", action="store_true",
+                        help="With --pregate-rescue, require the kept box to touch "
+                             "the kept chip's valid-window edge on the side facing "
+                             "the rejected chip. Off by default.")
+    parser.add_argument("--pregate-rescue-edge-px", type=int, default=2,
+                        help="Pixel tolerance for --pregate-rescue-require-edge. Default 2.")
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--postproc-config", type=Path, default=DEFAULT_POSTPROC)
     parser.add_argument("--batch-size", type=int, default=8)
