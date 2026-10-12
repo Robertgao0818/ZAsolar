@@ -15,6 +15,9 @@ the classifier. Launch it inside tmux::
       'python -u scripts/gate_pilot/durban_citywide.py run --model-path ...'
 
 Re-running skips grids that already have an ok or empty sentinel.
+``raw_detections.pkl`` is kept after finalize unless ``--reap-raw`` is set.
+A finished grid is still skipped: the ok/empty sentinel is checked before
+the raw file, so keeping the pickle does not schedule another finalize.
 """
 from __future__ import annotations
 
@@ -124,6 +127,13 @@ def write_sentinel(state_dir: Path, grid_id: str, kind: str) -> None:
 
 
 def assign_actions(grids: list[dict], state_dir: Path, output_root: Path) -> list[dict]:
+    """Choose skip, finalize_only, or detect.
+
+    An ok or empty sentinel is skip even when ``raw_detections.pkl`` is
+    still in the grid directory. Keeping that pickle after finalize does
+    not rerun a finished grid. A pickle without a terminal sentinel is
+    finalize_only: detect finished and finalize did not.
+    """
     assigned = []
     for grid in grids:
         kind = terminal_kind(state_dir, grid["grid_id"])
@@ -211,11 +221,17 @@ def release_staged(dest_dir: Path, shm_root: Path) -> None:
     shutil.rmtree(dest_dir)
 
 
-def reap_intermediates(grid_dir: Path) -> None:
-    """Drop the heavy detection dump after polygons exist. Keep the gate table."""
+def reap_intermediates(grid_dir: Path, keep_raw: bool = True) -> None:
+    """Drop heavy intermediates after polygons exist. Keep the gate table.
+
+    ``raw_detections.pkl`` stays unless ``keep_raw`` is False. ``masks/``
+    and ``vectors/`` are removed either way. Resume still skips a grid that
+    has an ok or empty sentinel, so leaving the pickle in place does not
+    turn a finished grid into finalize_only.
+    """
     grid_dir = Path(grid_dir)
     raw = grid_dir / "raw_detections.pkl"
-    if raw.exists():
+    if raw.exists() and not keep_raw:
         raw.unlink()
     for name in ("masks", "vectors"):
         path = grid_dir / name
@@ -343,6 +359,8 @@ def build_plan(args: argparse.Namespace) -> dict:
         "n_detect": sum(1 for grid in grids if grid["action"] == "detect"),
         "grids": grids,
         "reading": READING,
+        # Default keeps raw_detections.pkl. --reap-raw restores the old delete.
+        "reap_raw": bool(getattr(args, "reap_raw", False)),
     }
     plan["detect_args"] = _detect_args(args, heads, output_root)
     plan["engine"] = engine_record(plan)
@@ -515,7 +533,7 @@ def finalize_one(plan: dict, grid_id: str) -> dict:
     size = gpkg.stat().st_size if gpkg.is_file() else 0
     result = classify_finalize_result(completed.returncode, text, size)
     if result["rc"] == 0:
-        reap_intermediates(out_dir)
+        reap_intermediates(out_dir, keep_raw=not bool(plan.get("reap_raw", False)))
     return result
 
 
@@ -773,6 +791,10 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
                         help="How many grids may occupy staging space, including the one on the GPU.")
     parser.add_argument("--stage-workers", type=int, default=2)
     parser.add_argument("--finalize-workers", type=int, default=2)
+    parser.add_argument("--reap-raw", action="store_true",
+                        help="Delete raw_detections.pkl after a successful finalize. "
+                             "Default keeps it so postproc can be rerun on CPU. "
+                             "masks/ and vectors/ are still removed.")
 
 
 def build_parser() -> argparse.ArgumentParser:

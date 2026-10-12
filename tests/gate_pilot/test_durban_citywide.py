@@ -26,6 +26,7 @@ from scripts.gate_pilot.durban_citywide import (  # noqa: E402
     classify_finalize_result,
     discover_grids,
     execute,
+    finalize_one,
     gpu_process_main,
     main,
     reap_intermediates,
@@ -76,6 +77,7 @@ def _args(tmp_path: Path, tile_root: Path, **overrides) -> Namespace:
         "stage_ahead": 3,
         "stage_workers": 2,
         "finalize_workers": 2,
+        "reap_raw": False,
     }
     values.update(overrides)
     return Namespace(**values)
@@ -174,6 +176,7 @@ def test_more_than_ten_grids_stay_gate_on_only(tmp_path: Path):
     assert detect_args["pregate_threshold"] == 0.45
     assert len(detect_args["pregate_head"]) == 4
     assert plan["engine"]["solar_cls"] is False
+    assert plan["reap_raw"] is False
     assert "not the share of time saved" in plan["reading"]
     assert "source tiles stay" in plan["reading"]
 
@@ -213,6 +216,12 @@ def test_resume_skips_ok_retries_fail_and_finalizes_a_raw_pickle(tmp_path: Path)
     (out / "DBN0005").mkdir(parents=True)
     (out / "DBN0005" / "raw_detections.pkl").write_bytes(b"pkl")
     write_sentinel(state, "DBN0005", "fail")
+    # A finished grid keeps its raw pickle under the default. The sentinel
+    # is checked first, so the pickle must not pull it back into finalize_only.
+    grids.append(_grid("DBN0006", "detect"))
+    (out / "DBN0006").mkdir(parents=True)
+    (out / "DBN0006" / "raw_detections.pkl").write_bytes(b"pkl")
+    write_sentinel(state, "DBN0006", "ok")
     actions = {row["grid_id"]: row["action"] for row in assign_actions(grids, state, out)}
     assert actions == {
         "DBN0001": "skip",
@@ -220,6 +229,7 @@ def test_resume_skips_ok_retries_fail_and_finalizes_a_raw_pickle(tmp_path: Path)
         "DBN0003": "finalize_only",
         "DBN0004": "skip",
         "DBN0005": "finalize_only",
+        "DBN0006": "skip",
     }
 
 
@@ -281,11 +291,48 @@ def test_finalize_classes_and_reap_keeps_the_gate_table(tmp_path: Path):
     (grid / "pregate_decisions.csv").write_text("chip\n")
     (grid / "predictions_metric.gpkg").write_bytes(b"gpkg")
     reap_intermediates(grid)
-    assert not (grid / "raw_detections.pkl").exists()
+    assert (grid / "raw_detections.pkl").is_file()
     assert not (grid / "masks").exists()
     assert not (grid / "vectors").exists()
     assert (grid / "pregate_decisions.csv").is_file()
     assert (grid / "predictions_metric.gpkg").is_file()
+    reap_intermediates(grid, keep_raw=False)
+    assert not (grid / "raw_detections.pkl").exists()
+    assert (grid / "pregate_decisions.csv").is_file()
+
+
+def test_plan_reap_raw_reaches_finalize(tmp_path: Path, monkeypatch):
+    root = tmp_path / "tiles"
+    _touch_grid(root, "DBN0001", 4)
+    kept = build_plan(_args(tmp_path, root))
+    assert kept["reap_raw"] is False
+    reaped = build_plan(_args(tmp_path, root, reap_raw=True))
+    assert reaped["reap_raw"] is True
+
+    def _finish(plan: dict) -> None:
+        grid = Path(plan["output_root"]) / "DBN0001"
+        grid.mkdir(parents=True, exist_ok=True)
+        (grid / "raw_detections.pkl").write_bytes(b"pkl")
+        (grid / "masks").mkdir(exist_ok=True)
+        (grid / "vectors").mkdir(exist_ok=True)
+        (grid / "pregate_decisions.csv").write_text("chip\n", encoding="utf-8")
+
+        def fake_run(argv, **kwargs):
+            (grid / "predictions_metric.gpkg").write_bytes(b"gpkg-bytes")
+            return __import__("subprocess").CompletedProcess(argv, 0)
+
+        monkeypatch.setattr(citywide.subprocess, "run", fake_run)
+        result = finalize_one(plan, "DBN0001")
+        assert result["rc"] == 0
+        assert result["empty"] is False
+        assert not (grid / "masks").exists()
+        assert not (grid / "vectors").exists()
+        assert (grid / "pregate_decisions.csv").is_file()
+
+    _finish(kept)
+    assert (Path(kept["output_root"]) / "DBN0001" / "raw_detections.pkl").is_file()
+    _finish(reaped)
+    assert not (Path(reaped["output_root"]) / "DBN0001" / "raw_detections.pkl").exists()
 
 
 def test_stage_failure_releases_and_does_not_detect(tmp_path: Path):
