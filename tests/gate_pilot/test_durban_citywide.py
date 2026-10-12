@@ -660,6 +660,10 @@ def test_gpu_process_reports_a_grid_error_and_still_closes(monkeypatch):
 
     fake = type("Detect", (), {"infer_grid": staticmethod(infer), "close_runtime": staticmethod(close)})
     monkeypatch.setattr(citywide, "_die_with_parent", lambda: order.append("pdeath"))
+    monkeypatch.setattr(
+        citywide, "_raise_nofile_limit",
+        lambda: order.append("nofile") or (1024, 1048576),
+    )
     monkeypatch.setattr(citywide, "_prepare_gpu_env", lambda shm: order.append(("env", shm)))
     monkeypatch.setattr(citywide, "_boot_gpu_runtime", lambda _args: (fake, runtime))
     jobs = queue.Queue()
@@ -673,7 +677,106 @@ def test_gpu_process_reports_a_grid_error_and_still_closes(monkeypatch):
     assert failed["grid_id"] == "DBN0002"
     assert failed["rc"] == 1
     assert "RuntimeError: tile missing" in failed["error"]
-    assert order == ["pdeath", ("env", "/dev/shm/tiles"), "DBN0001", "DBN0002", "close"]
+    assert order == ["pdeath", "nofile", ("env", "/dev/shm/tiles"), "DBN0001", "DBN0002", "close"]
+
+
+def test_nofile_soft_limit_rises_to_the_hard_limit(monkeypatch):
+    import resource
+
+    state = {"soft": 1024, "hard": 4096}
+
+    def getrlimit(res):
+        assert res == resource.RLIMIT_NOFILE
+        return state["soft"], state["hard"]
+
+    def setrlimit(res, limits):
+        assert res == resource.RLIMIT_NOFILE
+        state["soft"], state["hard"] = limits
+
+    monkeypatch.setattr(resource, "getrlimit", getrlimit)
+    monkeypatch.setattr(resource, "setrlimit", setrlimit)
+    assert citywide._raise_nofile_limit() == (4096, 4096)
+
+
+def test_five_consecutive_failures_stop_without_marking_the_rest(tmp_path: Path):
+    grids = [_grid(f"DBN{index:04d}") for index in range(1, 8)]
+    detected = []
+    notes = []
+
+    def detect(grid):
+        detected.append(grid["grid_id"])
+        return {"rc": 1, "error": "boom"}
+
+    counts = run_pipeline(
+        _sched_plan(tmp_path, grids),
+        detect=detect,
+        finalize=_ok_finalize,
+        stage=_ok_stage,
+        release=_ok_release,
+        log=notes.append,
+    )
+    assert counts["fail"] == 5
+    assert counts["ok"] == 0
+    state = tmp_path / "state"
+    assert len(list(state.glob("infer_*.fail"))) == 5
+    assert len(list(state.glob("infer_*.*"))) == 5
+    assert detected == [f"DBN{index:04d}" for index in range(1, 6)]
+    assert any(note == "stop: 5 consecutive failures" for note in notes)
+    assert "DBN0006" not in detected
+    assert "DBN0007" not in detected
+
+
+def test_a_success_resets_the_consecutive_failure_count(tmp_path: Path):
+    # The fifth detect call succeeds. Staging can reorder grid ids, so the
+    # reset is defined on call order. One detect slot makes that order serial.
+    seen = {"n": 0}
+
+    def detect(_grid_row):
+        seen["n"] += 1
+        if seen["n"] == 5:
+            return {"rc": 0, "error": ""}
+        return {"rc": 1, "error": "boom"}
+
+    grids = [_grid(f"DBN{index:04d}") for index in range(1, 10)]
+    notes = []
+    counts = run_pipeline(
+        _sched_plan(tmp_path, grids),
+        detect=detect,
+        finalize=_ok_finalize,
+        stage=_ok_stage,
+        release=_ok_release,
+        log=notes.append,
+    )
+    assert counts == {"ok": 1, "empty": 0, "fail": 8, "skip": 0}
+    assert seen["n"] == 9
+    assert not any(note.startswith("stop:") for note in notes)
+    assert len(list((tmp_path / "state").glob("infer_*.*"))) == 9
+
+
+def test_shutdown_loader_does_not_grow_worker_pipes(monkeypatch):
+    import torch
+    from torch.utils.data import DataLoader, TensorDataset
+
+    import detect_direct
+
+    monkeypatch.setenv("SOLAR_DATALOADER_START", "forkserver")
+    context = detect_direct.dataloader_context()
+    counts = []
+    for _ in range(5):
+        loader = DataLoader(
+            TensorDataset(torch.arange(4)),
+            batch_size=2,
+            num_workers=4,
+            prefetch_factor=2,
+            persistent_workers=True,
+            shuffle=False,
+            multiprocessing_context=context,
+        )
+        for _batch in loader:
+            pass
+        detect_direct._shutdown_loader(loader)
+        counts.append(len(os.listdir("/proc/self/fd")))
+    assert counts[-1] == counts[0], counts
 
 
 def test_forkserver_reads_one_chip_without_starting_cuda(tmp_path: Path, monkeypatch):
