@@ -66,6 +66,12 @@ _KNOWN_KEYS = {
     "conf_tiered",
     "merge_mode",
     "vectorize_multi_component",
+    # Seam-truncation rescue. Off unless a config sets hysteresis_rescue.
+    "hysteresis_rescue",
+    "hysteresis_s_min",
+    "hysteresis_min_area_m2",
+    "hysteresis_touch_m",
+    "hysteresis_edge_px",
 }
 
 
@@ -1013,15 +1019,21 @@ def paint_and_vectorize_pixel_or(
 # ─────────────────────────────────────────────────────────────────────────
 # Postproc filter pipeline — area / tiered elong / tiered conf / RGB
 # ─────────────────────────────────────────────────────────────────────────
-def apply_postproc_filters(gdf, config: dict[str, Any]):
+def apply_postproc_filters(gdf, config: dict[str, Any], *, return_score_rejects: bool = False):
     """Run the full filter chain.
 
     Required columns:
       area_m2, elongation, confidence, mean_r, mean_g, mean_b
     Returns (filtered_gdf, stats_dict) where stats_dict has counts per stage.
+
+    ``return_score_rejects=True`` adds a third item: rows that passed area,
+    elongation, and RGB, then failed the tiered confidence keep. Callers
+    that unpack two values are unchanged.
     """
     stats = {"input": len(gdf)}
     if len(gdf) == 0:
+        if return_score_rejects:
+            return gdf, stats, gdf.iloc[0:0].copy()
         return gdf, stats
 
     # 1) area filter
@@ -1057,16 +1069,227 @@ def apply_postproc_filters(gdf, config: dict[str, Any]):
         gdf = gdf[~(is_shadow | is_too_bright)].copy()
     stats["after_rgb"] = len(gdf)
 
-    # 4) tiered confidence
+    # 4) tiered confidence. Score-only rejects are the rows this step drops
+    # and no earlier step dropped.
+    score_rejected = None
     if "confidence" in gdf.columns and "area_m2" in gdf.columns:
         tiers = config.get("conf_tiered", DEFAULT_CONF_TIERED)
+        before_confidence = gdf
         gdf = _apply_tiered_keep(gdf, "confidence", tiers, op=">=")
+        if return_score_rejects:
+            score_rejected = before_confidence.loc[
+                ~before_confidence.index.isin(gdf.index)
+            ].copy()
     elif "confidence" in gdf.columns:
         post_conf = float(config.get("post_conf_threshold", DEFAULT_POST_CONF_THRESHOLD))
         gdf = gdf[gdf["confidence"] >= post_conf].copy()
     stats["after_confidence"] = len(gdf)
 
+    if return_score_rejects:
+        if score_rejected is None:
+            score_rejected = gdf.iloc[0:0].copy()
+        return gdf, stats, score_rejected
     return gdf, stats
+
+
+def rescue_seam_truncated(accepted, score_rejected, config: dict[str, Any] | None):
+    """Rescue score-rejected polygons that look cut off at a chip or tif edge.
+
+    No-op unless ``config["hysteresis_rescue"]`` is true: the accepted frame
+    is returned as the same object, with no added column.
+
+    Seeds are the accepted rows only. A rescued row is never a seed, so
+    this cannot chain. A candidate is rescued only when all of these hold:
+
+    * ``score`` (or ``confidence`` if score is absent) >= ``hysteresis_s_min``
+      (default 0.5) and ``area_m2`` >= ``hysteresis_min_area_m2`` (default 200);
+    * it intersects a seed, or lies within ``hysteresis_touch_m`` metres
+      (default 0.5);
+    * that seed has a different ``chip_index`` or a different ``source_tif``;
+    * the candidate chip-space box in ``_hyst_box`` comes within
+      ``hysteresis_edge_px`` (default 2) of its valid-window edge or the
+      source tif boundary. Window, valid window, and tif shape are
+      ``_hyst_window``, ``_hyst_valid`` (each col, row, width, height in tif
+      pixels) and ``_hyst_tif_shape`` (height, width).
+
+    Those helper columns are dropped. When the rescue is enabled every
+    returned row has ``hysteresis_rescued``.
+    """
+    if not config or not config.get("hysteresis_rescue"):
+        return accepted
+
+    import geopandas as gpd
+    import pandas as pd
+
+    s_min = float(config.get("hysteresis_s_min", 0.5))
+    min_area = float(config.get("hysteresis_min_area_m2", 200.0))
+    touch_m = float(config.get("hysteresis_touch_m", 0.5))
+    edge_px = float(config.get("hysteresis_edge_px", 2.0))
+
+    accepted_out = accepted.copy()
+    accepted_out["hysteresis_rescued"] = False
+    rescued_ids: list = []
+    rejected = score_rejected if score_rejected is not None else accepted.iloc[0:0]
+    if len(accepted) and len(rejected):
+        seed_ok = []
+        for idx, row in accepted.iterrows():
+            if _seam_context(row) is None:
+                continue
+            geom = row.geometry
+            if geom is None or geom.is_empty:
+                continue
+            seed_ok.append(idx)
+        if seed_ok:
+            seeds = accepted.loc[seed_ok]
+            contexts = [_seam_context(row) for _, row in seeds.iterrows()]
+            tree = seeds.sindex
+            for idx, row in rejected.iterrows():
+                if not _seam_candidate_ok(row, s_min, min_area, edge_px):
+                    continue
+                cand_ctx = _seam_context(row)
+                geom = row.geometry
+                query_geom = geom.buffer(touch_m) if touch_m > 0 else geom
+                for position in tree.intersection(query_geom.bounds):
+                    seed_ctx = contexts[position]
+                    if seed_ctx is None or seed_ctx == cand_ctx:
+                        continue
+                    try:
+                        near = float(geom.distance(seeds.geometry.iloc[position])) <= touch_m
+                    except Exception:
+                        near = False
+                    if near:
+                        rescued_ids.append(idx)
+                        break
+
+    if not rescued_ids:
+        return _drop_hyst_columns(accepted_out)
+
+    rescued = rejected.loc[rescued_ids].copy()
+    rescued["hysteresis_rescued"] = True
+    crs = getattr(accepted_out, "crs", None)
+    if crs is None:
+        crs = getattr(rejected, "crs", None)
+    combined = gpd.GeoDataFrame(
+        pd.concat([accepted_out, rescued], ignore_index=True),
+        geometry="geometry",
+        crs=crs,
+    )
+    return _drop_hyst_columns(combined)
+
+
+def _drop_hyst_columns(gdf):
+    columns = [column for column in gdf.columns if str(column).startswith("_hyst_")]
+    if not columns:
+        return gdf
+    return gdf.drop(columns=columns)
+
+
+def _seam_candidate_ok(row, s_min: float, min_area: float, edge_px: float) -> bool:
+    score = _seam_score(row)
+    if score is None or score < s_min:
+        return False
+    if "area_m2" not in row.index:
+        return False
+    area = float(row["area_m2"])
+    if not np.isfinite(area) or area < min_area:
+        return False
+    geom = row.geometry
+    if geom is None or geom.is_empty:
+        return False
+    if _seam_context(row) is None:
+        return False
+    return _touches_truncation_edge(row, edge_px)
+
+
+def _seam_score(row) -> float | None:
+    for column in ("score", "confidence"):
+        if column not in row.index:
+            continue
+        value = row[column]
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(number):
+            return number
+    return None
+
+
+def _seam_context(row):
+    if "chip_index" not in row.index or "source_tif" not in row.index:
+        return None
+    chip = row["chip_index"]
+    source = row["source_tif"]
+    if chip is None or source is None:
+        return None
+    try:
+        if isinstance(chip, float) and np.isnan(chip):
+            return None
+        return (int(chip), str(source))
+    except (TypeError, ValueError):
+        return None
+
+
+def _touches_truncation_edge(row, edge_px: float) -> bool:
+    """True when the chip-space box meets a valid-window edge or the tif edge."""
+    box = _as_floats(row.get("_hyst_box") if hasattr(row, "get") else None, 4)
+    window = _as_floats(row.get("_hyst_window") if hasattr(row, "get") else None, 4)
+    valid = _as_floats(row.get("_hyst_valid") if hasattr(row, "get") else None, 4)
+    if box is None or window is None or valid is None:
+        return False
+    valid_chip = _shift_to_chip(_window_rect(valid), window)
+    if _near_rect_edge(box, valid_chip, edge_px):
+        return True
+    tif_shape = _as_floats(row.get("_hyst_tif_shape"), 2)
+    if tif_shape is None:
+        return False
+    tif_height, tif_width = tif_shape
+    tif_chip = _shift_to_chip((0.0, 0.0, tif_width, tif_height), window)
+    return _near_rect_edge(box, tif_chip, edge_px)
+
+
+def _as_floats(value, length: int):
+    if value is None or isinstance(value, (str, bytes)):
+        return None
+    if isinstance(value, (float, np.floating)) and not np.isfinite(value):
+        return None
+    try:
+        items = tuple(value)
+    except TypeError:
+        return None
+    if len(items) != length:
+        return None
+    try:
+        numbers = tuple(float(item) for item in items)
+    except (TypeError, ValueError):
+        return None
+    if not all(np.isfinite(number) for number in numbers):
+        return None
+    return numbers
+
+
+def _window_rect(window) -> tuple[float, float, float, float]:
+    col, row, width, height = window
+    return (col, row, col + width, row + height)
+
+
+def _shift_to_chip(rect, window) -> tuple[float, float, float, float]:
+    col, row = float(window[0]), float(window[1])
+    return (rect[0] - col, rect[1] - row, rect[2] - col, rect[3] - row)
+
+
+def _near_rect_edge(box, rect, tolerance: float) -> bool:
+    x1, y1, x2, y2 = box
+    rx1, ry1, rx2, ry2 = rect
+    tol = float(tolerance)
+    if x2 < rx1 - tol or x1 > rx2 + tol or y2 < ry1 - tol or y1 > ry2 + tol:
+        return False
+    return (
+        x1 <= rx1 + tol
+        or y1 <= ry1 + tol
+        or x2 >= rx2 - tol
+        or y2 >= ry2 - tol
+    )
 
 
 def _apply_tiered_keep(gdf, value_col: str, tiers: Iterable[tuple[float, float]], *, op: str):

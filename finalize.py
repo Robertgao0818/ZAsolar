@@ -19,6 +19,7 @@ Pipeline:
   6. compute_rgb_zonal_means GROUPED BY source_tif
   7. set confidence column (Phase 1: confidence = score)
   8. apply_postproc_filters (tiered conf, area, tiered elong, RGB)
+  8b. seam hysteresis, only when the postproc config sets hysteresis_rescue
   9. grid-level spatial_nms (IoU 0.5)
 """
 from __future__ import annotations
@@ -56,6 +57,7 @@ from core.postproc import (
     paint_geoai_parity_mask,
     paint_and_vectorize_pixel_or,
     parse_threshold_area_tiers,
+    rescue_seam_truncated,
     spatial_nms,
     vectorize_chip_mask,
 )
@@ -139,6 +141,8 @@ def _vectorize_chip(
     mask_threshold_area_units: str,
     mask_hysteresis_high_threshold: float | None,
     mask_hysteresis_min_core_area_px: int,
+    record_seam_edge: bool = False,
+    tif_shape: tuple[int, int] | None = None,
 ) -> gpd.GeoDataFrame:
     """Build a per-chip GeoDataFrame in source_crs."""
     rows = []
@@ -200,6 +204,13 @@ def _vectorize_chip(
                 "_mask_crop": det.mask_crop_uint8,
                 "_mask_offset": tuple(det.mask_crop_offset),
             })
+            if record_seam_edge:
+                rows[-1]["_hyst_box"] = tuple(float(value) for value in det.box_chip_xyxy)
+                rows[-1]["_hyst_window"] = tuple(int(value) for value in chip.window)
+                rows[-1]["_hyst_valid"] = tuple(int(value) for value in chip.valid_window)
+                rows[-1]["_hyst_tif_shape"] = (
+                    None if tif_shape is None else tuple(int(value) for value in tif_shape)
+                )
 
     if not rows:
         return gpd.GeoDataFrame(
@@ -683,6 +694,8 @@ def run(args: argparse.Namespace) -> int:
         )
     else:
         chip_gdfs = []
+        record_seam = bool(postproc_cfg.get("hysteresis_rescue"))
+        tif_hw = {tile.path: tuple(tile.shape) for tile in artifact.source_tiles}
         for chip in artifact.chips:
             if not chip.detections:
                 continue
@@ -691,6 +704,8 @@ def run(args: argparse.Namespace) -> int:
                 mask_threshold=mask_threshold,
                 multi_component=args.vectorize_multi_component,
                 simplify_tolerance_pixels=args.simplify_tolerance_pixels,
+                record_seam_edge=record_seam,
+                tif_shape=tif_hw.get(chip.source_tif),
                 **mask_shape_opts,
             )
             if len(g) > 0:
@@ -792,9 +807,25 @@ def run(args: argparse.Namespace) -> int:
         print(f"[finalize] postproc filters: {stats}")
     else:
         # ── Post-proc filters ────────────────────────────────────────────
-        pred_filtered, stats = apply_postproc_filters(pred_metric, postproc_cfg)
+        # Seam rescue runs only for this direct path, after the filters and
+        # before spatial NMS. The key is absent on v4_canonical, so that
+        # config still takes the two-value call.
+        if postproc_cfg.get("hysteresis_rescue"):
+            pred_filtered, stats, score_rejected = apply_postproc_filters(
+                pred_metric, postproc_cfg, return_score_rejects=True,
+            )
+            pred_filtered = rescue_seam_truncated(
+                pred_filtered, score_rejected, postproc_cfg,
+            )
+        else:
+            pred_filtered, stats = apply_postproc_filters(pred_metric, postproc_cfg)
         n_after_postproc = len(pred_filtered)
         print(f"[finalize] postproc filters: {stats}")
+        if postproc_cfg.get("hysteresis_rescue") and "hysteresis_rescued" in pred_filtered.columns:
+            print(
+                "[finalize] seam hysteresis: rescued "
+                f"{int(pred_filtered['hysteresis_rescued'].sum())}"
+            )
 
         # ── Grid-level spatial NMS ───────────────────────────────────────
         pred_nms = spatial_nms(pred_filtered, iou_threshold=float(args.nms_iou))
