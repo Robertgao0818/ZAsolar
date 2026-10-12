@@ -17,6 +17,7 @@ import pytest
 import rasterio
 from rasterio.transform import from_origin
 
+from core import region_registry
 from core.inference.raw_artifact import (
     Chip,
     Detection,
@@ -30,6 +31,14 @@ from core.inference.raw_artifact import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# finalize resolves the metric CRS from the JHB task grid (gitignored *.gpkg).
+# Without that machine-local file G1110 cannot be resolved, so skip rather
+# than fail on machines that do not carry it.
+NEEDS_JHB_GRID = pytest.mark.skipif(
+    not region_registry.get_task_grid_path("johannesburg").exists(),
+    reason="machine-local JHB task grid missing (needed to resolve G1110)",
+)
 
 
 def _write_synthetic_jhb_tif(path: Path, width: int = 400, height: int = 400) -> dict:
@@ -117,6 +126,7 @@ def _make_synthetic_artifact(tif_meta: dict) -> RawArtifact:
     )
 
 
+@NEEDS_JHB_GRID
 def test_finalize_writes_min_schema(tmp_path):
     """Round-trip: synthetic artifact → finalize → gpkg has minimum schema."""
     tif = tmp_path / "G1110_mosaic.tif"
@@ -179,6 +189,7 @@ def test_finalize_writes_min_schema(tmp_path):
     assert cfg["stage_counts"]["raw_total"] == 1
 
 
+@NEEDS_JHB_GRID
 def test_finalize_geoai_parity_mode_preserves_mask_band_confidence(tmp_path):
     """Geoai parity mode writes geoai-style mask/vector sidecars and keeps band-2 confidence."""
     pytest.importorskip("geoai")

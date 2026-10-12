@@ -33,7 +33,10 @@ checker = _load_checker()
 
 @pytest.mark.parametrize("artifact", REAL_ARTIFACTS, ids=lambda p: p.name)
 def test_real_artifact_has_no_violations(artifact):
-    assert artifact.exists(), "missing real artifact: %s" % artifact
+    if not artifact.exists():
+        # data/analysis/ is gitignored; the artifact only exists where the
+        # prelaunch run was done. The negative control below still runs.
+        pytest.skip("machine-local artifact missing: %s" % artifact)
     n_rows, violations = checker.validate_file(str(artifact))
     assert n_rows > 0, "artifact had no rows: %s" % artifact
     assert violations == [], "fail-closed violations in %s: %s" % (
