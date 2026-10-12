@@ -173,7 +173,8 @@ def test_score_rejects_are_only_the_tiered_confidence_drop():
 
 def test_hysteresis_config_extends_v4_canonical_without_editing_it():
     canonical = json.loads((ROOT / "configs/postproc/v4_canonical.json").read_text())
-    hyst = json.loads((ROOT / "configs/postproc/v4_canonical_hysteresis.json").read_text())
+    seam_path = ROOT / "configs/postproc/v4_canonical_seam_hysteresis.json"
+    hyst = json.loads(seam_path.read_text())
     assert "hysteresis_rescue" not in canonical
     for key, value in canonical.items():
         assert hyst[key] == value
@@ -184,7 +185,15 @@ def test_hysteresis_config_extends_v4_canonical_without_editing_it():
     assert hyst["hysteresis_edge_px"] == 2
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        loaded = load_postproc_config(ROOT / "configs/postproc/v4_canonical_hysteresis.json")
+        loaded = load_postproc_config(seam_path)
     assert not any("unknown postproc" in str(item.message) for item in caught)
     assert loaded["hysteresis_rescue"] is True
     assert loaded["pre_vector_score_threshold"] == 0.3
+
+    # The pre-existing mask-pixel experiment keeps its own filename.
+    mask = json.loads((ROOT / "configs/postproc/v4_canonical_hysteresis.json").read_text())
+    assert mask["mask_threshold"] == 0.18
+    assert mask["mask_hysteresis_high_threshold"] == 0.50
+    assert mask["mask_hysteresis_min_core_area_px"] == 200
+    assert mask["merge_mode"] == "pixel-or"
+    assert "hysteresis_rescue" not in mask

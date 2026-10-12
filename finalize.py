@@ -20,6 +20,8 @@ Pipeline:
   7. set confidence column (Phase 1: confidence = score)
   8. apply_postproc_filters (tiered conf, area, tiered elong, RGB)
   8b. seam hysteresis, only when the postproc config sets hysteresis_rescue
+      (configs/postproc/v4_canonical_seam_hysteresis.json; the older
+      v4_canonical_hysteresis.json is a mask-pixel experiment)
   9. grid-level spatial_nms (IoU 0.5)
 """
 from __future__ import annotations
@@ -809,7 +811,9 @@ def run(args: argparse.Namespace) -> int:
         # ── Post-proc filters ────────────────────────────────────────────
         # Seam rescue runs only for this direct path, after the filters and
         # before spatial NMS. The key is absent on v4_canonical, so that
-        # config still takes the two-value call.
+        # config still takes the two-value call. Enable it with
+        # configs/postproc/v4_canonical_seam_hysteresis.json, not
+        # v4_canonical_hysteresis.json (mask-pixel experiment).
         if postproc_cfg.get("hysteresis_rescue"):
             pred_filtered, stats, score_rejected = apply_postproc_filters(
                 pred_metric, postproc_cfg, return_score_rejects=True,

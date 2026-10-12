@@ -67,6 +67,8 @@ _KNOWN_KEYS = {
     "merge_mode",
     "vectorize_multi_component",
     # Seam-truncation rescue. Off unless a config sets hysteresis_rescue.
+    # That config is configs/postproc/v4_canonical_seam_hysteresis.json.
+    # v4_canonical_hysteresis.json is the older mask-pixel experiment.
     "hysteresis_rescue",
     "hysteresis_s_min",
     "hysteresis_min_area_m2",
@@ -1114,6 +1116,11 @@ def rescue_seam_truncated(accepted, score_rejected, config: dict[str, Any] | Non
 
     Those helper columns are dropped. When the rescue is enabled every
     returned row has ``hysteresis_rescued``.
+
+    The shipped switch is
+    ``configs/postproc/v4_canonical_seam_hysteresis.json``.
+    ``configs/postproc/v4_canonical_hysteresis.json`` is a different,
+    mask-pixel experiment and does not turn this rescue on.
     """
     if not config or not config.get("hysteresis_rescue"):
         return accepted
