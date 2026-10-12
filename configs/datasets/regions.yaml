@@ -109,7 +109,10 @@ regions:
         path: "/home/gao/zasolar_data/tiles/cape_town/aerial_2025"
         source: "aerial"
         vintage: "2025"
-        census_imagery_mid_date: "2025-06-30"  # mid-year fallback
+        # Conservative month-end ceiling for the City of Cape Town
+        # "Aerial Imagery 2025Jan" mosaic. Post-January frames are
+        # reference-only for install-date inference.
+        census_imagery_mid_date: "2025-01-31"
         file_layout: "chunked"
         file_pattern: "{grid_id}/{grid_id}_{col}_{row}_geo.tif"
         crs: "EPSG:4326"
