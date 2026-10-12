@@ -282,5 +282,6 @@ def test_detect_direct_drops_only_the_rejected_chip(tmp_path, monkeypatch):
     assert '"n_rejected": 1' in timing
     assert "not the share of wall-clock time saved" in timing
     decisions = (out / "pregate_decisions.csv").read_text(encoding="utf-8")
+    assert "rescued" not in decisions
     assert "0,0," in decisions
     assert "1,1," in decisions

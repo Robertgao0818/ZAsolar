@@ -78,6 +78,8 @@ def _args(tmp_path: Path, tile_root: Path, **overrides) -> Namespace:
         "stage_workers": 2,
         "finalize_workers": 2,
         "reap_raw": False,
+        "pregate_rescue": False,
+        "pregate_rescue_min_score": 0.3,
     }
     values.update(overrides)
     return Namespace(**values)
@@ -177,6 +179,10 @@ def test_more_than_ten_grids_stay_gate_on_only(tmp_path: Path):
     assert len(detect_args["pregate_head"]) == 4
     assert plan["engine"]["solar_cls"] is False
     assert plan["reap_raw"] is False
+    assert plan["pregate_rescue"] is False
+    assert plan["detect_args"]["pregate_rescue"] is False
+    assert plan["detect_args"]["pregate_rescue_min_score"] == 0.3
+    assert "pregate_rescue" not in plan["engine"]
     assert "not the share of time saved" in plan["reading"]
     assert "source tiles stay" in plan["reading"]
 
@@ -308,6 +314,15 @@ def test_plan_reap_raw_reaches_finalize(tmp_path: Path, monkeypatch):
     assert kept["reap_raw"] is False
     reaped = build_plan(_args(tmp_path, root, reap_raw=True))
     assert reaped["reap_raw"] is True
+    rescued = build_plan(_args(
+        tmp_path, root, pregate_rescue=True, pregate_rescue_min_score=0.35,
+    ))
+    assert rescued["detect_args"]["pregate_rescue"] is True
+    assert rescued["detect_args"]["pregate_rescue_min_score"] == 0.35
+    assert rescued["engine"]["pregate_rescue"] is True
+    assert rescued["engine"]["pregate_rescue_min_score"] == 0.35
+    with pytest.raises(ValueError, match="rescue min score"):
+        build_plan(_args(tmp_path, root, pregate_rescue=True, pregate_rescue_min_score=1.5))
 
     def _finish(plan: dict) -> None:
         grid = Path(plan["output_root"]) / "DBN0001"
