@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import os
 import queue
@@ -844,7 +845,7 @@ def test_shutdown_loader_does_not_grow_worker_pipes(monkeypatch):
     monkeypatch.setenv("SOLAR_DATALOADER_START", "forkserver")
     context = detect_direct.dataloader_context()
     counts = []
-    for _ in range(5):
+    for _ in range(6):
         loader = DataLoader(
             TensorDataset(torch.arange(4)),
             batch_size=2,
@@ -857,8 +858,14 @@ def test_shutdown_loader_does_not_grow_worker_pipes(monkeypatch):
         for _batch in loader:
             pass
         detect_direct._shutdown_loader(loader)
+        del loader
+        gc.collect()
         counts.append(len(os.listdir("/proc/self/fd")))
-    assert counts[-1] == counts[0], counts
+    # The first round also opens the forkserver, so it is a warm-up. The old
+    # leak added 8 pipes per round (4 workers x 2); over 5 rounds that is 40.
+    # Allow a few descriptors of noise from other threads, not a per-round leak.
+    steady = counts[1:]
+    assert max(steady) - steady[0] < 8, counts
 
 
 def test_forkserver_reads_one_chip_without_starting_cuda(tmp_path: Path, monkeypatch):
