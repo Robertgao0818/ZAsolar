@@ -10,7 +10,11 @@ Differences from v1:
   GT heater audit) and from hard negatives (reviewed FP deletes).
 - Hard-negative subtypes come from a (grid, idx, subtype) CSV; pool heaters
   stay 2 and are tagged ``pool_heater`` so they can be remapped later.
-- Pixels outside the grid extent or with nodata (all bands 0) are 255.
+- Pixels outside the grid extent or with nodata (all bands 0) are 255. With
+  ``--native-dir`` (EPSG:32734, 0.05 m, shared 100 m tiles, per-grid vrt =
+  cell + 50 m buffer) one mask is written per (grid, tile); the 50 m buffer
+  outside the cell is 255 because neighbouring cells' labels may be absent
+  there (the same tile gets its own core labels under the neighbour's grid).
 
 Mask: uint8, 0 bg, 1 PV, 2 hard negative, 255 ignore. Masks are written next
 to nothing in the sources; images are referenced, not copied.
@@ -62,6 +66,22 @@ def read_tile_manifest(path: Path, root: Path | None = None) -> pd.DataFrame:
     return out[["grid", "image"]]
 
 
+def tiles_from_native_dir(native_dir: Path) -> pd.DataFrame:
+    """DataFrame[grid, image] from ``vrt/CPT####.vrt`` files (only complete grids
+    have a vrt). Each vrt lists the shared 100 m tiles (cell bbox + 50 m buffer)."""
+    import xml.etree.ElementTree as ET
+
+    rows = []
+    for v in sorted(glob.glob(str(native_dir / "vrt" / "CPT*.vrt"))):
+        g = norm_grid(Path(v).stem)
+        for el in ET.parse(v).getroot().iter("SourceFilename"):
+            f = el.text
+            if el.get("relativeToVRT") == "1":
+                f = os.path.normpath(os.path.join(os.path.dirname(v), f))
+            rows.append(dict(grid=g, image=f))
+    return pd.DataFrame(rows, columns=["grid", "image"]).drop_duplicates()
+
+
 def pixel_size_m(transform, crs, lat: float) -> tuple[float, float]:
     """Pixel width/height in metres for geographic or projected CRS."""
     if crs is not None and crs.is_geographic:
@@ -72,7 +92,9 @@ def pixel_size_m(transform, crs, lat: float) -> tuple[float, float]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--zasolar-root", type=Path, default=Path(os.environ.get("ZASOLAR_ROOT", Path(__file__).resolve().parents[2])))
-    ap.add_argument("--tile-manifest", type=Path, required=True)
+    src_grp = ap.add_mutually_exclusive_group(required=True)
+    src_grp.add_argument("--tile-manifest", type=Path)
+    src_grp.add_argument("--native-dir", type=Path, help="aerial_2025_native005 layout (vrt/CPT####.vrt + tiles/)")
     ap.add_argument("--tile-root", type=Path, default=None, help="prefix for relative manifest paths")
     ap.add_argument("--labels-dir", type=Path, required=True)
     ap.add_argument("--g1688-fixed", type=Path, required=True)
@@ -141,7 +163,9 @@ def main() -> None:
             cache[r.src] = gpd.read_file(r.src).to_crs(4326)
         hn_geoms.setdefault(r.grid, []).append((cache[r.src].geometry.iloc[r.idx], sub.get((r.grid, int(r.idx)), "unknown")))
 
-    tiles = read_tile_manifest(a.tile_manifest, a.tile_root)
+    tiles = tiles_from_native_dir(a.native_dir) if a.native_dir else read_tile_manifest(a.tile_manifest, a.tile_root)
+    if tiles.empty:
+        sys.exit("no tiles (no complete grid vrt yet?)")
     tiles = tiles[[os.path.exists(p) for p in tiles.image]]
     grids = sorted((set(pos) | set(hn_geoms)) & set(tiles.grid))
     grids = [g for g in grids if g not in a.exclude and (not a.grids or g in a.grids)]
@@ -183,6 +207,8 @@ def main() -> None:
                 return rasterize([(x, 1) for x in gs], out_shape=(Hh, Ww), transform=tr, fill=0, all_touched=False).astype(bool)
 
             valid = ras(list(grid_poly)) & ~nodata
+            if not valid.any():
+                continue  # tile lies entirely in the buffer / nodata
             pvB = ras(list(P["B"].geometry)) if P.get("B") is not None else np.zeros((Hh, Ww), bool)
             pvA = ras(list(P["A"].geometry)) if P.get("A") is not None else np.zeros((Hh, Ww), bool)
             hnm = ras(list(Hg)) if Hg is not None else np.zeros((Hh, Ww), bool)
@@ -190,6 +216,8 @@ def main() -> None:
             mask = compose_mask(pvB, pvA, hnm, valid, band_px(a.band_b_m, px_m), band_px(a.band_a_m, px_m))
             mask[swm] = IGNORE
             stem = Path(img).stem.replace("_geo", "")
+            if a.native_dir:
+                stem = f"CPT{g[1:]}__{stem}"
             mpath = od / f"{stem}_mask.tif"
             with rasterio.open(mpath, "w", driver="GTiff", width=Ww, height=Hh, count=1, dtype="uint8",
                                crs=crs, transform=tr, compress="DEFLATE", nodata=IGNORE) as dst:

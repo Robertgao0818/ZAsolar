@@ -43,3 +43,19 @@ def test_pixel_size_projected_and_geographic():
 def test_metric_bands_scale_with_resolution():
     assert band_px(0.3, 0.05) == 6 and band_px(0.15, 0.05) == 3
     assert band_px(0.3, 0.074) == 4
+
+
+def test_tiles_from_native_dir_parses_vrts(tmp_path):
+    from scripts.training.build_ct_seg_trainset_v2 import tiles_from_native_dir
+
+    (tmp_path / "vrt").mkdir()
+    (tmp_path / "vrt" / "CPT1349.vrt").write_text(
+        '<VRTDataset><VRTRasterBand band="1">'
+        '<SimpleSource><SourceFilename relativeToVRT="1">../tiles/E1_N2.tif</SourceFilename></SimpleSource>'
+        '<SimpleSource><SourceFilename relativeToVRT="0">/abs/E3_N4.tif</SourceFilename></SimpleSource>'
+        '</VRTRasterBand><VRTRasterBand band="2">'
+        '<SimpleSource><SourceFilename relativeToVRT="1">../tiles/E1_N2.tif</SourceFilename></SimpleSource>'
+        '</VRTRasterBand></VRTDataset>')
+    t = tiles_from_native_dir(tmp_path)
+    assert t.grid.unique().tolist() == ["G1349"]
+    assert sorted(t.image) == ["/abs/E3_N4.tif", str(tmp_path / "tiles" / "E1_N2.tif")]
