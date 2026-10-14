@@ -83,6 +83,24 @@ def _build_tiff_profile(
     return profile
 
 
+def full_tile_bounds(spec, col: int, row: int) -> tuple[float, float, float, float]:
+    """Unclipped square bounds for tile (col,row): same ground size as interior
+    tiles, anchored at the tile's normal origin (top-left), extending past the
+    grid boundary for the last column/row."""
+    txmin = spec.xmin + col * spec.tile_size_deg
+    tymax = spec.ymax - row * spec.tile_size_deg
+    return txmin, tymax - spec.tile_size_deg, txmin + spec.tile_size_deg, tymax
+
+
+def tile_request_bounds(spec, col: int, row: int, *, full_edge_tiles: bool = False):
+    """Bounds to request/georeference. Legacy mode clips edge tiles to the grid
+    (and the WMS then stretches them into pixel_size^2, i.e. non-square pixels);
+    full_edge_tiles=True requests every tile as a full unclipped square."""
+    if full_edge_tiles:
+        return full_tile_bounds(spec, col, row)
+    return get_tile_bounds(spec, col, row)
+
+
 def download_tile(
     spec,
     col,
@@ -93,9 +111,10 @@ def download_tile(
     tiff_compress: str = DEFAULT_TIFF_COMPRESS,
     jpeg_quality: int = DEFAULT_JPEG_QUALITY,
     tiled: bool = True,
+    full_edge_tiles: bool = False,
 ):
     """下载单个 WMS 瓦片并保存为带地理参考的 GeoTIFF (EPSG:4326)。"""
-    txmin, tymin, txmax, tymax = get_tile_bounds(spec, col, row)
+    txmin, tymin, txmax, tymax = tile_request_bounds(spec, col, row, full_edge_tiles=full_edge_tiles)
 
     params = {
         "service": "WMS",
@@ -132,7 +151,7 @@ def download_tile(
     data = np.array(img)
 
     # 写入带地理参考的 GeoTIFF
-    transform = from_bounds(txmin, tymin, txmax, tymax, spec.pixel_size, spec.pixel_size)
+    transform = from_bounds(txmin, tymin, txmax, tymax, data.shape[1], data.shape[0])
 
     if data.ndim == 3:
         bands, h, w = data.shape[2], data.shape[0], data.shape[1]
@@ -166,6 +185,7 @@ def download_grid(
     jpeg_quality: int = DEFAULT_JPEG_QUALITY,
     tiled: bool = True,
     force: bool = False,
+    full_edge_tiles: bool = False,
 ):
     """Download tiles for a grid.
 
@@ -240,6 +260,7 @@ def download_grid(
                 tiff_compress=tiff_compress,
                 jpeg_quality=jpeg_quality,
                 tiled=tiled,
+                full_edge_tiles=full_edge_tiles,
             )
             downloaded += 1
             print(f"  [{downloaded + skipped}/{total}] {tile_name}")
@@ -257,6 +278,7 @@ def download_grid(
                     tiff_compress=tiff_compress,
                     jpeg_quality=jpeg_quality,
                     tiled=tiled,
+                    full_edge_tiles=full_edge_tiles,
                 )
                 downloaded += 1
                 errors -= 1
@@ -299,6 +321,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Re-download and overwrite existing tiles",
     )
+    parser.add_argument(
+        "--full-edge-tiles",
+        action="store_true",
+        help="Request last col/row tiles as full unclipped squares (same ground size "
+        "as interior tiles, extending past the grid edge) instead of clipped+stretched",
+    )
     args = parser.parse_args()
     download_grid(
         args.grid_id,
@@ -308,4 +336,5 @@ if __name__ == "__main__":
         jpeg_quality=args.jpeg_quality,
         tiled=not args.no_tiled,
         force=args.force,
+        full_edge_tiles=args.full_edge_tiles,
     )
