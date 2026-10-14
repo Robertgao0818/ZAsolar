@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path("/home/gaosh/projects/ZAsolar")
+REPO_ROOT = Path("/home/gao/projects/ZAsolar")
 OUTPUT_DIR = REPO_ROOT / "results" / "analysis"
 OUTPUT_CSV = OUTPUT_DIR / "model_grid_metrics_tracker.csv"
 OUTPUT_MD = OUTPUT_DIR / "model_grid_metrics_tracker.md"

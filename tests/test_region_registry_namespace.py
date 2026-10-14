@@ -17,6 +17,27 @@ import pytest
 
 from core import region_registry
 
+
+def _local_grid(path) -> pytest.MarkDecorator:
+    """Skip when a gitignored, machine-local task grid is not on this machine.
+
+    Task grids (*.gpkg) are not tracked in git. These tests check resolution
+    against the real grids, so they can only run where the files exist.
+    """
+    return pytest.mark.skipif(
+        not path.exists(), reason=f"machine-local task grid missing: {path}"
+    )
+
+
+def _scheme_grid(region_key: str, scheme: str):
+    task_grid = region_registry.get_region_config(region_key).annotation_schemes[scheme].task_grid
+    return region_registry.BASE_DIR / task_grid
+
+
+NEEDS_JHB_GRID = _local_grid(region_registry.get_task_grid_path("johannesburg"))
+NEEDS_CT_GAO_GRID = _local_grid(_scheme_grid("cape_town", "gao"))
+NEEDS_CT_LI_GRID = _local_grid(_scheme_grid("cape_town", "li"))
+
 # rule 06-multi-city: these G-IDs exist in BOTH CT and JHB task grids but
 # cover different physical areas. Post CT regrid (2026-06-12) G\d{4} is
 # retired in both regions, so these resolve to both via the retired tier.
@@ -55,10 +76,12 @@ def test_jhb_legacy_jhbnn_falls_back_to_retired_namespace():
     assert region_registry.lookup_regions("JHB01") == ["johannesburg"]
 
 
+@NEEDS_JHB_GRID
 def test_jnb_canonical_is_active():
     assert region_registry.lookup_regions("JNB0001") == ["johannesburg"]
 
 
+@NEEDS_CT_LI_GRID
 def test_li_lprefix_resolves_to_cape_town_via_retired_tier():
     # Full-metro CPT统一 (decision A, 2026-06-14): L\d{4} is now RETIRED (folded
     # into CPT via data/ct_grid_crosswalk_l_to_cpt.csv). It stays resolvable —
@@ -185,6 +208,7 @@ def test_get_grid_spec_cpt_via_primary_task_grid():
     assert spec.xmax > spec.xmin
 
 
+@NEEDS_CT_GAO_GRID
 def test_get_grid_spec_g_id_via_gao_scheme_fallback():
     """get_grid_spec('G1240') must still work post-regrid: the gao scheme's
     data/task_grid.gpkg carries the retired G-cell geometry, and it is the
@@ -197,6 +221,7 @@ def test_get_grid_spec_g_id_via_gao_scheme_fallback():
     assert g_spec.ymax == pytest.approx(cpt_spec.ymax)
 
 
+@NEEDS_CT_GAO_GRID
 @pytest.mark.parametrize("gid", OVERLAP_GIDS)
 def test_trap_a_bare_overlap_gid_resolves_to_cape_town_cell(gid):
     """Regression for TRAP A: a BARE overlapping G-ID (no region passed) must
@@ -208,6 +233,7 @@ def test_trap_a_bare_overlap_gid_resolves_to_cape_town_cell(gid):
     assert grid_utils.get_metric_crs(gid) == "EPSG:32734"
 
 
+@NEEDS_JHB_GRID
 @pytest.mark.parametrize("gid", OVERLAP_GIDS)
 def test_explicit_jhb_region_still_reaches_jhb_cell(gid):
     """The fix must not break explicit JHB resolution: region='jhb' still gets

@@ -28,7 +28,7 @@ from shapely.geometry import box
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ENV = PROJECT_ROOT / ".env"
 DEFAULT_GRID_GPKG = PROJECT_ROOT / "data" / "vexcel_task_grids" / "joburg_task_grid.gpkg"
-DEFAULT_TILES_ROOT = Path("/home/gaosh/zasolar_data/tiles/johannesburg/vexcel_2024")
+DEFAULT_TILES_ROOT = Path("/home/gao/zasolar_data/tiles/johannesburg/vexcel_2024")
 DEFAULT_MANIFEST = (
     PROJECT_ROOT / "data" / "vexcel_eval_samples" / "jhb_jnb382_tile_manifest.csv"
 )

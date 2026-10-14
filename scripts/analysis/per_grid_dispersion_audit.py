@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from shapely.ops import unary_union
 
-ROOT = Path("/home/gaosh/projects/ZAsolar")
+ROOT = Path("/home/gao/projects/ZAsolar")
 OUTDIR = ROOT / "docs/experiments/per_hexagon_dispersion_2026-05-10"
 OUTDIR.mkdir(parents=True, exist_ok=True)
 

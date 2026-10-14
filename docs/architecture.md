@@ -10,14 +10,14 @@
 > external) with the task grid as the primary aggregation unit — see
 > [`validation_strategy.md`](validation_strategy.md).
 >
-> **Sibling subrepo `solar_backdating`** (`/home/gaosh/projects/solar_backdating/`,
+> **Sibling subrepo `solar_backdating`** (`/home/gao/projects/solar_backdating/`,
 > remote `Robertgao0818/solar_backdating`) handles install-date back-dating via
 > GEHistoricalImagery. It runs as a plugin of this repo, sharing `.venv` and
 > importing `core.region_registry`, `core.annotation_loader` and
 > `core.grid_utils` (per its `SHARED_FROM_ZASOLAR.md` contract).
 > All temporal / install-date code lives there; nothing in this repo.
 >
-> **Sibling subrepo `solar_cls`** (`/home/gaosh/projects/solar_cls/`, extracted
+> **Sibling subrepo `solar_cls`** (`/home/gao/projects/solar_cls/`, extracted
 > 2026-05-29) holds the PV/non-PV FP-suppressor chip classifier. Same plugin
 > model (shared `.venv`, imports `core.region_registry`, `core.grid_utils`);
 > the detector consumes its filtered gpkg only as a file path
@@ -52,8 +52,8 @@ data/
                                 大体量结果仍在 ~/zasolar_data/results/ 与 gitignore 的 results/
 tiles/                        — 项目目录占位符（实际数据禁止放 WSL 项目目录）
                                post-2026-04-26: 数据迁移到 ~/zasolar_data/ (WSL ext4, 替代 /mnt/d/ZAsolar/)
-                               env: SOLAR_TILES_ROOT=/home/gaosh/zasolar_data/tiles
-                                    SOLAR_ARTIFACT_ROOT=/home/gaosh/zasolar_data
+                               env: SOLAR_TILES_ROOT=/home/gao/zasolar_data/tiles
+                                    SOLAR_ARTIFACT_ROOT=/home/gao/zasolar_data
                                COCO 数据集: ~/zasolar_data/coco/coco_v4_*/
 
 # ~/zasolar_data/tiles/ 目录结构 (post-2026-04-19 重构, 2026-04-26 搬到 WSL):
@@ -63,7 +63,9 @@ tiles/                        — 项目目录占位符（实际数据禁止放 
 #     aerial_2023/{MANIFEST.json, G0772/, ...}      — JHB 航测 2023 (chunked, 100 grids)
 #     geid_2024_02/{MANIFEST.json, G0772_mosaic.tif, ...}  — JHB GEID 2024-02 (mosaic, 100 files)
 # /mnt/d/ZAsolar/tiles/johannesburg/aerial_legacy/  — JHB legacy pilot 6 grids (留在 NTFS, 仅 JHB01-06 用)
+#   ⚠ TODO 2026-07-12 WSL→Fedora 迁移: /mnt 已不可达(原生 Fedora 无挂载), 新落点未定
 # /mnt/d/ZAsolar/annotations_inbox/                 — QGIS handoff 区, 留在 NTFS 供 Windows 工具直访
+#   ⚠ TODO 2026-07-12 WSL→Fedora 迁移: 同上, 阻塞 gtnoise_t1_ceiling RA 流程, 新落点未定
 # 每层 MANIFEST.json 记录 source/vintage/file_layout/coverage_grids/crs。
 # 解析 tile 路径: core.region_registry.get_imagery_layer_path(region, layer_id)
 
@@ -71,7 +73,9 @@ tiles/                        — 项目目录占位符（实际数据禁止放 
 #   G1630 等在 CT 和 JHB 都有真实、独立的地理覆盖。**永远** 用
 #   (region, imagery_layer) 定位,不要靠 grid_id 猜 region。
 
-results/
+results/    — ⚠️ 2026-07-11 整树归档到 dropbox:ZAsolar_archive/results.tar 后删本地 (释放 12G)。
+             仅存 tracked 占位 README_ARCHIVED.md。代码仍读 BASE_DIR/results (RESULTS_ROOT),
+             新 run 会重填此目录；要复现旧配方先 restore。指针: 仓库根 ARCHIVE_LOCATIONS.md
   analysis/
     ct_wms_coverage_probe/    — CT WMS blank-probe 结果（probe.csv: grid_id, covered, blank_fraction 等; threshold=0.05, 2026-06-12）
 results/<region>/<model_run>/<GridID>/  — 检测结果按 region × model_run 分组
@@ -117,6 +121,7 @@ scripts/
   annotations/
     bootstrap_manifest.py      — 从 GPKG 生成初始 annotation manifest
     prepare_jhb_grids.py       — JHB grid 准备
+  archive/                     — 已归档的一次性分析/战役脚本（2026-07-10 审计移入；按战役分子目录，索引见 scripts/archive/README.md；新代码禁止 import）
 configs/
   datasets/
     regions.yaml               — 权威区域注册表（grids、CRS、paths、grid_id_pattern）

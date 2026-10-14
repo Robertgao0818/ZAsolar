@@ -71,4 +71,4 @@ echo "  tarball local  : $LOCAL_TARBALL"
 echo "  unpacked       : $LOCAL_UNPACK_PARENT/$RUN"
 echo
 echo "next: push to Dropbox (excludes masks/, vectors/):"
-echo "  ./scripts/sync_vexcel_results_to_dropbox.sh"
+echo "  ./scripts/archive/vexcel_sync/sync_vexcel_results_to_dropbox.sh  # archived helper; hardcodes v3c_vexcel_2024"

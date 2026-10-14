@@ -25,7 +25,7 @@ training_sets:
     audit_policy: null
     easy_negative_ratio: 0.15
     hn_policy: null
-    output_dir: "/home/gaosh/zasolar_data/coco/coco_v3_no_hn"
+    output_dir: "/home/gao/zasolar_data/coco/coco_v3_no_hn"
     notes: >
       Base dataset for V3-C training; no hard negatives.
       Historical benchmark used cape_town_independent_26 (26 grids) as holdout.
@@ -40,7 +40,7 @@ training_sets:
     audit_policy: null
     easy_negative_ratio: 0.15
     hn_policy: "batch 003 reviewed FPs (export_targeted_hn.py)"
-    output_dir: "/home/gaosh/zasolar_data/coco/coco_v3_targeted_hn"
+    output_dir: "/home/gao/zasolar_data/coco/coco_v3_targeted_hn"
     notes: "5623 images total; produced V3-C-HN checkpoint"
 
   v4_base:
@@ -53,7 +53,7 @@ training_sets:
     audit_policy: null
     easy_negative_ratio: 0.15
     hn_policy: null
-    output_dir: "/home/gaosh/zasolar_data/coco/coco_v4_base"
+    output_dir: "/home/gao/zasolar_data/coco/coco_v4_base"
     notes: "Expanded with batch 004 (25 additional grids)"
 
   v4_1_hn:
@@ -66,7 +66,7 @@ training_sets:
     audit_policy: null
     easy_negative_ratio: 0.15
     hn_policy: "batch 003 (ID 900000+) + batch 004 (ID 950000+)"
-    output_dir: "/home/gaosh/zasolar_data/coco/coco_v4_1_hn"
+    output_dir: "/home/gao/zasolar_data/coco/coco_v4_1_hn"
     notes: "15.7% targeted HN ratio; produced V4.1-HN checkpoint"
 
   v4_2_jhb_ft:
@@ -89,7 +89,7 @@ training_sets:
     audit_policy: null
     easy_negative_ratio: 0.15
     hn_policy: null    # baseline before HN; HN deferred to v4_3 after seeing v4_2 FPs
-    output_dir: "/home/gaosh/zasolar_data/coco/coco_v4_2_jhb_ft"
+    output_dir: "/home/gao/zasolar_data/coco/coco_v4_2_jhb_ft"
     init_weights: "checkpoints/exp004_v4_hn/best_model.pth"
     val_strategy: >
       Whole-grid val (no tile leakage): 5 CBD + 5 Sandton stratified by
@@ -145,7 +145,7 @@ training_sets:
       cbd: 185          # from 244 FPs, 76% yield
       sandton: 229      # from 444 FPs, 52% yield (dense PV → many audit drops)
       ct_residual: 452  # from 455 shortlist, 99% yield
-    output_dir: "/home/gaosh/zasolar_data/coco/coco_v4_3_hn"
+    output_dir: "/home/gao/zasolar_data/coco/coco_v4_3_hn"
     init_weights: "checkpoints/exp006_v4_2_jhb_ft/best_model.pth"
     val_strategy: >
       Same 10 val grids as v4_2_jhb_ft (5 CBD + 5 Sandton). Train-time
@@ -206,10 +206,10 @@ training_sets:
     hn_policy: >
       Optional merge from coco_v4_3_hn HN chips (tile-anchored, no
       polygon supervision; safe to mix with clean positives).
-    output_dir: "/home/gaosh/zasolar_data/coco/coco_clean_hs_ct260320_jhb_sam_added_20260510"
+    output_dir: "/home/gao/zasolar_data/coco/coco_clean_hs_ct260320_jhb_sam_added_20260510"
     init_weights:
       pilot_A: "checkpoints/exp003_C_targeted_hn/best_model.pth"
-      pilot_G: "/home/gaosh/.cache/huggingface/hub/models--giswqs--geoai/snapshots/089548329c81f128fa12576663e7abdedb5cfa0e/solar_panel_detection.pth"
+      pilot_G: "/home/gao/.cache/huggingface/hub/models--giswqs--geoai/snapshots/089548329c81f128fa12576663e7abdedb5cfa0e/solar_panel_detection.pth"
     val_strategy: >
       5 JHB grids held out from training (specific grids per build script
       --val-grids). Channel 3 area_F1 evaluation surface shrinks from 25
@@ -384,7 +384,7 @@ training_sets:
       hvac_rooftop_equipment, min_confidence A2, max_ratio 0.04). Yields 0
       chips today (pool manifest has no bbox geometry yet); mechanism in place
       for when geometry is backfilled.
-    output_dir: "${SOLAR_ARTIFACT_ROOT:-/home/gaosh/zasolar_data}/coco/coco_unified_reviewall_v2_<date>"
+    output_dir: "${SOLAR_ARTIFACT_ROOT:-/home/gao/zasolar_data}/coco/coco_unified_reviewall_v2_<date>"
     val_strategy: >
       Whole-grid JHB holdout (val_grids: G0772, G0816, G0817, G0888, G0925).
       CT all-train. Same as unified_reviewall_20260511.

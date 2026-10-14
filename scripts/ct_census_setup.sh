@@ -95,9 +95,9 @@ if [ ! -f "$CLS_CKPT" ] || [ ! -f "$(dirname "$CLS_CKPT")/config.json" ]; then
   does NOT come with the clone. Ship it P2P (NOT scp — scp silently truncates):
 
     # ON LOCAL (WSL) — ship the ADAPTIVE checkpoint (the locked CT winner):
-    runpodctl send /home/gaosh/projects/solar_cls/checkpoints/cls_pv_thermal_v2_dinov2_vits14_adaptive/best_cls.pth
+    runpodctl send /home/gao/projects/solar_cls/checkpoints/cls_pv_thermal_v2_dinov2_vits14_adaptive/best_cls.pth
     scp -P \$RUNPOD_SSH_PORT \\
-      /home/gaosh/projects/solar_cls/checkpoints/cls_pv_thermal_v2_dinov2_vits14_adaptive/config.json \\
+      /home/gao/projects/solar_cls/checkpoints/cls_pv_thermal_v2_dinov2_vits14_adaptive/config.json \\
       \$RUNPOD_SSH_HOST:$(dirname "$CLS_CKPT")/config.json
     # ON POD (paste the code runpodctl printed):
     mkdir -p $(dirname "$CLS_CKPT")

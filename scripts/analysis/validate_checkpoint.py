@@ -69,7 +69,7 @@ DEFAULT_CT_GRIDS = ["G2030", "G1971"]
 
 JHB_REGION = "jhb"
 JHB_LAYER = "vexcel_2024"
-JHB_TILES = "/home/gaosh/zasolar_data/tiles/johannesburg/vexcel_2024"
+JHB_TILES = "/home/gao/zasolar_data/tiles/johannesburg/vexcel_2024"
 JHB_METRIC_CRS = "EPSG:32735"
 JHB_BASELINE_CH2_DIR = (
     PROJECT_ROOT

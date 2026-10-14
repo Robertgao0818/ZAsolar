@@ -2,7 +2,7 @@
 """Direct Mask R-CNN inference (no geoai wrapper).
 
 Produces a raw detection artifact (`raw_detections.pkl`) consumed by
-``finalize.py``. See `/home/gaosh/.claude/plans/opengeoai-detector-sam-...md`
+``finalize.py``. See `/home/gao/.claude/plans/opengeoai-detector-sam-...md`
 (plan v1.4) for design.
 
 Stage 1 of the production direct pipeline:
@@ -15,11 +15,20 @@ Stage 1 of the production direct pipeline:
                             │
                        predictions_metric.gpkg  (SAM-refined)
 
-The full pipeline is orchestrated by ``scripts/runpod_detect_direct_template.sh``
-(Phase A: detect+finalize parallel; Phase B: SAM refine serial; Phase C: eval).
+The full Cape Town pipeline is orchestrated by
+``scripts/runpod_detect_direct_template.sh`` (Phase A: detect+finalize
+parallel; Phase B: SAM refine serial; Phase C: eval). That template does
+not pass ``--pregate-head``. ``scripts/gate_pilot/durban_citywide.py`` is
+the Durban citywide driver: it loads this model once and keeps finalize
+off the GPU.
 
 Knob-rich; saturation-friendly. Custom DataLoader + collate so torchvision's
 ``list[Tensor]`` input works; per-worker rasterio handles for GDAL fork-safety.
+
+An optional DINOv2 presence pregate can skip the detector on low-scoring
+chips. It is off unless ``--pregate-head`` is passed. The RunPod census
+template does not pass that flag. ``load_runtime`` / ``infer_grid`` let a
+citywide driver keep one model loaded across grids.
 """
 from __future__ import annotations
 
@@ -45,6 +54,18 @@ from core.inference.raw_artifact import (
     SourceTile,
     utc_now_iso,
     write_artifact,
+)
+from core.inference.presence_pregate import (
+    PresencePregate,
+    StageClock,
+    build_timing_payload,
+    decisions_path,
+    file_sha256,
+    keep_from_scores,
+    resolve_pregate_settings,
+    timing_path,
+    write_decisions,
+    write_timing,
 )
 from core.inference.tile_dataset import (
     SlidingWindowDataset,
@@ -108,6 +129,19 @@ def build_parser() -> argparse.ArgumentParser:
     # Smoke / debug
     p.add_argument("--profile", action="store_true",
                    help="Print per-stage timing summary at the end")
+    p.add_argument("--pregate-head", action="append", default=None,
+                   help="DINOv2 fold head.pt. Repeat for each head. Absent "
+                        "means the presence pregate is off and every chip is detected.")
+    p.add_argument("--pregate-threshold", type=float, default=None,
+                   help="Keep a chip when its highest head score is >= this value. "
+                        "Defaults to 0.45 when any --pregate-head is set. Refuses to "
+                        "run if set without a head.")
+    p.add_argument("--pregate-allow-non400", action="store_true",
+                   help="Allow the pregate on a chip size other than the 400px "
+                        "chips it was trained on.")
+    p.add_argument("--stage-timing", action="store_true",
+                   help="Write stage_timing.json beside the raw artifact. "
+                        "Implied when a pregate head is set.")
     p.add_argument("--dry-run-windows", action="store_true",
                    help="Iterate dataset only; no GPU forward, no artifact written")
     p.add_argument("--max-chips", type=int, default=None,
@@ -221,26 +255,161 @@ def _box_chip_to_source(
 # ─────────────────────────────────────────────────────────────────────────
 # Main inference loop
 # ─────────────────────────────────────────────────────────────────────────
-def run(args: argparse.Namespace) -> int:
+class LoadedRuntime:
+    """One Mask R-CNN, and the presence pregate when it is on.
+
+    A citywide driver keeps this object and calls ``infer_grid`` once per
+    grid. ``run`` loads it for a single grid and then closes it.
+    """
+
+    def __init__(self, device, model, gate, pregate_settings, model_sha256: str):
+        self.device = device
+        self.model = model
+        self.gate = gate
+        self.pregate_settings = pregate_settings
+        self.model_sha256 = model_sha256
+
+
+def _bind_grid(args: argparse.Namespace) -> tuple[str, str]:
     region_arg = args.region
     region_key = region_registry.normalize_region_key(region_arg)
     if region_key is None:
-        sys.exit(f"unknown region alias: {region_arg!r}")
+        raise ValueError(f"unknown region alias: {region_arg!r}")
     args.grid_id = normalize_grid_id(args.grid_id)
-
-    print(f"[detect_direct] grid={args.grid_id} region={region_arg}({region_key}) "
-          f"layer={args.imagery_layer} run={args.model_run}")
-    print(f"[detect_direct] model={args.model_path}")
-
-    # ── Resolve tiles ────────────────────────────────────────────────
-    tif_paths = resolve_tile_paths(args, region_key)
-    print(f"[detect_direct] {len(tif_paths)} source TIF(s)")
-
     if args.detections_per_img is None:
         args.detections_per_img = 100 if args.parity_mode == "geoai" else 300
     if args.parity_mode == "geoai" and args.raw_mask_storage != "full_chip":
         print("[detect_direct] geoai parity mode: forcing --raw-mask-storage full_chip")
         args.raw_mask_storage = "full_chip"
+    return region_arg, region_key
+
+
+def load_runtime(args: argparse.Namespace) -> LoadedRuntime:
+    """Load the detector and, when heads are set, the presence pregate."""
+    if args.device == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device = args.device
+    print(f"[detect_direct] device={device}")
+    print(f"[detect_direct] model={args.model_path}")
+    try:
+        pregate_settings = resolve_pregate_settings(
+            heads=args.pregate_head,
+            threshold=args.pregate_threshold,
+            chip_size=args.chip_size,
+            allow_non400=args.pregate_allow_non400,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise RuntimeError(str(exc)) from exc
+    if pregate_settings is None:
+        print("[detect_direct] pregate off")
+    else:
+        print(
+            "[detect_direct] pregate on "
+            f"threshold={pregate_settings.threshold} "
+            f"heads={','.join(pregate_settings.head_labels)} "
+            "keep_rule=max_score"
+        )
+    model, info = build_solar_maskrcnn(
+        pretrained_path=str(args.model_path),
+        return_load_info=True,
+    )
+    if info.missing or info.unexpected:
+        print(f"[WARN] checkpoint load reported missing={len(info.missing)} "
+              f"unexpected={len(info.unexpected)}")
+    if args.detections_per_img is None:
+        args.detections_per_img = 100 if args.parity_mode == "geoai" else 300
+    model.roi_heads.score_thresh = float(args.detector_score_threshold)
+    model.roi_heads.nms_thresh = float(args.nms_iou_threshold)
+    model.roi_heads.detections_per_img = int(args.detections_per_img)
+    model.eval()
+    model.to(device)
+    gate = None
+    if pregate_settings is not None:
+        gate = PresencePregate(head_paths=pregate_settings.head_paths, device=device)
+    return LoadedRuntime(
+        device=device,
+        model=model,
+        gate=gate,
+        pregate_settings=pregate_settings,
+        model_sha256=_file_sha256(args.model_path),
+    )
+
+
+def close_runtime(runtime: LoadedRuntime) -> None:
+    runtime.gate = None
+    runtime.model = None
+    if runtime.device == "cuda":
+        torch.cuda.empty_cache()
+
+
+def _close_worker_process(worker) -> None:
+    """Release the parent's forkserver pipes.
+
+    ``Process.join`` leaves the sentinel and the duplicated write end open.
+    Those two descriptors close only in ``Process.close``. The DataLoader
+    keeps the worker objects alive, so garbage collection does not close
+    them either. One citywide process would otherwise leak 8 pipes per grid.
+    """
+    close = getattr(worker, "close", None)
+    if close is None:
+        return
+    try:
+        close()
+        return
+    except ValueError:
+        pass
+    terminate = getattr(worker, "terminate", None)
+    if terminate is not None:
+        try:
+            terminate()
+        except Exception:
+            pass
+    join = getattr(worker, "join", None)
+    if join is not None:
+        join(timeout=5)
+    try:
+        close()
+    except ValueError:
+        pass
+
+
+def _shutdown_loader(loader: DataLoader) -> None:
+    iterator = getattr(loader, "_iterator", None)
+    if iterator is None:
+        return
+    # Copy first. Shutdown joins the workers but does not drop the list.
+    workers = list(getattr(iterator, "_workers", []) or [])
+    shutdown = getattr(iterator, "_shutdown_workers", None)
+    if shutdown is not None:
+        shutdown()
+    for worker in workers:
+        _close_worker_process(worker)
+
+
+def dataloader_context():
+    """Use a forkserver only when the citywide worker asked for one.
+
+    The citywide GPU process starts that server before it initializes CUDA.
+    Copying this process with plain fork after CUDA is initialized would
+    hand the tile workers a broken CUDA state. A single-grid ``run`` leaves
+    the variable unset and keeps the DataLoader default.
+    """
+    if os.environ.get("SOLAR_DATALOADER_START") != "forkserver":
+        return None
+    import multiprocessing as mp
+
+    return mp.get_context("forkserver")
+
+
+def infer_grid(args: argparse.Namespace, runtime: LoadedRuntime) -> int:
+    region_arg, region_key = _bind_grid(args)
+    print(f"[detect_direct] grid={args.grid_id} region={region_arg}({region_key}) "
+          f"layer={args.imagery_layer} run={args.model_run}")
+
+    # ── Resolve tiles ────────────────────────────────────────────────
+    tif_paths = resolve_tile_paths(args, region_key)
+    print(f"[detect_direct] {len(tif_paths)} source TIF(s)")
 
     # ── Output dir ───────────────────────────────────────────────────
     out_dir = resolve_output_dir(args, region_arg)
@@ -273,130 +442,270 @@ def run(args: argparse.Namespace) -> int:
         print(f"[detect_direct] --dry-run-windows OK in {time.time() - t0:.2f}s")
         return 0
 
-    # ── Device ───────────────────────────────────────────────────────
-    if args.device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    else:
-        device = args.device
-    print(f"[detect_direct] device={device}")
-
-    # ── Model ────────────────────────────────────────────────────────
-    model, info = build_solar_maskrcnn(
-        pretrained_path=str(args.model_path),
-        return_load_info=True,
-    )
-    if info.missing or info.unexpected:
-        print(f"[WARN] checkpoint load reported missing={len(info.missing)} "
-              f"unexpected={len(info.unexpected)}")
-    model.roi_heads.score_thresh = float(args.detector_score_threshold)
-    model.roi_heads.nms_thresh = float(args.nms_iou_threshold)
-    model.roi_heads.detections_per_img = int(args.detections_per_img)
-    model.eval()
-    model.to(device)
+    if runtime is None:
+        raise RuntimeError("infer_grid needs a loaded runtime once windows are being detected")
+    device = runtime.device
+    model = runtime.model
+    gate = runtime.gate
+    pregate_settings = runtime.pregate_settings
 
     # ── DataLoader ───────────────────────────────────────────────────
-    loader = DataLoader(
-        dataset,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        prefetch_factor=args.prefetch_factor if args.num_workers > 0 else None,
-        persistent_workers=args.num_workers > 0,
-        worker_init_fn=worker_init_fn,
-        collate_fn=list_collate,
-        shuffle=False,
-        pin_memory=(device == "cuda"),
-    )
+    # The constructor sits inside the same try as the loop so a failure
+    # still closes the dataset. Workers are shut down before the next grid
+    # opens its own loader; persistent workers would otherwise keep the
+    # previous grid's file handles.
+    loader = None
+    try:
+        loader_kwargs = dict(
+            dataset=dataset,
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            prefetch_factor=args.prefetch_factor if args.num_workers > 0 else None,
+            persistent_workers=args.num_workers > 0,
+            worker_init_fn=worker_init_fn,
+            collate_fn=list_collate,
+            shuffle=False,
+            pin_memory=(device == "cuda"),
+        )
+        mp_context = dataloader_context()
+        if mp_context is not None and args.num_workers > 0:
+            loader_kwargs["multiprocessing_context"] = mp_context
+        loader = DataLoader(**loader_kwargs)
 
-    # ── Inference loop ───────────────────────────────────────────────
-    all_chips: list[Chip] = []
+        # ── Inference loop ───────────────────────────────────────────────
+        all_chips: list[Chip] = []
+        if device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
+        t_start = time.time()
+        n_chips_done = 0
+        n_detections = 0
+        decision_rows: list[dict] = []
+        clock: StageClock | None = None
+        instrumented = gate is not None or args.stage_timing
+
+        if not instrumented:
+            with torch.inference_mode():
+                for batch_tensors, batch_metas in loader:
+                    tensors_on_device = [t.to(device, non_blocking=True) for t in batch_tensors]
+                    outputs = model(tensors_on_device)
+                    for chip_meta, out in zip(batch_metas, outputs):
+                        chip = _process_one_chip(
+                            chip_meta=chip_meta,
+                            out=out,
+                            chip_size=args.chip_size,
+                            raw_mask_storage=args.raw_mask_storage,
+                            geoai_binary_mask_threshold=(
+                                float(args.mask_threshold) if args.parity_mode == "geoai" else None
+                            ),
+                        )
+                        all_chips.append(chip)
+                        n_detections += len(chip.detections)
+                    n_chips_done += len(batch_metas)
+        else:
+            clock = StageClock()
+            loop_started = time.perf_counter()
+            previous = loop_started
+            with torch.inference_mode():
+                for batch_tensors, batch_metas in loader:
+                    now = time.perf_counter()
+                    clock.batch_wait_s += now - previous
+                    keep_index = list(range(len(batch_metas)))
+                    scores = None
+                    if gate is not None:
+                        scored_at = time.perf_counter()
+                        scores = gate.score(batch_tensors)
+                        _sync_device(device)
+                        clock.pregate_s += time.perf_counter() - scored_at
+                        kept = keep_from_scores(scores, pregate_settings.threshold)
+                        keep_index = [index for index, flag in enumerate(kept) if bool(flag)]
+                    outputs_by_index = {}
+                    if keep_index:
+                        detected_at = time.perf_counter()
+                        tensors_on_device = [
+                            batch_tensors[index].to(device, non_blocking=True)
+                            for index in keep_index
+                        ]
+                        outputs = model(tensors_on_device)
+                        _sync_device(device)
+                        clock.detect_s += time.perf_counter() - detected_at
+                        outputs_by_index = dict(zip(keep_index, outputs))
+                    for index, chip_meta in enumerate(batch_metas):
+                        if index in outputs_by_index:
+                            chip = _process_one_chip(
+                                chip_meta=chip_meta,
+                                out=outputs_by_index[index],
+                                chip_size=args.chip_size,
+                                raw_mask_storage=args.raw_mask_storage,
+                                geoai_binary_mask_threshold=(
+                                    float(args.mask_threshold) if args.parity_mode == "geoai" else None
+                                ),
+                            )
+                        else:
+                            chip = _empty_chip(chip_meta)
+                        all_chips.append(chip)
+                        n_detections += len(chip.detections)
+                        if scores is not None:
+                            decision_rows.append(_decision_row(
+                                chip_meta.chip_index,
+                                scores[index],
+                                pregate_settings.head_labels,
+                                pregate_settings.threshold,
+                            ))
+                    n_chips_done += len(batch_metas)
+                    clock.n_chips += len(batch_metas)
+                    clock.n_kept += len(keep_index)
+                    clock.n_rejected += len(batch_metas) - len(keep_index)
+                    previous = time.perf_counter()
+            clock.loop_wall_s = time.perf_counter() - loop_started
+            clock.n_detections = n_detections
+
+        elapsed = time.time() - t_start
+        chips_per_sec = n_chips_done / elapsed if elapsed > 0 else 0.0
+        peak_vram_gb = (
+            torch.cuda.max_memory_allocated() / 1024**3 if device == "cuda" else 0.0
+        )
+        print(f"[detect_direct] {n_chips_done} chips → {n_detections} detections "
+              f"in {elapsed:.1f}s ({chips_per_sec:.2f} chips/s, peak VRAM {peak_vram_gb:.2f} GB)")
+        if clock is not None:
+            skip = (clock.n_rejected / clock.n_chips) if clock.n_chips else 0.0
+            print(
+                "[detect_direct] stage_timing "
+                f"batch_wait={clock.batch_wait_s:.1f}s "
+                f"pregate={clock.pregate_s:.1f}s "
+                f"detect={clock.detect_s:.1f}s "
+                f"loop_wall={clock.loop_wall_s:.1f}s "
+                f"kept={clock.n_kept}/{clock.n_chips} "
+                f"chip_skip_fraction={skip:.4f}"
+            )
+
+        # ── Build artifact ───────────────────────────────────────────────
+        source_tiles = []
+        for tm in dataset.tif_meta:
+            sha = None
+            if args.hash_tiles_content:
+                sha = _file_sha256(tm["path"])
+            source_tiles.append(SourceTile(
+                path=tm["path"],
+                size_bytes=tm["size_bytes"],
+                mtime=tm["mtime"],
+                crs=tm["crs"],
+                transform=tm["transform"],
+                bounds=tm["bounds"],
+                shape=tm["shape"],
+                sha256=sha,
+            ))
+
+        artifact = RawArtifact(
+            schema_version=SCHEMA_VERSION,
+            pipeline_version=PIPELINE_VERSION,
+            created_at_utc=utc_now_iso(),
+            git_commit=_git_commit(),
+            script_sha256=SCRIPT_SHA256,
+            torch_version=torch.__version__,
+            torchvision_version=_torchvision_version(),
+            rasterio_version=_rasterio_version(),
+            grid_id=args.grid_id,
+            region_arg=region_arg,
+            region_key=region_key,
+            imagery_layer_id=args.imagery_layer,
+            model_run_id=args.model_run,
+            model_path=str(args.model_path),
+            model_sha256=runtime.model_sha256,
+            model_builder="core.models.build_solar_maskrcnn",
+            detector_score_threshold=float(args.detector_score_threshold),
+            detections_per_img=int(args.detections_per_img),
+            nms_thresh=float(args.nms_iou_threshold),
+            mask_threshold_used=float(args.mask_threshold),
+            raw_mask_storage=args.raw_mask_storage,
+            chip_size=(args.chip_size, args.chip_size),
+            overlap=args.overlap,
+            edge_pad=True,
+            source_tiles=source_tiles,
+            chips=all_chips,
+        )
+        write_artifact(artifact, raw_path)
+        print(f"[detect_direct] wrote {raw_path}")
+        if clock is not None:
+            digests = [file_sha256(path) for path in pregate_settings.head_paths] if pregate_settings else []
+            payload = build_timing_payload(
+                clock=clock,
+                settings=pregate_settings,
+                head_sha256=digests,
+            )
+            timing_file = timing_path(raw_path)
+            write_timing(timing_file, payload)
+            print(f"[detect_direct] wrote {timing_file}")
+            if pregate_settings is not None:
+                decision_file = decisions_path(raw_path)
+                write_decisions(decision_file, decision_rows, pregate_settings.head_labels)
+                print(f"[detect_direct] wrote {decision_file}")
+
+        if args.profile:
+            print(f"[profile] chips/sec       : {chips_per_sec:.3f}")
+            print(f"[profile] peak VRAM (GB)  : {peak_vram_gb:.3f}")
+            print(f"[profile] total detections: {n_detections}")
+            print(f"[profile] total wall time : {elapsed:.2f}s")
+        return 0
+    finally:
+        if loader is not None:
+            _shutdown_loader(loader)
+        dataset.close()
+
+
+def run(args: argparse.Namespace) -> int:
+    """Detect one grid. Loads the model for this call and then releases it."""
+    if args.dry_run_windows:
+        try:
+            return infer_grid(args, None)
+        except ValueError as exc:
+            sys.exit(f"[detect_direct] {exc}")
+    try:
+        runtime = load_runtime(args)
+    except RuntimeError as exc:
+        sys.exit(f"[detect_direct] {exc}")
+    try:
+        return infer_grid(args, runtime)
+    except ValueError as exc:
+        sys.exit(f"[detect_direct] {exc}")
+    finally:
+        close_runtime(runtime)
+
+
+def _sync_device(device: str) -> None:
     if device == "cuda":
-        torch.cuda.reset_peak_memory_stats()
-    t_start = time.time()
-    n_chips_done = 0
-    n_detections = 0
+        torch.cuda.synchronize()
 
-    with torch.inference_mode():
-        for batch_tensors, batch_metas in loader:
-            tensors_on_device = [t.to(device, non_blocking=True) for t in batch_tensors]
-            outputs = model(tensors_on_device)
-            for chip_meta, out in zip(batch_metas, outputs):
-                chip = _process_one_chip(
-                    chip_meta=chip_meta,
-                    out=out,
-                    chip_size=args.chip_size,
-                    raw_mask_storage=args.raw_mask_storage,
-                    geoai_binary_mask_threshold=(
-                        float(args.mask_threshold) if args.parity_mode == "geoai" else None
-                    ),
-                )
-                all_chips.append(chip)
-                n_detections += len(chip.detections)
-            n_chips_done += len(batch_metas)
 
-    elapsed = time.time() - t_start
-    chips_per_sec = n_chips_done / elapsed if elapsed > 0 else 0.0
-    peak_vram_gb = (
-        torch.cuda.max_memory_allocated() / 1024**3 if device == "cuda" else 0.0
+def _empty_chip(chip_meta) -> Chip:
+    """A chip the pregate refused. It stays in the artifact with no detections."""
+    return Chip(
+        chip_index=chip_meta.chip_index,
+        source_tif=chip_meta.source_tif,
+        source_tile_id=chip_meta.source_tile_id,
+        source_crs=chip_meta.source_crs,
+        source_transform=chip_meta.source_transform,
+        window=chip_meta.window,
+        window_transform=chip_meta.window_transform,
+        valid_window=chip_meta.valid_window,
+        valid_shape=chip_meta.valid_shape,
+        chip_shape=chip_meta.chip_shape,
+        detections=[],
     )
-    print(f"[detect_direct] {n_chips_done} chips → {n_detections} detections "
-          f"in {elapsed:.1f}s ({chips_per_sec:.2f} chips/s, peak VRAM {peak_vram_gb:.2f} GB)")
 
-    # ── Build artifact ───────────────────────────────────────────────
-    source_tiles = []
-    for tm in dataset.tif_meta:
-        sha = None
-        if args.hash_tiles_content:
-            sha = _file_sha256(tm["path"])
-        source_tiles.append(SourceTile(
-            path=tm["path"],
-            size_bytes=tm["size_bytes"],
-            mtime=tm["mtime"],
-            crs=tm["crs"],
-            transform=tm["transform"],
-            bounds=tm["bounds"],
-            shape=tm["shape"],
-            sha256=sha,
-        ))
 
-    artifact = RawArtifact(
-        schema_version=SCHEMA_VERSION,
-        pipeline_version=PIPELINE_VERSION,
-        created_at_utc=utc_now_iso(),
-        git_commit=_git_commit(),
-        script_sha256=SCRIPT_SHA256,
-        torch_version=torch.__version__,
-        torchvision_version=_torchvision_version(),
-        rasterio_version=_rasterio_version(),
-        grid_id=args.grid_id,
-        region_arg=region_arg,
-        region_key=region_key,
-        imagery_layer_id=args.imagery_layer,
-        model_run_id=args.model_run,
-        model_path=str(args.model_path),
-        model_sha256=_file_sha256(args.model_path),
-        model_builder="core.models.build_solar_maskrcnn",
-        detector_score_threshold=float(args.detector_score_threshold),
-        detections_per_img=int(args.detections_per_img),
-        nms_thresh=float(args.nms_iou_threshold),
-        mask_threshold_used=float(args.mask_threshold),
-        raw_mask_storage=args.raw_mask_storage,
-        chip_size=(args.chip_size, args.chip_size),
-        overlap=args.overlap,
-        edge_pad=True,
-        source_tiles=source_tiles,
-        chips=all_chips,
-    )
-    write_artifact(artifact, raw_path)
-    print(f"[detect_direct] wrote {raw_path}")
-
-    if args.profile:
-        print(f"[profile] chips/sec       : {chips_per_sec:.3f}")
-        print(f"[profile] peak VRAM (GB)  : {peak_vram_gb:.3f}")
-        print(f"[profile] total detections: {n_detections}")
-        print(f"[profile] total wall time : {elapsed:.2f}s")
-
-    dataset.close()
-    return 0
+def _decision_row(chip_index: int, scores, labels: tuple[str, ...], threshold: float) -> dict:
+    values = [float(score) for score in np.asarray(scores).reshape(-1)]
+    if len(values) != len(labels):
+        raise RuntimeError(f"pregate returned {len(values)} scores for {len(labels)} heads")
+    score_max = max(values) if values else float("nan")
+    row = {
+        "chip_index": chip_index,
+        "kept": int(score_max >= float(threshold)),
+        "score_max": f"{score_max:.8f}",
+    }
+    for label, score in zip(labels, values):
+        row[label] = f"{score:.8f}"
+    return row
 
 
 def _process_one_chip(

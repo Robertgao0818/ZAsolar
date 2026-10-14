@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 SOLAR_BACKDATING_ROOT = Path(
-    os.environ.get("SOLAR_BACKDATING_ROOT", "/home/gaosh/projects/solar_backdating")
+    os.environ.get("SOLAR_BACKDATING_ROOT", "/home/gao/projects/solar_backdating")
 )
 if str(SOLAR_BACKDATING_ROOT) not in sys.path:
     sys.path.insert(0, str(SOLAR_BACKDATING_ROOT))

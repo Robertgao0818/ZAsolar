@@ -58,8 +58,10 @@ def test_jhb_aerial_2023_exposes_census_mid_date() -> None:
 
 
 def test_ct_aerial_2025_exposes_census_mid_date() -> None:
+    # Month-end ceiling of the "Aerial Imagery 2025Jan" mosaic (regions.yaml),
+    # replacing the old mid-year fallback 2025-06-30.
     layer = get_imagery_layer("cape_town", "aerial_2025")
-    assert layer.census_imagery_mid_date == "2025-06-30"
+    assert layer.census_imagery_mid_date == "2025-01-31"
 
 
 def test_layers_without_field_are_none() -> None:

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# This research machine uses the system interpreter (/usr/bin/python3).
+# Packages live in the user site ~/.local, which that interpreter already
+# searches. Do not create or activate .venv.
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   echo "Use: source scripts/activate_env.sh"
@@ -6,17 +9,10 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 fi
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV_PATH="$PROJECT_ROOT/.venv"
 
-if [[ ! -x "$VENV_PATH/bin/python" ]]; then
-  echo "Virtual environment not found at $VENV_PATH"
-  echo "Run: ./scripts/bootstrap_env.sh"
-  return 1
-fi
-
+unset VIRTUAL_ENV
+export PATH="${HOME}/.local/bin:${PATH}"
 export PROJECT_ROOT
-export VIRTUAL_ENV="$VENV_PATH"
-export PATH="$VIRTUAL_ENV/bin:$PATH"
 export PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 export XDG_CACHE_HOME="$PROJECT_ROOT/.cache"
@@ -36,5 +32,6 @@ mkdir -p \
   "$MPLCONFIGDIR" \
   "$JOBLIB_TEMP_FOLDER"
 
+hash -r
 echo "Activated project environment: $PROJECT_ROOT"
-echo "Python: $(command -v python)"
+echo "Python: $(command -v python3)"

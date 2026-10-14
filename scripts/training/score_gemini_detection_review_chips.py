@@ -22,7 +22,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 
 SOLAR_BACKDATING_ROOT = Path(
-    os.environ.get("SOLAR_BACKDATING_ROOT", "/home/gaosh/projects/solar_backdating")
+    os.environ.get("SOLAR_BACKDATING_ROOT", "/home/gao/projects/solar_backdating")
 )
 if str(SOLAR_BACKDATING_ROOT) not in sys.path:
     sys.path.insert(0, str(SOLAR_BACKDATING_ROOT))
@@ -105,7 +105,7 @@ def _default_env_file() -> Path:
     local = SOLAR_BACKDATING_ROOT / ".env.gemini.local"
     if local.exists():
         return local
-    return Path("/home/gaosh/projects/ZAsolar/.env.gemini.local")
+    return Path("/home/gao/projects/ZAsolar/.env.gemini.local")
 
 
 def load_config(args: argparse.Namespace) -> GeminiClientConfig:

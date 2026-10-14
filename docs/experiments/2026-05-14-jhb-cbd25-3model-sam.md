@@ -1,5 +1,8 @@
 # JHB CBD 25-grid 3-model comparison + SAM (mask+box) — 2026-05-14
 
+> **Note (2026-07-10)**: the driver scripts referenced below (`scripts/_3model_jhb_cbd25_eval.sh`, `scripts/runpod_3model_jhb_cbd25_compare.sh`, `scripts/_3model_jhb_cbd25_regions_patch.yaml`) were archived to `scripts/archive/jhb_cbd25_3model/`.
+
+
 ## TL;DR — under unified v4_canonical pixel-or postproc
 
 **Apparent winner**: `v3c_vexcel_2024_direct_sam_maskbox` — bulk 1.063, σ_Bw 0.221, RMSE 1078, agg_F1 0.820.

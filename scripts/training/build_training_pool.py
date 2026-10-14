@@ -4,9 +4,11 @@
 Phase 1 of the training-set normalization effort (2026-05-29). This script
 enumerates every positive annotation polygon registered across all regions
 in ``configs/datasets/regions.yaml`` and writes a **provenance manifest** —
-NOT chips. Chips are extracted on demand at COCO-export time per rule
-``08-runpod-large-files.md``; storing them here would duplicate the tile
-pool for no benefit (same design as ``data/negative_pool/manifest.csv``).
+NOT chips. Chips are extracted on demand at COCO-export time (derived data
+is built from tiles on demand, never stored twice — see
+``.claude/skills/runpod-ops/reference/file-transfer.md``); storing them here
+would duplicate the tile pool for no benefit (same design as
+``data/negative_pool/manifest.csv``).
 
 Two buckets, split solely on ``mask_trusted`` from the single-source YAML
 ``data/training_pool/boundary_trust_rules.yaml`` (loaded via

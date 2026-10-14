@@ -2,17 +2,10 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV_PATH="$PROJECT_ROOT/.venv"
 
-if [[ ! -x "$VENV_PATH/bin/python" ]]; then
-  echo "Virtual environment not found at $VENV_PATH"
-  echo "Run: ./scripts/bootstrap_env.sh"
-  exit 1
-fi
-
+unset VIRTUAL_ENV
+export PATH="${HOME}/.local/bin:${PATH}"
 export PROJECT_ROOT
-export VIRTUAL_ENV="$VENV_PATH"
-export PATH="$VIRTUAL_ENV/bin:$PATH"
 export PYTHONPATH="$PROJECT_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 export XDG_CACHE_HOME="$PROJECT_ROOT/.cache"
 export XDG_CONFIG_HOME="$PROJECT_ROOT/.config"
@@ -31,7 +24,7 @@ mkdir -p \
   "$MPLCONFIGDIR" \
   "$JOBLIB_TEMP_FOLDER"
 
-python - <<'PY'
+python3 - <<'PY'
 import importlib
 import os
 import sys

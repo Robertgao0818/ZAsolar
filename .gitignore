@@ -13,7 +13,10 @@ tiles_satellite_2025/
 *.geojson
 
 # 检测结果（可重新生成；review 工件走 Dropbox/外存，不入仓）
-results/
+# `results/*` (not `results/`) so the archived-off-repo pointer can be re-included
+# (git can't re-include a file whose parent dir is excluded).
+results/*
+!results/README_ARCHIVED.md
 
 # 模型权重（太大，不同步）
 checkpoints/
@@ -157,6 +160,10 @@ start-*.bat
 # Job-search case study (shared by email, not tracked — see job_framing_delivery)
 CASE_STUDY.md
 CASE_STUDY.html
+
+# Data symlinks into ~/zasolar_data (2026-07-10 in-repo data migration; targets are gitignored data)
+/checkpoints_cleaned
+/data/buildings
 
 # Generated root-level report HTML (regeneratable from scripts/analysis/*)
 /ct_census_report.html

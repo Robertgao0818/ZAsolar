@@ -1,0 +1,39 @@
+{
+ "name": "estset_v1 frozen FP rules",
+ "frozen_at": "2026-10-12T18:20:00+13:00",
+ "frozen_before": "any frac50 / SAM3 / Gemini / DINOv3 feature was computed on the 344 estset blocks and before any label-vs-signal comparison. Only label counts (TP 250 / FP 82 / PART 12 / UNS 0) were looked at.",
+ "population": "holefill_v3 geometry; estset_v1/estset_manifest_v1.csv (sha256 seal af55de23e611719632d359ff9c155fae67dc89fbd54a206efb025ea0a92f3257)",
+ "flag_means": "rule says 'FP' for the block (flag only; nothing deleted)",
+ "rules": {
+  "A": {"desc": "score_max < 0.95 on area_m2 >= 100", "expr": "(area_m2 >= 100) & (score_max < 0.95)", "source": "fpflag_v1/fpflag_v1.py fp_flag_score"},
+  "B": {"desc": "3-signal union on >= 100 m2", "expr": "(area_m2 >= 100) & ((score_max < 0.95) | (frac50 < 0.25) | (sam3_status == 'ok' & sam3_cov < 0.25))", "source": "fpcut_v4/podscore/build_v4.py fp_flag_union_ge100", "missing": "NaN frac50/sam3_cov never fires"},
+  "C": {"desc": "same union on all sizes (score part keeps its built-in >=100 m2 condition, as build_v4 fp_flag_union_all)", "expr": "((area_m2 >= 100) & (score_max < 0.95)) | (frac50 < 0.25) | (sam3_status == 'ok' & sam3_cov < 0.25)", "source": "fpcut_v4/podscore/build_v4.py fp_flag_union_all = fpclean_v2 common_v2 nominated"},
+  "D": {"desc": "nomination = rule C (fpclean_v2 nom_score|nom_frac50|nom_sam) -> Gemini dual-scale verify -> safety rule; flagged = action == 'fp_candidate' only ('review' and 'keep' are not flagged; review counted as review load)",
+        "gemini": {"model": "gemini-3.5-flash-lite", "prompt_version": "fpclean_v2_p3", "cfg_hash": "6dbc5221c760df93", "decide": "fpclean_v1 s2_gemini_verify.decide with fp_conf = 0.8", "crops": "common_v2 CROP_PARAMS, unchanged", "endpoint": "local proxy http://127.0.0.1:8317"},
+        "safety": "if sam3_cov <= 0.02 and frac50 < 0.30 and gemini action == 'keep' -> 'review' (safety_sam0_pregate_low)",
+        "source": "fpclean_v2/common_v2.py + s2_gemini_verify_v2.py (unchanged)"},
+  "E": {"desc": "DINOv3-SAT-L frozen features, native view, logistic-regression head trained on Cape Town labels only; flag = p_FP >= 0.5611882517854918 on area_m2 >= 100",
+        "head": "make_pipeline(StandardScaler(), LogisticRegression(C=0.01, max_iter=5000, class_weight='balanced')) fit on ct_emb_dinov3l_sat.npz 'native' with CT labels exactly as ct_cls_transfer_v1/s2_train_eval.py (deterministic refit; the script does not persist the head)",
+        "threshold": 0.5611882517854918, "threshold_source": "95% of CT true panels pass on CT grid-grouped OOF (durban_heldout_metrics.csv row CT-dinov3l_sat-native-logreg)",
+        "features": "Durban block embedding as pregate_dino_021786_v1/feats_v1.py (native view), unchanged",
+        "refit_check": "must reproduce dev-350 row 60/65 FP caught, 10/191 TP flagged before scoring estset"}
+ },
+ "code_sha256": {
+  "fpclean_v2/common_v2.py": "d979d5df68579c0ead7aad5f36ba6180768009e718a23d4972e11f3bf76d8d6a",
+  "fpclean_v1/s2_gemini_verify.py": "235311071f7a55b82440027ff93e0255a209a8e45840a2f83419608c6f046e3f",
+  "fpclean_v2/s2_gemini_verify_v2.py": "ca12f701295f76d04b33ca0c4081a04f344325d6d89537662cb63405f30d11f5",
+  "ct_cls_transfer_v1/s2_train_eval.py": "ed425c7f837eaf705f6ae7c3f006f23c215bac99a99451797c0c30d695e893dc",
+  "ct_cls_transfer_v1/ct_emb_dinov3l_sat.npz": "dd9bd72dc207cf472dee25d7828b56321dbce0aa71ded3a698c20ef6005b619c",
+  "fpcut_v4/podscore/score_city.py": "2902bf91fb121e39b43ef6ef4879bb3bc4716bc0aeb9a58d92b9baab997112cc",
+  "fpcut_v4/podscore/build_v4.py": "2b955726c0a5470a34e25377872c23babec7a1435f871828c2a12852c66fdea2",
+  "pregate_dino_021786_v1/feats_v1.py": "4e1e41f689295f1d8e6b73c3f0de2bb41a443042563eaa925da224bfa665de78"
+ },
+ "evaluation_plan": {
+  "labels": "durban_estset_review_20261012/estset_labels_20261012.csv (葉, blind)",
+  "weights": "manifest pi / weight; stratified (cell) Horvitz-Thompson and ratio-to-cell-area estimators; 95% CI = stratified bootstrap within cells (B=2000); certainty cells XL/L contribute no sampling variance",
+  "metrics": "per rule: flagged area/count, precision (area, count), FP-area capture, true-panel area wrongly flagged (city-weighted), review load",
+  "PART": "main: true panel; sensitivity: FP",
+  "UNS": "main: excluded; sensitivity: FP (none present)",
+  "bars": {"codex": "real-panel area loss UB <= 1% of true-panel area; cut-area precision LB >= 0.98; FP-area capture LB >= 0.75", "claude": "area precision LB >= 0.90 and wrongly cut TP area <= ~38,000 m2 city-wide"}
+ }
+}

@@ -56,7 +56,7 @@ from core import region_registry
 # Try local ext4 path first (resilient to /mnt/c drvfs hangs); fall back to
 # the QGIS GeoOSAM plugin path for backward compat.
 _SAM_CHECKPOINT_CANDIDATES = [
-    Path("/home/gaosh/zasolar_data/models/sam2/checkpoints/sam2.1_hiera_large.pt"),
+    Path("/home/gao/zasolar_data/models/sam2/checkpoints/sam2.1_hiera_large.pt"),
     Path("/mnt/c/Users/gaosh/AppData/Roaming/QGIS/QGIS3/profiles/default/python/plugins/GeoOSAM/sam2/checkpoints/sam2.1_hiera_large.pt"),
 ]
 SAM_CHECKPOINT = _SAM_CHECKPOINT_CANDIDATES[0]
@@ -2073,16 +2073,16 @@ def _find_predictions(grid_id: str, base_dir: Path, region: str | None = None) -
     if region == "jhb":
         candidates = [
             base_dir / "results_joburg" / grid_id / "predictions_metric.gpkg",
-            Path("/home/gaosh/zasolar_data/results/johannesburg/v4_aerial_2023") / grid_id / "predictions_metric.gpkg",
+            Path("/home/gao/zasolar_data/results/johannesburg/v4_aerial_2023") / grid_id / "predictions_metric.gpkg",
             base_dir / "results" / grid_id / "predictions_metric.gpkg",
-            Path("/home/gaosh/zasolar_data/results") / grid_id / "predictions_metric.gpkg",
+            Path("/home/gao/zasolar_data/results") / grid_id / "predictions_metric.gpkg",
         ]
     else:
         candidates = [
             base_dir / "results" / grid_id / "predictions_metric.gpkg",
             base_dir / "results_joburg" / grid_id / "predictions_metric.gpkg",
-            Path("/home/gaosh/zasolar_data/results") / grid_id / "predictions_metric.gpkg",
-            Path("/home/gaosh/zasolar_data/results/johannesburg/v4_aerial_2023") / grid_id / "predictions_metric.gpkg",
+            Path("/home/gao/zasolar_data/results") / grid_id / "predictions_metric.gpkg",
+            Path("/home/gao/zasolar_data/results/johannesburg/v4_aerial_2023") / grid_id / "predictions_metric.gpkg",
         ]
     for p in candidates:
         if p.exists():
@@ -2125,14 +2125,14 @@ def main():
         import subprocess
         grid_ids = []
         if region == "jhb":
-            results_roots = [Path("/home/gaosh/zasolar_data/results/johannesburg/v4_aerial_2023"), base_dir / "results_joburg"]
+            results_roots = [Path("/home/gao/zasolar_data/results/johannesburg/v4_aerial_2023"), base_dir / "results_joburg"]
         elif region == "ct":
-            results_roots = [Path("/home/gaosh/zasolar_data/results"), base_dir / "results"]
+            results_roots = [Path("/home/gao/zasolar_data/results"), base_dir / "results"]
         else:
             results_roots = [
-                Path("/home/gaosh/zasolar_data/results"),
+                Path("/home/gao/zasolar_data/results"),
                 base_dir / "results",
-                Path("/home/gaosh/zasolar_data/results/johannesburg/v4_aerial_2023"),
+                Path("/home/gao/zasolar_data/results/johannesburg/v4_aerial_2023"),
                 base_dir / "results_joburg",
             ]
 
