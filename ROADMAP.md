@@ -35,6 +35,8 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-10-15: feat(training): CT seg v2c patch (HN->0, 2=swh collectors, per-grid swh_labelled)
+- 2026-10-15: fix(training): resolve native VRT tile paths relative to native_dir
 - 2026-10-15: feat(training): CT seg v2 collector mask (confirmed=2, likely=255) + sam_fn Class A
 - 2026-10-14: feat(training): v2 builder reads aerial_2025_native005 layout (--native-dir)
 - 2026-10-14: feat(training): resolution-agnostic CT seg trainset v2 builder
