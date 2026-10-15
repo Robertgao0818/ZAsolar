@@ -35,14 +35,12 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-10-07: docs(gate): point the Durban citywide run record at its code commits
-- 2026-10-07: feat(gate): add the learning-curve pipeline that trained the fold heads
-- 2026-10-07: feat(gate): run Durban citywide with the presence pregate, no solar_cls
-- 2026-09-24: docs(gate): record post-hoc analysis and park the gate line
-- 2026-09-23: docs(gate): record the holdout failure of the frozen presence gate
-- 2026-09-23: docs(gate): freeze the YOLO presence-gate threshold before the holdout
-- 2026-07-12: docs(essd): land P4/P7/P8 verified results; correct FP-cut gate wording; register P9
-- 2026-07-12: docs(essd): rebuild v0 draft census sections; mark Vexcel license resolved
+- 2026-10-15: feat(training): CT seg v2 collector mask (confirmed=2, likely=255) + sam_fn Class A
+- 2026-10-14: feat(training): v2 builder reads aerial_2025_native005 layout (--native-dir)
+- 2026-10-14: feat(training): resolution-agnostic CT seg trainset v2 builder
+- 2026-10-14: test(training): v2 manifest parsing, pixel-size and metric band tests
+- 2026-10-14: feat(training): CT semantic-seg training set v1 builder
+- 2026-10-14: test(training): unit tests for CT seg trainset v1 mask/split helpers
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
