@@ -81,16 +81,25 @@ def read_tile_manifest(path: Path, root: Path | None = None) -> pd.DataFrame:
 
 def tiles_from_native_dir(native_dir: Path) -> pd.DataFrame:
     """DataFrame[grid, image] from ``vrt/CPT####.vrt`` files (only complete grids
-    have a vrt). Each vrt lists the shared 100 m tiles (cell bbox + 50 m buffer)."""
+    have a vrt). Each vrt lists the shared 100 m tiles (cell bbox + 50 m buffer).
+
+    Native VRTs may use relativeToVRT="0" with paths like ``tiles/E…tif`` that
+    are still relative to ``native_dir`` (not cwd). Resolve any non-absolute
+    path against ``native_dir``; relativeToVRT="1" is resolved against the
+    vrt/ directory as usual.
+    """
     import xml.etree.ElementTree as ET
 
     rows = []
+    native_dir = Path(native_dir)
     for v in sorted(glob.glob(str(native_dir / "vrt" / "CPT*.vrt"))):
         g = norm_grid(Path(v).stem)
         for el in ET.parse(v).getroot().iter("SourceFilename"):
-            f = el.text
+            f = el.text or ""
             if el.get("relativeToVRT") == "1":
                 f = os.path.normpath(os.path.join(os.path.dirname(v), f))
+            elif not os.path.isabs(f):
+                f = str(native_dir / f)
             rows.append(dict(grid=g, image=f))
     return pd.DataFrame(rows, columns=["grid", "image"]).drop_duplicates()
 

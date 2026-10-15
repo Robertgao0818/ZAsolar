@@ -59,12 +59,19 @@ def test_tiles_from_native_dir_parses_vrts(tmp_path):
         '<VRTDataset><VRTRasterBand band="1">'
         '<SimpleSource><SourceFilename relativeToVRT="1">../tiles/E1_N2.tif</SourceFilename></SimpleSource>'
         '<SimpleSource><SourceFilename relativeToVRT="0">/abs/E3_N4.tif</SourceFilename></SimpleSource>'
+        '<SimpleSource><SourceFilename relativeToVRT="0">tiles/E5_N6.tif</SourceFilename></SimpleSource>'
         '</VRTRasterBand><VRTRasterBand band="2">'
         '<SimpleSource><SourceFilename relativeToVRT="1">../tiles/E1_N2.tif</SourceFilename></SimpleSource>'
         '</VRTRasterBand></VRTDataset>')
     t = tiles_from_native_dir(tmp_path)
     assert t.grid.unique().tolist() == ["G1349"]
-    assert sorted(t.image) == ["/abs/E3_N4.tif", str(tmp_path / "tiles" / "E1_N2.tif")]
+    # relativeToVRT="1" is relative to vrt/; relativeToVRT="0" non-absolute
+    # paths are relative to native_dir (parent of vrt/), not left as cwd-relative.
+    assert sorted(t.image) == [
+        "/abs/E3_N4.tif",
+        str(tmp_path / "tiles" / "E1_N2.tif"),
+        str(tmp_path / "tiles" / "E5_N6.tif"),
+    ]
 
 
 def test_collector_mask_value_confirmed_is_hn_likely_is_ignore():
