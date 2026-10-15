@@ -6,10 +6,10 @@ pixels outside the grid / imagery).
 
 Sources
 - Positives (Class B): Gao ``*_SAM2_*`` gpkgs. ``sam_fn_review`` and
-  ``sam_fn_marker`` are treated as human-reviewed positives here (owner
-  decision 2026-10-14), deliberately NOT via
-  ``core.training.positive_sources._ct_source_to_label_source`` which maps
-  them to untrusted. Edge ignore band: ``--band-b-m`` (default 0.3 m).
+  ``sam_fn_marker`` stay in Class B here (0.3 m band). Owner decision
+  2026-10-15 maps those sources to trusted ``human_manual_sam_assisted``
+  in ``_ct_source_to_label_source``; v2 routes them to Class A. v1 does not.
+  Edge ignore band: ``--band-b-m`` (default 0.3 m).
 - Class A (``--band-a-m``, 0.15 m) only from explicitly passed aligned
   2025-imagery gpkgs (``--class-a``); Li KML labels are eval-only.
 - Hard negatives: reviewed detector ``delete`` polygons (inventory CSV),

@@ -137,20 +137,23 @@ def _load_jhb_grid_annotations(grid_id: str, tile_crs,
 def _ct_source_to_label_source(src):
     """Map CT-batch GeoPackage 'source' value → label_source enum.
 
-    CT batch003/004 schemas use NaN for V3C-reviewed-accepted and
-    'sam_fn_marker' for non-interactive FN catches.  CT early SAM2
-    (G1189/G1190/G1238) uses 'sam2'.  CT batch001/002/002b have no
-    'source' column at all (default to human_manual_sam_assisted).
+    CT batch003/004 schemas use NaN for V3C-reviewed-accepted.
+    ``sam_fn_marker`` and ``sam_fn_review`` are human-confirmed FN catches.
+    CT early SAM2 (G1189/G1190/G1238) uses 'sam2'.  CT batch001/002/002b
+    have no 'source' column at all (default to human_manual_sam_assisted).
+
+    Owner decision 2026-10-15: ``sam_fn_marker`` and ``sam_fn_review`` are
+    trusted human Class A (``human_manual_sam_assisted``). They previously
+    mapped to untrusted ``sam_added_true_fn``.
     """
     if src is None or (isinstance(src, float) and pd.isna(src)):
         return "reviewed_prediction"     # V3-C accepted; halo-prone → untrusted
     s = str(src).lower().strip()
-    # CT FN-补切 family: all non-interactive batch SAM cut (pre-browser-tool
-    # 2026-04-13). marker = clicked marker that triggers a SAM cut at the
-    # marker location; review = sam_fn_review.py CLI batch tool. Both produce
-    # boundary noise without per-instance human refine → untrusted.
+    # Owner decision 2026-10-15: Cape Town sam_fn_review / sam_fn_marker are
+    # human-confirmed and trusted (Class A). Previously both mapped to
+    # untrusted sam_added_true_fn.
     if s in ("sam_fn_marker", "sam_fn_review"):
-        return "sam_added_true_fn"
+        return "human_manual_sam_assisted"
     if s == "sam2":
         return "human_manual_sam_assisted"
     if s == "reviewed_prediction":

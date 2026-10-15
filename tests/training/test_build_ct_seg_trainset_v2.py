@@ -1,11 +1,17 @@
 """Unit tests for the resolution-agnostic CT seg trainset v2 helpers."""
+import geopandas as gpd
+import numpy as np
 import pandas as pd
 import pytest
 from affine import Affine
 from rasterio.crs import CRS
+from shapely.geometry import box
 
-from scripts.training.build_ct_seg_trainset_v1 import band_px
-from scripts.training.build_ct_seg_trainset_v2 import norm_grid, pixel_size_m, read_tile_manifest
+from scripts.training.build_ct_seg_trainset_v1 import HN, IGNORE, band_px, compose_mask
+from scripts.training.build_ct_seg_trainset_v2 import (
+    assemble_collectors, collector_mask_value, merge_class_a, norm_grid, pixel_size_m,
+    read_tile_manifest, route_sam_fn_polygons,
+)
 
 
 def test_norm_grid():
@@ -59,3 +65,90 @@ def test_tiles_from_native_dir_parses_vrts(tmp_path):
     t = tiles_from_native_dir(tmp_path)
     assert t.grid.unique().tolist() == ["G1349"]
     assert sorted(t.image) == ["/abs/E3_N4.tif", str(tmp_path / "tiles" / "E1_N2.tif")]
+
+
+def test_collector_mask_value_confirmed_is_hn_likely_is_ignore():
+    # Human-confirmed collectors train as hard negatives. Likely and anything
+    # unaudited are ignore, so the loss does not treat them as background.
+    assert collector_mask_value("confirmed") == HN
+    assert collector_mask_value("CONFIRMED") == HN
+    assert collector_mask_value("likely") == IGNORE
+    assert collector_mask_value("Likely") == IGNORE
+    assert collector_mask_value("unaudited") == IGNORE
+    assert collector_mask_value(None) == IGNORE
+    assert collector_mask_value("") == IGNORE
+    # Pool heater is confirmed even if the swh row said likely.
+    assert collector_mask_value("likely", is_pool_heater=True) == HN
+    assert collector_mask_value(None, is_pool_heater=True) == HN
+
+
+def test_confirmed_collector_joins_hn_likely_painted_ignore():
+    n = 20
+    z = np.zeros((n, n), bool)
+    confirmed = np.zeros((n, n), bool)
+    confirmed[2:6, 2:6] = True
+    likely = np.zeros((n, n), bool)
+    likely[10:14, 10:14] = True
+    valid = np.ones((n, n), bool)
+    mask = compose_mask(z, z, z | confirmed, valid, r_b=3, r_a=1)
+    mask[likely] = IGNORE
+    assert (mask[2:6, 2:6] == HN).all()
+    assert mask[1, 3] == 0  # no ignore band around the collector hard negative
+    assert (mask[10:14, 10:14] == IGNORE).all()
+
+
+def test_route_sam_fn_polygons_to_class_a():
+    g = gpd.GeoDataFrame({
+        "source": ["sam_fn_review", "sam_fn_marker", "SAM_FN_extra", "sam2", None, "classB"],
+        "geometry": [box(i, 0, i + 1, 1) for i in range(6)],
+    })
+    class_b, class_a = route_sam_fn_polygons(g)
+    assert set(class_a["source"].str.lower()) == {"sam_fn_review", "sam_fn_marker", "sam_fn_extra"}
+    assert set(class_b["source"].dropna()) == {"sam2", "classB"}
+    assert class_b["source"].isna().sum() == 1
+    no_src = g.drop(columns="source")
+    class_b2, class_a2 = route_sam_fn_polygons(no_src)
+    assert len(class_b2) == 6 and len(class_a2) == 0
+
+
+def test_merge_class_a_keeps_sam_fn_replaces_explicit():
+    existing = gpd.GeoDataFrame({
+        "source": ["sam_fn_review", "older_explicit"],
+        "geometry": [box(0, 0, 1, 1), box(1, 0, 2, 1)],
+    })
+    explicit = gpd.GeoDataFrame({"source": ["human"], "geometry": [box(3, 0, 4, 1)]})
+    out = merge_class_a(existing, explicit)
+    assert set(out["source"]) == {"sam_fn_review", "human"}
+
+
+def test_assemble_collectors_confirmed_likely_and_pool_heater():
+    swh = gpd.GeoDataFrame({
+        "grid": ["G1", "G1", "G1"],
+        "origin": ["classB_label", "fp_review_delete", "classB_label"],
+        "ref": ["a.gpkg#0", "b.gpkg#1", "c.gpkg#2"],
+        "confidence": ["confirmed", "likely", None],
+        "geometry": [box(0, 0, 1, 1), box(2, 0, 3, 1), box(4, 0, 5, 1)],
+    }, crs="EPSG:4326")
+    pool = [
+        {"grid": "G1", "ref": "b.gpkg#1", "geometry": box(2, 0, 3, 1)},
+        {"grid": "G2", "ref": "d.gpkg#4", "geometry": box(6, 0, 7, 1)},
+    ]
+    out = assemble_collectors(swh, pool)
+    by_ref = out.set_index("ref")
+    assert by_ref.loc["a.gpkg#0", "mask_value"] == HN
+    assert by_ref.loc["a.gpkg#0", "confidence"] == "confirmed"
+    assert by_ref.loc["a.gpkg#0", "kind"] == "collector"
+    # Already in the swh table as likely, but it is a pool heater → confirmed, no duplicate.
+    assert (out.ref == "b.gpkg#1").sum() == 1
+    assert by_ref.loc["b.gpkg#1", "mask_value"] == HN
+    assert by_ref.loc["b.gpkg#1", "confidence"] == "confirmed"
+    assert by_ref.loc["b.gpkg#1", "confidence_src"] == "likely"
+    assert by_ref.loc["b.gpkg#1", "subtype"] == "pool_heater"
+    assert by_ref.loc["c.gpkg#2", "mask_value"] == IGNORE
+    assert by_ref.loc["c.gpkg#2", "confidence"] == "unaudited"
+    assert by_ref.loc["d.gpkg#4", "mask_value"] == HN
+    assert by_ref.loc["d.gpkg#4", "confidence"] == "confirmed"
+    assert by_ref.loc["d.gpkg#4", "kind"] == "collector"
+    assert by_ref.loc["d.gpkg#4", "subtype"] == "pool_heater"
+    assert by_ref.loc["d.gpkg#4", "origin"] == "hn_pool_heater"
+    assert (out.kind == "collector").all()
