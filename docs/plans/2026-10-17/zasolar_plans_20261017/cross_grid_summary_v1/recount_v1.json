@@ -1,0 +1,68 @@
+{
+ "raw_features": 1493,
+ "labelled": 1260,
+ "labelled_area": 40707.8,
+ "wholly_outside": 14,
+ "partial": 12,
+ "lost_m2": 821.1,
+ "src_in_cells": 1246,
+ "src_in_cells_area_full": 40470.5,
+ "clipped_area": 39886.7,
+ "merged_touching_components": 1154,
+ "per_cell_pieces": 1260,
+ "pieces_by_group": {
+  "A": 447,
+  "B": 403,
+  "C": 349,
+  "D": 61
+ },
+ "gt_gpkg_rows": 1260,
+ "src_any_10m": [
+  105,
+  5726.9,
+  14.15
+ ],
+ "src_ext_10m": [
+  27,
+  4007.3,
+  9.9
+ ],
+ "src_int_10m": [
+  78,
+  1719.6,
+  4.25
+ ],
+ "src_any_20m": [
+  178,
+  9006.1,
+  22.25
+ ],
+ "src_ext_20m": [
+  50,
+  4916.9,
+  12.15
+ ],
+ "src_int_20m": [
+  132,
+  4291.1,
+  10.6
+ ],
+ "cross_ext": [
+  12,
+  1923.0
+ ],
+ "cross_int": [
+  14,
+  467.1
+ ],
+ "units": 507,
+ "tiles": 442,
+ "tiles_2plus_units": 61,
+ "units_on_multi": 126,
+ "units_by_group": {
+  "A": 179,
+  "B": 163,
+  "C": 123,
+  "D": 42
+ }
+}

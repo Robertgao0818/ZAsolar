@@ -1,0 +1,18 @@
+Permission allow rule (--allowed-tools): Write(/home/gao/projects/zasolar_roadmap_20261017/ROADMAP.md) is not matched by file permission checks — only Edit(path) rules are. Use Edit(/home/gao/projects/zasolar_roadmap_20261017/ROADMAP.md) instead (Edit rules cover all file-editing tools).
+我已经写好 `~/projects/zasolar_roadmap_20261017/ROADMAP.md`（英文）。这是唯一新建的文件，其他文件都只读过、没动；没用 GPU，也没碰 `li_infer` 和 PID 374974。文件按 brief 的要求分 Phase 0（本周）、Phase 1（2–4 周）、Phase 2（扩展到全南非）。普查和回溯定年是两条独立的线，另有一节讲两条线在哪里衔接（种子冻结、多边形对照表、航片年份检查）。每个数字都标了来源文件，没有出处的都标成"estimate"或"assumption"。
+
+**最需要葉定的几件事**（放在文件最前面）：
+1. **签发冻结的测试规则。** 签了之后，已经批准的 0.9 GPU-h 测试推理才能跑，并且必须在看到分数之前签。
+2. **批准 Phase 1 的骨干网络（backbone，模型提取图像特征的主体）对比，约 26 GPU-h（估计）。** 我建议把 MiT-b2 的第二个随机种子（+3.2 GPU-h，估计）也算进这 26 小时里。不同种子之间的差距就是"噪声底线"；没有它，两个模型的分差算不算真的都说不清。
+3. **训练集用原样的 v2d2。** 去重和栅格化（把多边形转成像素 mask 的规则）这两项改动，等选出胜出的模型后再单独测。这样每次只改一处，结果才能归因。
+4. **SAT 停在 25k 结案。** 它的训练成本是 MiT 的 3.1 倍，过不了切换规则；在 JHB25 上 F1 和 MiT 差在噪声之内。
+5. **回溯定年这边周一要定的几项：** 谁来做盲读、3.1 和 3.5 对比怎么设计、种子是否冻结在 111,801 个多边形上。另外还有 Durban 积压的三项。
+
+**写的时候发现的问题**（文件 §9）：
+- **测试 tile 数对不上。** brief 写的是"在 443 个 canonical tile 上打分"，但 v3.2 把 12 个越界 tile 裁掉了，实际标成要打分的是 431 个。这个要在签测试规则时一起定；不定的话，打分时会用哪个口径就说不准。
+- **"SSEG 只作 precision 检查"的适用范围。** 我理解它只管普查，不影响回溯定年那边已由 D11 冻结的日期矛盾指标，这一点需要葉确认。
+- **冻结规则文件还不存在。** `TEST_RULES_frozen_20261017.md` 已经被其他设计文档引用，但现在还没有这个文件。Phase 0 的第一项任务就是写它。
+
+**GPU 预算超了。** Phase 1 所有候选实验加起来约 38–48 GPU-h（估计），超过约 26 小时的上限。所以文件里把实验分成几批，每批单独批准。
+
+文件里还有每个阶段的完成标准、负责的 bot、依赖关系图、风险表和"停止做"清单。

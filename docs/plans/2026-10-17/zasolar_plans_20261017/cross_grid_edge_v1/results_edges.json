@@ -1,0 +1,196 @@
+{
+ "r2_vs_prod_cell_max_symdiff_m2": 0.0,
+ "prod_halo": {
+  "n_cells": 2083,
+  "halo_area_m2_median": 47003,
+  "halo_area_m2_min": 40967,
+  "halo_area_m2_max": 52660,
+  "halo_frac_of_cell_median": 0.047,
+  "halo_max_width_m_median": 23.6,
+  "halo_max_width_m_max": 26.4,
+  "halo_area_inside_other_census_cells_m2_total": 93312737,
+  "test_cells_halo_area_m2_mean": 41954
+ },
+ "clip_loss_recheck": {
+  "li_total_m2": 40707.8,
+  "lost_m2": 821.1,
+  "n_partly_outside": 12,
+  "n_wholly_outside": 14,
+  "n_lost_gt0p01": 26
+ },
+ "edge_length_m": {
+  "external": 26000,
+  "internal": 21000
+ },
+ "src_polys_in_test_cells": {
+  "n": 1246,
+  "area_m2": 40470.5
+ },
+ "src_vs_any_cell_edge": {
+  "within_0m": {
+   "n": 26,
+   "n_pct": 2.09,
+   "area_m2": 2390.1,
+   "area_pct": 5.91
+  },
+  "within_5m": {
+   "n": 71,
+   "n_pct": 5.7,
+   "area_m2": 3637.6,
+   "area_pct": 8.99
+  },
+  "within_10m": {
+   "n": 105,
+   "n_pct": 8.43,
+   "area_m2": 5726.9,
+   "area_pct": 14.15
+  },
+  "within_20m": {
+   "n": 178,
+   "n_pct": 14.29,
+   "area_m2": 9006.1,
+   "area_pct": 22.25
+  }
+ },
+ "src_vs_external_edge": {
+  "within_0m": {
+   "n": 12,
+   "n_pct": 0.96,
+   "area_m2": 1923.0,
+   "area_pct": 4.75
+  },
+  "within_10m": {
+   "n": 27,
+   "n_pct": 2.17,
+   "area_m2": 4007.3,
+   "area_pct": 9.9
+  },
+  "within_20m": {
+   "n": 50,
+   "n_pct": 4.01,
+   "area_m2": 4916.9,
+   "area_pct": 12.15
+  }
+ },
+ "src_vs_internal_edge": {
+  "within_0m": {
+   "n": 14,
+   "n_pct": 1.12,
+   "area_m2": 467.1,
+   "area_pct": 1.15
+  },
+  "within_10m": {
+   "n": 78,
+   "n_pct": 6.26,
+   "area_m2": 1719.6,
+   "area_pct": 4.25
+  },
+  "within_20m": {
+   "n": 132,
+   "n_pct": 10.59,
+   "area_m2": 4291.1,
+   "area_pct": 10.6
+  }
+ },
+ "src_crossing": {
+  "external": {
+   "n": 12,
+   "n_pct": 0.96,
+   "area_m2": 1923.0,
+   "area_pct": 4.75
+  },
+  "internal": {
+   "n": 14,
+   "n_pct": 1.12,
+   "area_m2": 467.1,
+   "area_pct": 1.15
+  }
+ },
+ "pv_area_in_band_10m": {
+  "any_edge_m2": 2214.4,
+  "external_edge_m2": 994.9
+ },
+ "pv_area_in_band_20m": {
+  "any_edge_m2": 4636.2,
+  "external_edge_m2": 2269.0
+ },
+ "pieces": {
+  "n": 1260,
+  "n_src": 1246,
+  "split_src": 14,
+  "pv_pieces": 1260
+ },
+ "pieces_vs_own_cell_edge": {
+  "within_0.01m": {
+   "n": 40,
+   "area_m2": 1806.2
+  },
+  "within_10m": {
+   "n": 119,
+   "area_m2": 5143.1
+  },
+  "within_20m": {
+   "n": 192,
+   "area_m2": 8422.3
+  }
+ },
+ "pieces_vs_own_cell_edge_by_group": {
+  "A": {
+   "within_10m": 53,
+   "within_20m": 79,
+   "n": 447
+  },
+  "B": {
+   "within_10m": 18,
+   "within_20m": 31,
+   "n": 403
+  },
+  "C": {
+   "within_10m": 36,
+   "within_20m": 66,
+   "n": 349
+  },
+  "D": {
+   "within_10m": 12,
+   "within_20m": 16,
+   "n": 61
+  }
+ },
+ "tiles": {
+  "units": 507,
+  "tiles": 442,
+  "tiles_in_2plus_cells": 61,
+  "units_on_multi_cell_tiles": 126,
+  "max_cells_per_tile": 4
+ },
+ "prod_double_processing_of_gt": {
+  "n_src_in_ge2_grid_bboxes": 119,
+  "pct": 9.55,
+  "pv_area_in_ge2_bboxes_m2": 3006.6,
+  "pv_area_pct": 7.43,
+  "area_weighted_mean_bbox_multiplicity": 1.0743
+ },
+ "prod_chunk_seams": {
+  "chunks_per_cell": "7x6",
+  "seam_len_per_cell_m": 11002,
+  "cross": {
+   "n": 64,
+   "n_pct": 5.14,
+   "area_m2": 4576.8,
+   "area_pct": 11.31
+  }
+ },
+ "mit_tile_lines_100m": {
+  "n": 131,
+  "n_pct": 10.51,
+  "area_m2": 11278.3,
+  "area_pct": 27.87
+ },
+ "mit_gate_cell_lines_33m": {
+  "n": 421,
+  "n_pct": 33.79,
+  "area_m2": 26144.1,
+  "area_pct": 64.6
+ },
+ "mit_gate_cut_area_outside_largest_piece_m2": 8256.0
+}

@@ -1,0 +1,105 @@
+{
+ "grids": {
+  "eval": 5,
+  "train": 79,
+  "val": 14
+ },
+ "tiles": {
+  "train": 9970,
+  "val": 1768,
+  "eval": 632
+ },
+ "pv_px": {
+  "eval": 2440167,
+  "train": 42372083,
+  "val": 12645119
+ },
+ "chips": {
+  "train": 19904,
+  "val": 3562,
+  "eval": 1263
+ },
+ "masks_checked": 12370,
+ "mask_mismatch_vs_expected_source": 0,
+ "reverted_split": {
+  "G1687": [
+   "train"
+  ],
+  "G1971": [
+   "train"
+  ],
+  "G2028": [
+   "val"
+  ],
+  "G1240": [
+   "train"
+  ]
+ },
+ "n_pv_recount_errors_of_300": 0,
+ "train_grids_in_grid_manifest": 79,
+ "train_polygons_recount": 5645,
+ "grid_manifest_polygon_sum": 5645,
+ "ids_ok": true,
+ "reverted_labels_eq_original": {
+  "G1687": true,
+  "G1971": true,
+  "G1240": true
+ },
+ "raster_spotcheck": [
+  {
+   "grid": "G1971",
+   "tile": "CPT1971__E263600_N6225800_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1971",
+   "tile": "CPT1971__E263600_N6226200_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1971",
+   "tile": "CPT1971__E263500_N6226100_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1687",
+   "tile": "CPT1687__E259700_N6220100_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1687",
+   "tile": "CPT1687__E259000_N6220800_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 0.5768
+  },
+  {
+   "grid": "G1687",
+   "tile": "CPT1687__E259700_N6220400_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1972",
+   "tile": "CPT1972__E263700_N6225600_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1972",
+   "tile": "CPT1972__E264300_N6225500_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1972",
+   "tile": "CPT1972__E263700_N6225800_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  }
+ ],
+ "MD5SUMS_bad": 0
+}

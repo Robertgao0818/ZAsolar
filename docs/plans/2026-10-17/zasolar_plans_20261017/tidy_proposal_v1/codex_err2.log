@@ -1,0 +1,858 @@
+Reading additional input from stdin...
+OpenAI Codex v0.159.3
+--------
+workdir: /home/gao/projects/ZAsolar
+model: gpt-6.1-sol
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: none
+session id: 01a1484f-bd4e-7540-bf6d-e82768fe4467
+--------
+user
+Re-review: /home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/PROPOSAL_v2.md (fixes for /home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/CODEX_REVIEW_v1.md) and /home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/STATUS_draft_v2.md. Read-only. Note: you cannot see host processes or SSH from your sandbox; the executor checks those on the host. Are the v1 blockers resolved? List remaining BLOCKERS, end with VERDICT: OK or VERDICT: BLOCKED. Be concise.
+codex
+我会只读核对 v1 审查意见与两份 v2 文档，逐项检查阻断项是否解决；主机进程和 SSH 状态按你的说明由执行者核查。
+
+exec
+/bin/bash -lc "pwd; rg --files -g AGENTS.md -g 'PROPOSAL_v2.md' -g 'CODEX_REVIEW_v1.md' -g 'STATUS_draft_v2.md' /home/gao/projects/zasolar_plans_20261017 /home/gao/projects/ZAsolar /home/gao 2>/dev/null" in /home/gao/projects/ZAsolar
+exec
+/bin/bash -lc 'for p in /AGENTS.md /home/AGENTS.md /home/gao/AGENTS.md /home/gao/projects/AGENTS.md /home/gao/projects/ZAsolar/AGENTS.md /home/gao/projects/zasolar_plans_20261017/AGENTS.md /home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/AGENTS.md; do if test -f "$p"; then printf '"'\\n%s\\n' \""'$p"; cat "$p"; fi; done' in /home/gao/projects/ZAsolar
+ succeeded in 0ms:
+exec
+/bin/bash -lc 'cat /home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/CODEX_REVIEW_v1.md /home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/PROPOSAL_v2.md /home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/STATUS_draft_v2.md' in /home/gao/projects/ZAsolar
+ succeeded in 0ms:
+已只读抽查，未修改任何文件。**目前不能按原计划整套执行。**
+
+**BLOCKERS**
+
+- **`git mv` 不适用于这些源目录。** `zasolar_plans_20261017`、`zasolar_roadmap_20261017` 均在仓库之外，也不是 Git 仓库；直接执行会失败。应先复制到新分支、核对完整性，再决定何时处理原目录。[计划位置](/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/PROPOSAL_v1.md:4)
+- **文件拆分和旧路径映射尚未具体化。** 符号链接就是让旧路径指向新位置的文件系统入口；它不能自动修复目录结构变化。例如 [boot.py](/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/boot.py:3) 从运行目录读取多个 CSV，把代码和数据分开会破坏原运行方式。计划还漏列 `matched/*.py`；新内容若只在独立工作树（同一仓库的另一份检出目录），旧链接也不能指向尚未更新的主目录。忽略这些会产生失效路径或遗漏文件。
+- **无法完成宿主机进程安全核验。** 本次 `ps` 只显示隔离环境内进程，`tmux` 访问被拒绝，不能确认计划中的进程编号仍有效。“先移动、后建链接”仍可能造成读取中断；目前应保留原目录，仅制作副本。
+- **当前环境无法验证或完成推送。** 只读查询远端分支已因 SSH 配置文件权限错误失败；因此无法确认远端 `reorg-20261017` 是否存在，也不能认定现在可推送。
+
+**Non-blocking issues**
+
+- **Mask R-CNN 只能按计划“打标签、写说明”，不能实际搬走。** 已确认 Durban 驱动依赖 `detect_direct.py`、`finalize.py`，HN 审核依赖 `core.inference.presence_pregate`，JHB 脚本读取旧结果路径。保留这些依赖即可继续整理；搬走会破坏后续运行。
+- **主目录状态需要明确保留。** 当前确为 `aa23c2f`，但有未提交的 `ROADMAP.md` 修改和未跟踪的 `weights/`。从该提交创建独立分支不会带入它们；忽略会遗漏最新决策和本地权重。`evalfix` 建议暂不移动；固定评分工作树的 `.git` 确实指回其主目录。
+- **STATUS 已过时且需补限定。** HN 目录已有 `summary_v1.json`、`verdicts_v1.csv`，日志以 `GROK_EXIT 0` 结束，不能再写“结果尚未产出”。模型比较还应保留“参考标注源自 Mask R-CNN 检测结果”的限制，否则容易把该比较误读为可立即退役的依据。v2e 数量及 Group A 的 179 个评分单元与抽查文件一致。
+
+VERDICT: BLOCKED# ZAsolar tidy-up proposal v2 (fixes CODEX_REVIEW_v1 blockers)
+Changes vs v1:
+1. **Copy, don't move.** Sources outside the repo (zasolar_roadmap/plans/hn_review/verification_20261017) are not git repos, so git mv is impossible. Plan: new worktree ~/projects/ZAsolar_reorg_wt on new branch reorg-20261017 from origin/durban-citywide-pregate (aa23c2f); `cp -a` (rsync) each source dir WHOLE, structure preserved, into docs/{roadmap,plans,reviews,status}/2026-10-17/<srcname>/. No splitting of code from data (jhb25_analysis_v1/boot.py reads CSVs from cwd; matched/*.py included). Originals stay in place and remain the live source of truth → **no symlinks needed now** (old paths keep working). Verify with md5 manifest of copies.
+2. **evalfix**: not moved (pinned worktree 8044d14_wt used by Cape Town bot; worktree .git pointers). Only a docs/eval/ZAEVAL_POINTER.md recording path, branch evalfix, commits 8044d14 / 59911a8(invalid). Later option: `git subtree add` once bots no longer pin it.
+3. **Mask R-CNN**: tag + doc only (annotated tag maskrcnn-final-20261017 on aa23c2f, docs/status/MASKRCNN_SUPERSEDED.md). No code moves (detect_direct.py, finalize.py, core/ used by Durban, HN audit pregate, JHB scripts).
+4. Main tree's uncommitted ROADMAP.md change and untracked weights/ are untouched; not carried into the branch.
+5. Excluded from git: v2e/md5_inputs_*.txt (3.7 MB, path lists), codex_run.log, __pycache__, any tif/npz/gpkg/pth/safetensors/ckpt, >5 MB. Secret scan before commit.
+6. Push: only a new branch, no force; requires a working SSH from the main host (Codex sandbox couldn't test).
+7. STATUS: docs/status/STATUS_20261017.md (new file; no existing STATUS in docs). Fixed per review (see STATUS_draft_v2.md).
+# ZAsolar STATUS draft v2 — 2026-10-17 (NZDT)
+- **Phase-1 模型对比**: MiT-b2 baseline / SegNeXt-B / ConvNeXt-T+UPerNet (b3 optional), cap ~26 GPU-h, trains on v2e. 未开始，等葉说开。[ROADMAP_v4.md]
+- **v2e**: train 79 grids / 5,645 polygons, val 14, eval 5; 12,370 masks independently verified. G2028 留在 val; G1749/G1972/G2029 ignore 编辑保留; hn_clean 缓存训练前需重建（CPU）。[v2e/DECISIONS_20261017.md, v2e/verify_v2e_independent.json]
+- **Li test set**: 17 grids, 1,260 scoring polygon pieces (1,246 source polygons inside cells); Group A 8 grids / 179 units / 447 polygons. [cross_grid_summary_v1.md] (Group A/B/C/D split from summary; not re-counted here)
+- **zaeval-2**: scorer commit 8044d14 (59911a8 invalid). r2 rules (TEST_RULES_frozen_20261017_r2.md) 未签，暂停；测试打分、相邻标注合并决定均暂停。
+- **HN audit** (~/capetown_eval/ds3m_ft/hn_crop_audit_v1_20261017, finished): 214 HN samples, 22 pass, 192 flagged (pregate 145, both 47, gemini-only 0). Method is pregate + Gemini, **not SAM3** as described in the brief — to be confirmed with 葉. Codex review: zasolar_hn_review_20261017/CODEX_REVIEW.md.
+- **Durban v4**: native 0.075 m. [UNVERIFIED in files this pass]
+- **Backdating**: 暂停; 用 3.5。[ROADMAP_v4.md]
+- **Mask R-CNN superseded**: JHB25 F1 0.775 (vector re-impl 0.771) vs MiT v2c 0.899 [0.865,0.922]. [ROADMAP_v4.md:128, jhb25_analysis_v1.md:6,12] Caveat: JHB25 GT is detector-seeded (from Mask R-CNN detections), so this is not a clean comparison [ROADMAP_v4.md:267].
+- **Cross-grid edge**: cross_grid_summary_v1.md; 葉 keeps current approach; exp_edge_handling_v1.md deferred; at full-city inference recommend city-wide stitch with one owner per object (CPU).
+
+exec
+/bin/bash -lc 'rg --files /home/gao/projects/zasolar_plans_20261017 /home/gao/projects/zasolar_roadmap_20261017 /home/gao/projects/zasolar_hn_review_20261017 /home/gao/projects/zasolar_verification_20261017' in /home/gao/projects/ZAsolar
+ succeeded in 0ms:
+/home/gao/projects/zasolar_verification_20261017/VERIFICATION.md
+/home/gao/projects/zasolar_verification_20261017/verification.csv
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v3.md.md5
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v3.md
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v2.md.md5
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v2.md
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP.md.md5_before_v2
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_claude_draft.md
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP.md
+/home/gao/projects/zasolar_roadmap_20261017/claude_run.log
+/home/gao/projects/zasolar_roadmap_20261017/brief.md
+/home/gao/projects/zasolar_verification_20261017/scripts/v2d2.out
+/home/gao/projects/zasolar_verification_20261017/scripts/v2d2.py
+/home/gao/projects/zasolar_verification_20261017/scripts/labels.py
+/home/gao/projects/zasolar_verification_20261017/scripts/dbn.py
+/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/codex_err2.log
+/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/codex_stdout2.log
+/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/STATUS_draft_v2.md
+/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/PROPOSAL_v2.md
+/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/codex_stdout.log
+/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/codex_err.log
+/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/CODEX_REVIEW_v1.md
+/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/STATUS_draft_v1.md
+/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/PROPOSAL_v1.md
+/home/gao/projects/zasolar_plans_20261017/exp_edge_handling_v1.md
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1.md
+/home/gao/projects/zasolar_plans_20261017/mit_upgrade_design_v1.md
+/home/gao/projects/zasolar_plans_20261017/backdating_plan.md
+/home/gao/projects/zasolar_plans_20261017/census_plan.md
+/home/gao/projects/zasolar_plans_20261017/claude_run.log
+/home/gao/projects/zasolar_plans_20261017/brief.md
+/home/gao/projects/zasolar_plans_20261017/label_provenance_v1.md
+/home/gao/projects/zasolar_plans_20261017/mit_upgrade_design_v2.md
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1/panel_size_v2e_trainval.py
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1/recount_v1.json
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1/recount_v1.py
+/home/gao/projects/zasolar_plans_20261017/cross_grid_edge_proposal_v1.md
+/home/gao/projects/zasolar_plans_20261017/cross_grid_edge_v1/xgrid_claude_out_20261017.md
+/home/gao/projects/zasolar_plans_20261017/cross_grid_edge_v1/census_dupes.json
+/home/gao/projects/zasolar_plans_20261017/cross_grid_edge_v1/census_dupes.py
+/home/gao/projects/zasolar_plans_20261017/cross_grid_edge_v1/results_edges.json
+/home/gao/projects/zasolar_plans_20261017/cross_grid_edge_v1/per_cell_halo.csv
+/home/gao/projects/zasolar_plans_20261017/cross_grid_edge_v1/quant_edges.py
+/home/gao/projects/zasolar_plans_20261017/v2e/DECISIONS_20261017.md
+/home/gao/projects/zasolar_plans_20261017/v2e/verify_v2e_independent.json
+/home/gao/projects/zasolar_plans_20261017/v2e/verify_v2e_independent.py
+/home/gao/projects/zasolar_plans_20261017/v2e/md5_inputs_after.txt
+/home/gao/projects/zasolar_plans_20261017/v2e/md5_inputs_before.txt
+/home/gao/projects/zasolar_plans_20261017/v2e/build_v2e.py
+/home/gao/projects/zasolar_plans_20261017/mit_upgrade_scripts_20261017/map2.py
+/home/gao/projects/zasolar_plans_20261017/mit_upgrade_scripts_20261017/map.py
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/reagg.py
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/pred_objs.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/gt_objs.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/grid_valid.csv
+/home/gao/projects/zasolar_plans_20261017/mit_upgrade_design_v3.md
+/home/gao/projects/zasolar_plans_20261017/label_provenance_v2.md
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/gt_vec.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/gate_cells.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/vec.py
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/boot.py
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/mrcnn_vec_preds.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/per_grid.csv
+/home/gao/projects/zasolar_plans_20261017/exp_split_dedupe_v1.md
+/home/gao/projects/zasolar_plans_20261017/exp_train_rasterisation_v1.md
+/home/gao/projects/zasolar_plans_20261017/v2e/__pycache__/build_v2e.cpython-314.pyc
+/home/gao/projects/zasolar_plans_20261017/v2e/grok_build.log
+/home/gao/projects/zasolar_plans_20261017/v2e/v2e_design.md
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/matched/per_grid.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/matched/pred_objs.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/matched/gt_objs.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/matched/grid_valid.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/matched/gate_cells.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/matched/mrcnn_vec_preds.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/matched/gt_vec.csv
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/matched/boot.py
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1/matched/reagg_matched.py
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1.md
+/home/gao/projects/zasolar_plans_20261017/scripts/split_overlap_check_20261017.json
+/home/gao/projects/zasolar_plans_20261017/scripts/split_overlap_check.py
+/home/gao/projects/zasolar_plans_20261017/v2e/handoff/20261017_1700_bot-to-grokbuild_build_v2e.md
+/home/gao/projects/zasolar_plans_20261017/v2e/handoff/20261017_1700_bot-to-grokbuild_build_v2e_reply.md
+/home/gao/projects/zasolar_hn_review_20261017/CODEX_REVIEW.md
+/home/gao/projects/zasolar_hn_review_20261017/codex_run.log
+/home/gao/projects/zasolar_hn_review_20261017/PROMPT.md
+
+exec
+/bin/bash -lc 'git status --short --branch; git rev-parse HEAD; git show-ref --heads --tags; git worktree list --porcelain' in /home/gao/projects/ZAsolar
+ succeeded in 0ms:
+## durban-citywide-pregate...origin/durban-citywide-pregate
+ M ROADMAP.md
+?? weights/
+aa23c2fa70f1729e492a6fdc7f11b0e0af5c8e46
+aa23c2fa70f1729e492a6fdc7f11b0e0af5c8e46 refs/heads/durban-citywide-pregate
+d47bf80d04623089e1c508a18014245682f76ede refs/heads/feat/ct-seg-trainset-v1
+f104856c1ea6c2921eada275de4894b211825020 refs/heads/feat/eval-protocol-hardening
+76326480518d431fdfd249d9f528b26d87fc05d3 refs/heads/feat/gate-rescue-hysteresis
+345cfacfbfb6d30e3428e541a8ff418a803ecf2a refs/heads/feat/gemini-two-stage-skylight-review
+2e46c805be048571dc99630436e846890ab1d3cd refs/heads/feat/gtnoise-t1-ceiling-wiring
+13d4fe723809df9c947ae9a4fd5095edc62cbf9f refs/heads/feat/installation-sym-profile
+d371f04af81de97dbaf1ff2215f0dda0fd8b2ac7 refs/heads/feat/jhb-fp-cut-inventory-delivery
+9217270356b60f6482f4e2e315ac5e1afcee82ba refs/heads/fix/edge-tile-aspect
+9614ad6b72ed02dd14d4803fa07b99d34c64105b refs/heads/fix/edge-tile-aspect-on-durban
+1b58dad663079495c4e2a726088a3ccccbe253fe refs/heads/fix/legacy-postconf-honor
+6bdc51e91cc946869132e35868bec9a0311b0792 refs/heads/main
+worktree /home/gao/projects/ZAsolar
+HEAD aa23c2fa70f1729e492a6fdc7f11b0e0af5c8e46
+branch refs/heads/durban-citywide-pregate
+
+worktree /home/gao/projects/ZAsolar_edgefix_wt
+HEAD e9cd82b3e13c4b5f6cbc3bf5496ee7cf3d3dd41e
+detached
+
+worktree /home/gao/projects/ZAsolar_segv1_wt
+HEAD d47bf80d04623089e1c508a18014245682f76ede
+branch refs/heads/feat/ct-seg-trainset-v1
+
+
+exec
+/bin/bash -lc 'cat /home/gao/capetown_eval/ds3m_ft/hn_crop_audit_v1_20261017/summary_v1.json; cat /home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/PROPOSAL_v1.md' in /home/gao/projects/ZAsolar
+ succeeded in 0ms:
+{
+ "sampled": 214,
+ "pass": 22,
+ "flagged": 192,
+ "by_flagged_by": {
+  "pregate": 145,
+  "gemini": 0,
+  "both": 47
+ },
+ "by_grid": {
+  "G1855": {
+   "adr0002_cpt_id": "CPT1855",
+   "sampled": 10,
+   "pass": 0,
+   "flagged": 10,
+   "by_flagged_by": {
+    "pregate": 8,
+    "gemini": 0,
+    "both": 2
+   }
+  },
+  "G1856": {
+   "adr0002_cpt_id": "CPT1856",
+   "sampled": 1,
+   "pass": 0,
+   "flagged": 1,
+   "by_flagged_by": {
+    "pregate": 1,
+    "gemini": 0,
+    "both": 0
+   }
+  },
+  "G1862": {
+   "adr0002_cpt_id": "CPT1862",
+   "sampled": 10,
+   "pass": 0,
+   "flagged": 10,
+   "by_flagged_by": {
+    "pregate": 8,
+    "gemini": 0,
+    "both": 2
+   }
+  },
+  "G1864": {
+   "adr0002_cpt_id": "CPT1864",
+   "sampled": 8,
+   "pass": 2,
+   "flagged": 6,
+   "by_flagged_by": {
+    "pregate": 5,
+    "gemini": 0,
+    "both": 1
+   }
+  },
+  "G1909": {
+   "adr0002_cpt_id": "CPT1909",
+   "sampled": 2,
+   "pass": 0,
+   "flagged": 2,
+   "by_flagged_by": {
+    "pregate": 1,
+    "gemini": 0,
+    "both": 1
+   }
+  },
+  "G1910": {
+   "adr0002_cpt_id": "CPT1910",
+   "sampled": 4,
+   "pass": 0,
+   "flagged": 4,
+   "by_flagged_by": {
+    "pregate": 2,
+    "gemini": 0,
+    "both": 2
+   }
+  },
+  "G1917": {
+   "adr0002_cpt_id": "CPT1917",
+   "sampled": 10,
+   "pass": 0,
+   "flagged": 10,
+   "by_flagged_by": {
+    "pregate": 5,
+    "gemini": 0,
+    "both": 5
+   }
+  },
+  "G1919": {
+   "adr0002_cpt_id": "CPT1919",
+   "sampled": 10,
+   "pass": 0,
+   "flagged": 10,
+   "by_flagged_by": {
+    "pregate": 8,
+    "gemini": 0,
+    "both": 2
+   }
+  },
+  "G1921": {
+   "adr0002_cpt_id": "CPT1921",
+   "sampled": 6,
+   "pass": 3,
+   "flagged": 3,
+   "by_flagged_by": {
+    "pregate": 2,
+    "gemini": 0,
+    "both": 1
+   }
+  },
+  "G1966": {
+   "adr0002_cpt_id": "CPT1966",
+   "sampled": 1,
+   "pass": 0,
+   "flagged": 1,
+   "by_flagged_by": {
+    "pregate": 1,
+    "gemini": 0,
+    "both": 0
+   }
+  },
+  "G1970": {
+   "adr0002_cpt_id": "CPT1970",
+   "sampled": 3,
+   "pass": 0,
+   "flagged": 3,
+   "by_flagged_by": {
+    "pregate": 3,
+    "gemini": 0,
+    "both": 0
+   }
+  },
+  "G1971": {
+   "adr0002_cpt_id": "CPT1971",
+   "sampled": 10,
+   "pass": 0,
+   "flagged": 10,
+   "by_flagged_by": {
+    "pregate": 5,
+    "gemini": 0,
+    "both": 5
+   }
+  },
+  "G1972": {
+   "adr0002_cpt_id": "CPT1972",
+   "sampled": 10,
+   "pass": 1,
+   "flagged": 9,
+   "by_flagged_by": {
+    "pregate": 6,
+    "gemini": 0,
+    "both": 3
+   }
+  },
+  "G1973": {
+   "adr0002_cpt_id": "CPT1973",
+   "sampled": 10,
+   "pass": 0,
+   "flagged": 10,
+   "by_flagged_by": {
+    "pregate": 8,
+    "gemini": 0,
+    "both": 2
+   }
+  },
+  "G1974": {
+   "adr0002_cpt_id": "CPT1974",
+   "sampled": 5,
+   "pass": 1,
+   "flagged": 4,
+   "by_flagged_by": {
+    "pregate": 4,
+    "gemini": 0,
+    "both": 0
+   }
+  },
+  "G1975": {
+   "adr0002_cpt_id": "CPT1975",
+   "sampled": 10,
+   "pass": 0,
+   "flagged": 10,
+   "by_flagged_by": {
+    "pregate": 6,
+    "gemini": 0,
+    "both": 4
+   }
+  },
+  "G1976": {
+   "adr0002_cpt_id": "CPT1976",
+   "sampled": 10,
+   "pass": 3,
+   "flagged": 7,
+   "by_flagged_by": {
+    "pregate": 6,
+    "gemini": 0,
+    "both": 1
+   }
+  },
+  "G1977": {
+   "adr0002_cpt_id": "CPT1977",
+   "sampled": 7,
+   "pass": 2,
+   "flagged": 5,
+   "by_flagged_by": {
+    "pregate": 5,
+    "gemini": 0,
+    "both": 0
+   }
+  },
+  "G1981": {
+   "adr0002_cpt_id": "CPT1981",
+   "sampled": 10,
+   "pass": 0,
+   "flagged": 10,
+   "by_flagged_by": {
+    "pregate": 8,
+    "gemini": 0,
+    "both": 2
+   }
+  },
+  "G2025": {
+   "adr0002_cpt_id": "CPT2025",
+   "sampled": 4,
+   "pass": 0,
+   "flagged": 4,
+   "by_flagged_by": {
+    "pregate": 4,
+    "gemini": 0,
+    "both": 0
+   }
+  },
+  "G2026": {
+   "adr0002_cpt_id": "CPT2026",
+   "sampled": 10,
+   "pass": 2,
+   "flagged": 8,
+   "by_flagged_by": {
+    "pregate": 6,
+    "gemini": 0,
+    "both": 2
+   }
+  },
+  "G2027": {
+   "adr0002_cpt_id": "CPT2027",
+   "sampled": 9,
+   "pass": 0,
+   "flagged": 9,
+   "by_flagged_by": {
+    "pregate": 5,
+    "gemini": 0,
+    "both": 4
+   }
+  },
+  "G2029": {
+   "adr0002_cpt_id": "CPT2029",
+   "sampled": 10,
+   "pass": 0,
+   "flagged": 10,
+   "by_flagged_by": {
+    "pregate": 7,
+    "gemini": 0,
+    "both": 3
+   }
+  },
+  "G2030": {
+   "adr0002_cpt_id": "CPT2030",
+   "sampled": 10,
+   "pass": 1,
+   "flagged": 9,
+   "by_flagged_by": {
+    "pregate": 7,
+    "gemini": 0,
+    "both": 2
+   }
+  },
+  "G2031": {
+   "adr0002_cpt_id": "CPT2031",
+   "sampled": 10,
+   "pass": 1,
+   "flagged": 9,
+   "by_flagged_by": {
+    "pregate": 9,
+    "gemini": 0,
+    "both": 0
+   }
+  },
+  "G2032": {
+   "adr0002_cpt_id": "CPT2032",
+   "sampled": 10,
+   "pass": 3,
+   "flagged": 7,
+   "by_flagged_by": {
+    "pregate": 6,
+    "gemini": 0,
+    "both": 1
+   }
+  },
+  "G2033": {
+   "adr0002_cpt_id": "CPT2033",
+   "sampled": 6,
+   "pass": 2,
+   "flagged": 4,
+   "by_flagged_by": {
+    "pregate": 4,
+    "gemini": 0,
+    "both": 0
+   }
+  },
+  "G2034": {
+   "adr0002_cpt_id": "CPT2034",
+   "sampled": 2,
+   "pass": 1,
+   "flagged": 1,
+   "by_flagged_by": {
+    "pregate": 1,
+    "gemini": 0,
+    "both": 0
+   }
+  },
+  "G2035": {
+   "adr0002_cpt_id": "CPT2035",
+   "sampled": 1,
+   "pass": 0,
+   "flagged": 1,
+   "by_flagged_by": {
+    "pregate": 1,
+    "gemini": 0,
+    "both": 0
+   }
+  },
+  "G2037": {
+   "adr0002_cpt_id": "CPT2037",
+   "sampled": 5,
+   "pass": 0,
+   "flagged": 5,
+   "by_flagged_by": {
+    "pregate": 3,
+    "gemini": 0,
+    "both": 2
+   }
+  }
+ },
+ "crops_with_labeled_pv": 46,
+ "crops_with_labeled_swh": 1,
+ "seed": 20261017,
+ "pregate_present_at": 0.45,
+ "pregate_unsure_at": 0.2,
+ "pregate_decision": "max(pregate_score_native, pregate_score_075)",
+ "pass_rule": "pass only when pregate_call and gemini_call are both absent"
+}
+# ZAsolar tidy-up proposal v1 (2026-10-17 18:15 NZDT) — READ-ONLY, nothing moved
+Repo: ~/projects/ZAsolar (origin git@github.com:Robertgao0818/ZAsolar.git; checked-out branch durban-citywide-pregate @ aa23c2f; worktrees ZAsolar_edgefix_wt e9cd82b, ZAsolar_segv1_wt feat/ct-seg-trainset-v1). Existing docs/ has plans/, adr/, runbook/, progress_log/ ... (no roadmap/, eval/, reviews/, status/ yet).
+
+## 1. Move list (proposed; git mv inside a new branch reorg-20261017 created from a separate worktree, NOT the checked-out tree)
+| Source | Target | Notes |
+|---|---|---|
+| ~/projects/zasolar_roadmap_20261017/*.md (+ .md5) | docs/roadmap/2026-10-17/ | claude_run.log -> docs/roadmap/2026-10-17/logs/ |
+| ~/projects/zasolar_plans_20261017/*.md, v2e/*.md, v2e/handoff/ | docs/plans/2026-10-17/ | design docs |
+| zasolar_plans_20261017/{v2e/build_v2e.py, verify_v2e_independent.py, scripts/, cross_grid_*/*.py, jhb25_analysis_v1/*.py, mit_upgrade_scripts_20261017/} | scripts/analysis/2026-10-17/ | code |
+| zasolar_plans_20261017 CSV/JSON results (jhb25 *.csv ~0.3 MB each, per_cell_halo.csv, split_overlap_check json) | docs/plans/2026-10-17/data/ or keep out of git | all <5 MB; v2e/md5_inputs_*.txt 3.7 MB each -> keep out of git; drop __pycache__ |
+| ~/projects/zasolar_hn_review_20261017/{CODEX_REVIEW.md,PROMPT.md} | docs/reviews/2026-10-17_hn_review/ | codex_run.log 0.9 MB -> out of git |
+| ~/projects/zasolar_verification_20261017/* | docs/status/verification_2026-10-17/ | small |
+| ~/projects/zasolar_evalfix_20261017 (git repo, branch evalfix, 57 MB incl. manifests/out json) | keep as its own repo; move whole dir to ~/projects/ZAsolar_evalfix (or `git subtree add --prefix=eval/zaeval` on branch reorg) | Worktrees zasolar_evalfix_8044d14_wt / _59911a8_wt are linked: moving the main dir needs `git worktree repair`. **8044d14_wt is the pinned scorer for the Cape Town bot's score_sealed_v3_r2.sh — do not move.** |
+| zasolar_evalfix_*_wt | stay | in use / pinned |
+Symlinks planned (after move): each old ~/projects/zasolar_*_20261017 -> new location (dir-level symlink). For the plans dir split across docs/ and scripts/, a symlink farm is needed (dir symlink not possible) — alternative: keep plans dir in place as source of truth and only copy into docs/.
+
+## 2. References to old paths (rg, scripts/md/json)
+- ~/capetown_eval/ds3m_ft/hn_crop_audit_v1_20261017/PROMPT.txt (running bot, tmux hnaudit)
+- ~/capetown_eval/testset_li/infer_v1_20261017/{RUN.md, li443.labels.json, score_sealed_v1_DISABLED.sh} (+ score_sealed_v3_r2.sh pins zasolar_evalfix_8044d14_wt)
+- zasolar_evalfix_20261017 and both worktrees: brief.md, PLAN.md, tasks/run.sh, manifests/*.labels.json, out/*.json (absolute paths embedded in provenance JSON — must not be edited, hashes)
+- ROADMAP_v*.md and plan docs cross-reference each other by absolute path.
+- No crontab. tmux: only `hnaudit`.
+(rg was time-limited; list may be incomplete for ~/zasolar_data.)
+
+## 3. Mask R-CNN archive plan
+Inventory: core/models/maskrcnn.py, train.py, detect_direct.py, finalize.py, core/inference/{raw_artifact,tile_dataset}.py, scripts/analysis/run_benchmark.py, scripts/gate_pilot/*, scripts/training/jhb_phaseA/*, tests (presence_pregate, finalize_schema, raw_artifact, mask_supervision_patch). weights/ 5.3 MB, checkpoints* tiny (real weights live elsewhere, see ARCHIVE_LOCATIONS.md). results/ already has README_ARCHIVED.md.
+Dependency flags:
+- **IN USE**: core.inference.presence_pregate imported live by tmux hnaudit grok job (PID 465938). Pregate shares core/ with Mask R-CNN code.
+- **IN USE**: ~/capetown_eval/ds3m_ft/joburg25_vexcel/chain.sh (PID 201732) reads ZAsolar/results/analysis/jhb_cbd25_3model_20260514/unified_A_perdet_sam_maskbox (Mask R-CNN JHB25 outputs); probdump_chain.sh (PID 248289) also running.
+- JHB25 eval scripts (evalobj_jhb25*.py, pregate/run_now_v*.sh, joburg5/*) reference ZAsolar/{core,detect_direct,results}.
+- Durban v4 census (durban_citywide.py / stitch_census_v1.py / detect_direct.py / pregate) on current branch — needs detect_direct.py + core/ in place.
+Proposal: **tag only, no moves now**: `git tag maskrcnn-final-20261017` on aa23c2f; add docs/status/MASKRCNN_SUPERSEDED.md; record env (requirements.lock.txt) + weight locations. Move top-level train.py/detect_direct.py to archive/maskrcnn/ only after chains finish and Durban/JHB scripts are re-pointed. core/ stays (shared).
+
+## 4. Risks
+Other agents (codex app-server, grok PID 442453, Cursor shells) have cwd ~/projects/ZAsolar right now; repo working tree must not be switched. Running chains + hnaudit read ZAsolar paths. Provenance JSONs embed absolute paths (symlinks required, no rewriting). Push to GitHub is external.
+
+exec
+/bin/bash -lc 'cat /home/gao/projects/zasolar_plans_20261017/v2e/verify_v2e_independent.json /home/gao/projects/zasolar_plans_20261017/v2e/DECISIONS_20261017.md /home/gao/projects/zasolar_hn_review_20261017/CODEX_REVIEW.md' in /home/gao/projects/ZAsolar
+ succeeded in 0ms:
+{
+ "grids": {
+  "eval": 5,
+  "train": 79,
+  "val": 14
+ },
+ "tiles": {
+  "train": 9970,
+  "val": 1768,
+  "eval": 632
+ },
+ "pv_px": {
+  "eval": 2440167,
+  "train": 42372083,
+  "val": 12645119
+ },
+ "chips": {
+  "train": 19904,
+  "val": 3562,
+  "eval": 1263
+ },
+ "masks_checked": 12370,
+ "mask_mismatch_vs_expected_source": 0,
+ "reverted_split": {
+  "G1687": [
+   "train"
+  ],
+  "G1971": [
+   "train"
+  ],
+  "G2028": [
+   "val"
+  ],
+  "G1240": [
+   "train"
+  ]
+ },
+ "n_pv_recount_errors_of_300": 0,
+ "train_grids_in_grid_manifest": 79,
+ "train_polygons_recount": 5645,
+ "grid_manifest_polygon_sum": 5645,
+ "ids_ok": true,
+ "reverted_labels_eq_original": {
+  "G1687": true,
+  "G1971": true,
+  "G1240": true
+ },
+ "raster_spotcheck": [
+  {
+   "grid": "G1971",
+   "tile": "CPT1971__E263600_N6225800_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1971",
+   "tile": "CPT1971__E263600_N6226200_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1971",
+   "tile": "CPT1971__E263500_N6226100_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1687",
+   "tile": "CPT1687__E259700_N6220100_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1687",
+   "tile": "CPT1687__E259000_N6220800_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 0.5768
+  },
+  {
+   "grid": "G1687",
+   "tile": "CPT1687__E259700_N6220400_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1972",
+   "tile": "CPT1972__E263700_N6225600_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1972",
+   "tile": "CPT1972__E264300_N6225500_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  },
+  {
+   "grid": "G1972",
+   "tile": "CPT1972__E263700_N6225800_mask.tif",
+   "mask_pv_inside_poly": 1.0,
+   "core_px_marked_pv_or_ignore": 1.0
+  }
+ ],
+ "MD5SUMS_bad": 0
+}# v2e decisions — 2026-10-17
+
+Recorded for the Phase-1 trainset `ct_seg_trainset_v2e_20261017`. Same items also appear in `~/projects/zasolar_roadmap_20261017/ROADMAP_v4.md` under **Decisions (2026-10-17 17:13 NZDT, 葉)**. Existing files were not modified.
+
+Source: 葉, 2026-10-17 17:13 NZDT (Pacific/Auckland). Reply to the three open questions after v2e build+verify: "1 留 2 保留 3 确认".
+
+## Decisions
+
+1. **G2028 stays in val.** Do not remove it from val. v2e val = v2d2 val (unchanged). G2028 keeps its SAM3 thin-strip labels. Rationale (主管 recommendation, accepted by 葉): leave as-is so v2c / v2d / v2e val scores are directly comparable.
+
+2. **Keep the v2d ignore edits in G1749 / G1972 / G2029.** The thin-strip → ignore changes made in v2d for those three grids remain in v2e. Do not revert them.
+
+3. **Backdating uses 3.5** — confirmed. Closes the open confirm item from ROADMAP_v3 Priorities §5. Standing choice while the backdating track is paused (Priorities §2). Was already [葉-1017b #3].
+
+## Still open (not decided here)
+
+- 葉's pregate cross-grid chip concern (does pregate cover chips from neighbouring grids in real detection; size of cross-grid effect). Under investigation; Claude on rog asked. May change r2 / scoring scripts. r2 sign-off, touching-label merge, and all test scoring remain ON HOLD.
+
+## Not started
+
+No training. Before any Phase-1 launch (still needs 葉's go): rebuild HN coord cache for v2e; write `train2_v2e.py`; smoke run; write DECISION_RULE (arm order, seeds, stop rules).
+**判定：sound with changes（方法成立，但需要修改使用方式）。** 人工确认的误检可以作为难负样本（HN，即模型容易误认成光伏的真实背景）；目前的清洗也没有发现坐标错配。不过，它只排除了与**已有标签**冲突的采样点，尚未证明剩余区域没有漏标光伏。忽略这个区别，可能会把真光伏反复当作背景训练，尤其伤害小板的召回率——即真实光伏被找出的比例。
+
+本次全程只读，仅做 CPU 检查，没有创建或修改文件，没有运行训练、模型推理或 Gemini 调用。下文“本次实查”指在内存中读取缓存、影像元数据和标签后计算；这些结果没有另存文件。
+
+**1．来源有依据，但可信度应落实到对象及其周边，不能落实到全部背景像素。**
+
+源头确实经过人工审阅。库存生成器读取 `v3c_targeted_hn_aerial_2025` 和旧版审阅文件，保留对象的来源路径、行号与审阅状态；训练集构建器只选择 `status == "delete"` 的对象。[inventory.py:3–13](/home/gao/data/ZAsolar/geid_temporal/cls_hardneg_inventory_v1_20261014/inventory.py:3)、[build_ct_seg_trainset_v2.py:326–348](/home/gao/projects/ZAsolar_segv1_wt/scripts/training/build_ct_seg_trainset_v2.py:326)
+
+本次实查发现：
+
+- 库存中的 793 个 `delete` 对象，均能在原始文件对应行找到相同删除状态；没有状态或行号不一致。
+- 原始 145,998 个 HN 坐标全部落在 v2b 的类别 `2` 上。但这个旧类别混合了普通误检和已确认热水器，因此原始缓存并非纯粹的普通背景误检集。[train.py:23–33](/home/gao/capetown_eval/ds3m_ft/train.py:23)、[patch_ct_seg_trainset_v2c.py:3–13](/home/gao/projects/ZAsolar_segv1_wt/scripts/training/patch_ct_seg_trainset_v2c.py:3)
+- 清洗后 118,143 个点全部位于原始 `delete` 多边形内，共涉及 **504 个不同对象、30 个网格**；全部坐标合法，492 张相关瓦片的影像与标签网格对齐。
+
+这足以支持“有根据的负样本候选”，不足以支持“已经验证没有光伏”。人工删除一个检测对象，可能是因为它整体错误、混合了屋顶和小板，或者边界严重错误；它不自动证明整个多边形以及周围裁剪都是背景。
+
+此外，汇总中的“8 个有可信手标网格”是**原始 HN 网格与手标来源的交集**。保留 HN 后，30 个网格中只有 **7 个**有该手标图层，另 **23 个**没有；后者承担约 **79.7% 的 HN 分支抽样机会**。`hand_label=True` 本身也只是判断该网格存在图层，没有检查该网格是否标注完整。[hn_clean.py:36–42](/home/gao/capetown_eval/ds3m_ft/hn_clean/hn_clean.py:36)
+
+**2．删除规则方向正确；0.3 米只是暂定保护距离，而且当前实现并非严格圆形半径。**
+
+清洗确实要求：
+
+```text
+当前位置是背景，并且不在已标光伏或可信手标的膨胀区域内。
+```
+
+可信手标来自指定的两组 `G*_SAM2_*` 文件，排除 Google Earth 标签；投影后还删除面积 ≥20,000 m² 的几何。[hn_clean.py:18–23](/home/gao/capetown_eval/ds3m_ft/hn_clean/hn_clean.py:18)、[hn_clean.py:34–43](/home/gao/capetown_eval/ds3m_ft/hn_clean/hn_clean.py:34)
+
+**27,855 个删除点的总数核实无误，但解释需要修正。** 本次逐点读取 v2d2 标签得到：
+
+- **27,809 个是类别 `2`，即太阳能热水／泳池加热设备。**
+- **46 个是 `255`，即忽略区。**
+- **0 个是已标光伏类别 `1`。**
+
+这与汇总的 `not_bg=27855` 一致。因此，这次清洗主要完成了类别分流，不能当作“已清除大量漏标真光伏”的证据。[hn_clean_summary.json:5–10](/home/gao/capetown_eval/ds3m_ft/hn_clean/hn_clean_summary.json:5)
+
+对三个具体规则的判断如下：
+
+- **删除 `mask==255` 的 HN 采样中心是正确的。** 忽略区可能是光伏边界、无影像区域或不确定的热水器，不应视为确认背景。训练也同时从交叉熵损失和 Dice 损失中排除了 `255`；两者分别衡量逐像素分类错误和预测区域重合程度。[build_ct_seg_trainset_v1.py:46–64](/home/gao/projects/ZAsolar_segv1_wt/scripts/training/build_ct_seg_trainset_v1.py:46)、[build_ct_seg_trainset_v2.py:408–412](/home/gao/projects/ZAsolar_segv1_wt/scripts/training/build_ct_seg_trainset_v2.py:408)、[train2_v2d2.py:75–81](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:75)
+- **六次默认膨胀不是严格的 0.3 米圆形缓冲。** 它沿上下左右扩展，形成菱形距离范围；部分直线距离不足 0.3 米的对角位置可能落在范围外。代码没有显式指定圆形结构。[hn_clean.py:34–39](/home/gao/capetown_eval/ds3m_ft/hn_clean/hn_clean.py:34)、[SciPy 官方说明](https://docs.scipy.org/doc/scipy/reference/generated/scipy.ndimage.binary_dilation.html)
+- **光伏距离是从标签内核算起。** 标签制作已将光伏边界内外设为忽略区，所以 `mm==1` 通常比原始光伏多边形小；再向外膨胀六像素，不能解释成“原始板边外另加 0.3 米”。[build_ct_seg_trainset_v1.py:58–63](/home/gao/projects/ZAsolar_segv1_wt/scripts/training/build_ct_seg_trainset_v1.py:58)、[hn_clean.py:34](/home/gao/capetown_eval/ds3m_ft/hn_clean/hn_clean.py:34)
+
+不过，本次用直线距离独立复核后，保留点中仍没有点距光伏内核 ≤0.3 米；在有可信手标的保留点中，距原始手标最近约 1.77 米。**几何实现值得修正，但没有证据说明它已污染当前这批保留点。**
+
+0.3 米可以暂留为探索参数，不能认定为最优。建议按原始光伏多边形计算真实距离，并比较 0.3、0.5、1 米会改变哪些对象。单纯扩大半径无法保护完全没有标签的光伏。
+
+**3．实际训练强度：15% 裁剪来自 HN，没有 HN 专属损失加权。**
+
+实际代码与开头注释略有出入：
+
+- 非空采样池下，比例为 **70% 光伏、5% 热水器、15% HN、10% 随机有效像素**。[train2_v2d2.py:41–45](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:41)
+- HN 分支先等概率选瓦片，再等概率选该瓦片内缓存点。因此不是网格等权，也不是全部 HN 点等权；点少的瓦片会使每个点被更频繁地重复抽取。[train2_v2d2.py:44–48](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:44)
+- 默认裁剪 **640×640 像素，即 32×32 米**；围绕抽样点随机平移，边缘限制在瓦片内。README 中的 512 像素切片索引不决定这里的训练裁剪大小。[train2_v2d2.py:18](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:18)、[train2_v2d2.py:46–50](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:46)
+- 类别权重默认是背景／光伏／热水器 **1／1／2**，总损失为交叉熵加 **0.5×光伏 Dice**；没有 HN 点或 HN 裁剪的额外权重。[train2_v2d2.py:20](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:20)、[train2_v2d2.py:74–81](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:74)
+
+**风险来自整张裁剪的标签，不只是采样点。** HN 坐标只选择取图位置，训练仍使用整张裁剪原有的标签。本次按代码复现前 12,000 次取样，得到 1,749 张 HN 裁剪，其中 **426 张（24.4%）含已标光伏**。这些光伏会正常参与正类训练；但附近若有漏标小板，它们会作为背景受罚。删除中心坐标也不会修复这些背景标签，其他采样分支仍可能取到它们。[train2_v2d2.py:47–56](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:47)、[train2_v2d2.py:78–80](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:78)
+
+因此，15% 本身不能判为过高，却也没有证据说明它最合适。小板还面临两个独立问题：正样本按光伏像素而非对象抽取，小对象获得的机会更少；边界忽略带会使它们失去更大比例的有效监督。[hn_clean.py:27–29](/home/gao/capetown_eval/ds3m_ft/hn_clean/hn_clean.py:27)、[train2_v2d2.py:42–47](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:42)、[v2d2 README:9](/home/gao/data/ZAsolar/geid_temporal/ct_seg_trainset_v2d2_20261017/README.md:9)
+
+**HN 不能直接解释 v2d1 相对 v2c 的退步。** 本次逐数组比较，v2c、v2d1、v2d2 的 409 个 HN 数组完全相同；v2c 与 v2d1 的采样比例、损失实现也相同。[train2.py:38–58](/home/gao/capetown_eval/ds3m_ft/train2.py:38)、[train2_v2d1.py:40–60](/home/gao/capetown_eval/ds3m_ft/train2_v2d1.py:40)、[train2.py:84–91](/home/gao/capetown_eval/ds3m_ft/train2.py:84)、[train2_v2d1.py:86–93](/home/gao/capetown_eval/ds3m_ft/train2_v2d1.py:86)
+
+对象精确率——预测对象中正确对象的比例——从 **0.892 降至 0.864**，已在相同 `h0.9_0.5` 配置的结果中核实；小板命中从 **11/12 降至 8/12**，但分母只有 12，估计仍很不稳定。[原版结果:5](/home/gao/capetown_eval/ds3m_ft/evalobj/TABLE.md:5)、[v2d1 结果:4](/home/gao/capetown_eval/ds3m_ft/evalobj_v2d1/TABLE_v2d1.md:4)
+
+这意味着应检查标签变化与 HN 裁剪内容的交互，以及训练随机差异，不能直接归因于 HN 比例。**“未改瓦片新增误检”这项，我没有独立重做对象匹配；退步的因果来源仍未验证。**
+
+**建议按以下优先级推进；这些是后续建议，本次没有执行写入或训练。**
+
+1. **先审计现有 HN，优先看完整裁剪。**  
+   每个活跃 HN 网格随机抽最多 **10 个不同原始对象**，共 **214 个**；记录随机种子，并在对象内随机选一个缓存点。每例看一张近景和按训练规则生成的 32 米裁剪，叠加原始删除边界、当前光伏标签及忽略区。分别记录“点下有真光伏”和“裁剪内有被标背景的真光伏”。另查距已标光伏最近的点、混合屋顶对象及少数点保留下来的瓦片，风险样本单独报告。这样才能区分中心可靠、周边漏标两类问题；只审中心会漏掉实际训练风险。
+
+2. **审计发现真光伏时，修标签或设为忽略，不能只删坐标。**  
+   明确真光伏改为正类；无法判断的对象或局部区域设为 `255`。Gemini 可以先分流“疑似光伏／非光伏／不确定”，人工复核疑似与不确定，并抽查其“非光伏”判断。按网格和实际采样机会报告污染情况，不能把多个同屋顶像素当作独立证据。
+
+3. **修正距离定义和清洗报告。**  
+   使用原始多边形的米制直线距离；同时报告非背景中的 `1/2/255` 分解，以及各排除条件的重叠和新增删除量。当前 `near_pv`、`near_hand` 是前序条件过滤后的新增数，两个零不能解释成没有任何原始重叠。[hn_clean.py:40–47](/home/gao/capetown_eval/ds3m_ft/hn_clean/hn_clean.py:40)
+
+4. **以后用一个受控对照决定 HN 比例。**  
+   固定标签、初始化、随机种子、训练步数和评估规则，先比较 **15% 与 0% HN**；腾出的比例分配给随机有效像素，其他设置保持一致。若确有精确率收益但损害小板召回，再试 5%。同时报告小板逐对象得失和网格间差异，避免只凭总体像素指标选择模型。当前不建议增加 HN 损失权重。
+
+5. **应该刷新 HN，但把当前模型的误检当作待审候选。**  
+   在训练网格上利用已有预测筛选高置信、重复出现且类型多样的候选，先人工或辅助审阅，再加入确认背景；其中发现的真光伏应补入正类。保留旧 HN 的一部分，避免只追逐某次模型的错误。验证和测试网格上的发现用于评估，不回灌训练，否则后续指标会失去独立性。现有脚本确实对训练／验证网格排除了指定保留网格。[train2_v2d2.py:28–29](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:28)
+
+6. **先核实 v2e 的配套状态，再使用。**  
+   v2e README 写着 HN 缓存尚未重建，但当前磁盘已有新的 v2e 缓存；本次确认其 HN 数组与 v2d2 相同，其他坐标数组有变化。现有验证记录也说明了这一点，因此 README 已部分过时；指定位置仍未找到 `train2_v2e.py`。[v2e README:39](/home/gao/data/ZAsolar/geid_temporal/ct_seg_trainset_v2e_20261017/README.md:39)、[v2e 缓存 README:2–7](/home/gao/capetown_eval/ds3m_ft/hn_clean_v2e_20261017/README.md:2)  
+   不应因 HN 恰好相同就沿用整个 v2d2 缓存。当前缓存名称只绑定清单文件的 MD5——即文件内容校验值——没有绑定标签栅格和手标内容；将来原地改标签而不改清单，可能继续加载旧缓存。[hn_clean.py:16–17](/home/gao/capetown_eval/ds3m_ft/hn_clean/hn_clean.py:16)、[train2_v2d2.py:30–32](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:30)
+
+Durban 的 Gemini HN 标签质量本次**未验证**；本次追溯的 Cape Town 数据和缓存读取链没有纳入它。它不能为当前 HN 的可信度提供额外支持。[train2_v2d2.py:23–32](/home/gao/capetown_eval/ds3m_ft/train2_v2d2.py:23)
+exec
+/bin/bash -lc "rg -n '179|447|1,260|1260|1,246|1246|0\\.775|0\\.771|0\\.899|0\\.865|detector.seed|26 GPU|G2028|hn_clean' /home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1.md /home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1.md /home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md; nl -ba /home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/PROPOSAL_v2.md; nl -ba /home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/STATUS_draft_v2.md" in /home/gao/projects/ZAsolar
+ succeeded in 0ms:
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:24:1. **G2028 stays in val.** Do not remove it. v2e val = v2d2 val (unchanged), so v2c / v2d / v2e val scores stay comparable. G2028 keeps its SAM3 thin-strip labels.
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:32:1. **Phase-1 GPU cap ≈26 GPU-h approved** (estimate-based cap). Launch details (arm order, seeds within the cap, launch time, stop rules / DECISION_RULE file) are still pending; nothing launched.
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:35:4. **Phase-1 trains on v2e** (replaces "v2d2 as built"): `~/data/ZAsolar/geid_temporal/ct_seg_trainset_v2e_20261017/` = v2c labels + G1189/G1190/G1238 + G1630 seg130 fix + G1972 tightening, without the v2d SAM3 thin-strip replacements in train G1971/G1687/G1240. Val/eval = v2d2 (unchanged; G2028 stays in val with its SAM3 thin-strip labels — decided 2026-10-17 17:13 NZDT, 葉). Design/verification: `~/projects/zasolar_plans_20261017/v2e/`. Train 79 grids / 5,645 polygons / 9,970 tiles / 19,904 chips.
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:52:2. **Approve the Phase-1 backbone comparison cap (≈26 GPU-h, estimate)** [葉-1017 #2; MU3 §5]. Also decide whether a second A0 seed (+3.2 GPU-h, estimate from measured T [MU3 §5]) comes out of that cap. *Recommendation:* approve it, and put the seed inside the cap. Without a seed gap, no arm-vs-arm difference can be called real [CP §2.4].
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:108:- [CP] T-A ("Li's labels as test") is now concrete: the Li no-KML batch (17 grids, 1,260 polygons), with the main metric on group A [葉-1017 #4].
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:119:  - Li no-KML batch: 17 grids, 1,260 labelled polygons, 233 empty-class polygons [M32 recount; RES].
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:120:  - Group A: 8 grids, 150 tiles, 447 polygons, 30 polygons <4 m², 96 of 4–10 m² [OQ1 Q4].
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:128:  - JHB25, with pre-gate, GT 2,068 [葉-1017 #3; JA §1]: MiT v2c F1 0.899, SAT interim 25k 0.888, DINOv3 LVD 0.888, MiT v2d1 0.874 (<4 m² recall 10/26), Mask R-CNN 0.775 [JHB25].
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:130:  - Mask R-CNN's JHB25 row is reference only: the GT is detector-seeded [JA §7.3].
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:247:At one GPU job at a time [CP §2.8], a 26 GPU-h wave is roughly 3 overnight runs. That is an assumption: about 8–10 h per night.
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:267:| C2.4 | **Johannesburg:** JHB25 already shows usable transfer on Vexcel (MiT v2c F1 0.899 with pre-gate [JHB25]). CoJ 15 cm aerial does not transfer (F1 0.662 [CP §2.6]). Candidate route: fine-tune or verify on 葉's 25 JHB Vexcel grids (3,835 reviewed polygons [CP §2.6]). | CT | `~/zasolar_data/dropbox_label_copies_20261017/`; the JNB grid | 葉 decides JHB in or out [CP D11]. JHB25 GT is detector-seeded, so a clean JHB check is needed before any JHB claim [JA §7.3]. |
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:393:| Group A is too small for small panels (~30 objects <4 m²; CI ≈ ±0.18, estimate) | certain | H2 (small-panel and boundary gains) cannot be decided on A | treat it as directional [葉-1017 #4]; T-B (Top 7); JHB25 as a secondary check, keeping in mind its detector-seeded GT [JA §7.3] |
+/home/gao/projects/zasolar_roadmap_20261017/ROADMAP_v4.md:424:- Comparing Mask R-CNN with the segmenters on the Li grids, the 5 eval grids or JHB25 as if those were fair tests (detector-seeded, or used for Mask R-CNN model selection) [OQ1 Q6; JA §7.3].
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1.md:6:- Mask R-CNN: fully independent **vector** implementation (`vec.py`, shapely, from predictions_metric.gpkg, gated by kept cells): P 0.677 (=), R 0.895 (vs 0.905), F1 0.771 (vs 0.775), FP/ha 0.369 (=), <4 m² 2/26 (vs 3/26), 4–10 250/275 (vs 255/274). Small R gap = raster vs vector coverage (all_touched) + 2068 vs 2065 objects; not a scorer bug.
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1.md:7:- **Mismatch to flag: GT count is 2,068 polygons in clean_gt (2,065 scored), not 2,168.** clean_gt = union of Mask R-CNN v3c predictions reviewed "correct" + SAM-added (clean_gt.py), i.e. GT is detector-seeded.
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1.md:12:| MiT v2c h0.9_0.5 | 0.856 [0.808,0.890] | 0.947 [0.915,0.969] | 0.899 [0.865,0.922] | 0.100 [0.076,0.125] | 0.912 [0.817,0.962] |
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1.md:15:| Mask R-CNN (vector recompute) | 0.677 [0.584,0.747] | 0.895 [0.831,0.938] | 0.771 [0.702,0.820] | 0.369 [0.296,0.453] | 0.909 |
+/home/gao/projects/zasolar_plans_20261017/jhb25_analysis_v1.md:39:- JHB is one city, 25 grids, detector-seeded GT: supports "v2c ≥ v2d1" and "SAT not clearly better"; does not by itself justify a model switch.
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1.md:4:## 1. Polygon base (the "1,246 vs 2,068" question)
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1.md:11:| labelled Li polygons | 1,260 | 40,707.8 | the source label set |
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1.md:14:| source polygons touching the cells | **1,246** | 40,470.5 (full) / 39,886.7 (clipped) | edge analysis ("how many panels") |
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1.md:15:| per-cell scoring pieces = gt.gpkg rows | **1,260** (= 1,246 + 14 split across internal lines) | 39,886.7 | **scoring GT**. A 447 / B 403 / C 349 / D 61 |
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1.md:17:The two 1,260 counts are a coincidence: 14 dropped and 14 split. They are not the same polygons.
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1.md:34:| 1 | Polygon base confusion | CT test 1,246 src / 1,260 pieces; 2,068 = Joburg | no | **resolved** |
+/home/gao/projects/zasolar_plans_20261017/cross_grid_summary_v1.md:38:| 5 | Gate zeroes neighbour predictions (33 m cells) | 421/1,246 polys cross gate/tile lines; 8,256 m² exposed | no (not used in CT test) | matters only if a gated MiT city run happens; fix before that |
+     1	# ZAsolar tidy-up proposal v2 (fixes CODEX_REVIEW_v1 blockers)
+     2	Changes vs v1:
+     3	1. **Copy, don't move.** Sources outside the repo (zasolar_roadmap/plans/hn_review/verification_20261017) are not git repos, so git mv is impossible. Plan: new worktree ~/projects/ZAsolar_reorg_wt on new branch reorg-20261017 from origin/durban-citywide-pregate (aa23c2f); `cp -a` (rsync) each source dir WHOLE, structure preserved, into docs/{roadmap,plans,reviews,status}/2026-10-17/<srcname>/. No splitting of code from data (jhb25_analysis_v1/boot.py reads CSVs from cwd; matched/*.py included). Originals stay in place and remain the live source of truth → **no symlinks needed now** (old paths keep working). Verify with md5 manifest of copies.
+     4	2. **evalfix**: not moved (pinned worktree 8044d14_wt used by Cape Town bot; worktree .git pointers). Only a docs/eval/ZAEVAL_POINTER.md recording path, branch evalfix, commits 8044d14 / 59911a8(invalid). Later option: `git subtree add` once bots no longer pin it.
+     5	3. **Mask R-CNN**: tag + doc only (annotated tag maskrcnn-final-20261017 on aa23c2f, docs/status/MASKRCNN_SUPERSEDED.md). No code moves (detect_direct.py, finalize.py, core/ used by Durban, HN audit pregate, JHB scripts).
+     6	4. Main tree's uncommitted ROADMAP.md change and untracked weights/ are untouched; not carried into the branch.
+     7	5. Excluded from git: v2e/md5_inputs_*.txt (3.7 MB, path lists), codex_run.log, __pycache__, any tif/npz/gpkg/pth/safetensors/ckpt, >5 MB. Secret scan before commit.
+     8	6. Push: only a new branch, no force; requires a working SSH from the main host (Codex sandbox couldn't test).
+     9	7. STATUS: docs/status/STATUS_20261017.md (new file; no existing STATUS in docs). Fixed per review (see STATUS_draft_v2.md).
+     1	# ZAsolar STATUS draft v2 — 2026-10-17 (NZDT)
+     2	- **Phase-1 模型对比**: MiT-b2 baseline / SegNeXt-B / ConvNeXt-T+UPerNet (b3 optional), cap ~26 GPU-h, trains on v2e. 未开始，等葉说开。[ROADMAP_v4.md]
+     3	- **v2e**: train 79 grids / 5,645 polygons, val 14, eval 5; 12,370 masks independently verified. G2028 留在 val; G1749/G1972/G2029 ignore 编辑保留; hn_clean 缓存训练前需重建（CPU）。[v2e/DECISIONS_20261017.md, v2e/verify_v2e_independent.json]
+     4	- **Li test set**: 17 grids, 1,260 scoring polygon pieces (1,246 source polygons inside cells); Group A 8 grids / 179 units / 447 polygons. [cross_grid_summary_v1.md] (Group A/B/C/D split from summary; not re-counted here)
+     5	- **zaeval-2**: scorer commit 8044d14 (59911a8 invalid). r2 rules (TEST_RULES_frozen_20261017_r2.md) 未签，暂停；测试打分、相邻标注合并决定均暂停。
+     6	- **HN audit** (~/capetown_eval/ds3m_ft/hn_crop_audit_v1_20261017, finished): 214 HN samples, 22 pass, 192 flagged (pregate 145, both 47, gemini-only 0). Method is pregate + Gemini, **not SAM3** as described in the brief — to be confirmed with 葉. Codex review: zasolar_hn_review_20261017/CODEX_REVIEW.md.
+     7	- **Durban v4**: native 0.075 m. [UNVERIFIED in files this pass]
+     8	- **Backdating**: 暂停; 用 3.5。[ROADMAP_v4.md]
+     9	- **Mask R-CNN superseded**: JHB25 F1 0.775 (vector re-impl 0.771) vs MiT v2c 0.899 [0.865,0.922]. [ROADMAP_v4.md:128, jhb25_analysis_v1.md:6,12] Caveat: JHB25 GT is detector-seeded (from Mask R-CNN detections), so this is not a clean comparison [ROADMAP_v4.md:267].
+    10	- **Cross-grid edge**: cross_grid_summary_v1.md; 葉 keeps current approach; exp_edge_handling_v1.md deferred; at full-city inference recommend city-wide stitch with one owner per object (CPU).
+
+exec
+/bin/bash -lc "cat /home/gao/capetown_eval/ds3m_ft/hn_clean_v2e_20261017/README.md; rg -n 'hn_clean_v2e|cache|缓存' /home/gao/projects/zasolar_verification_20261017/VERIFICATION.md" in /home/gao/projects/ZAsolar
+ exited 1 in 0ms:
+# HN coord cache for v2e (2026-10-17)
+Cache: ~/capetown_eval/ds3m_ft/coord_cache_v2e_clean_dbf55cb6.npz (file md5 e655cf9e1069bfafc9f2b1e8664496ce; dbf55cb6 = v2e manifest.csv md5[:8])
+Script: hn_clean_v2e.py (written by grok build grok-4.7-build-fast/high, copied from ../hn_clean/hn_clean.py; only DATA, output name, v2e key names, output dir, adr0002_cpt_id column changed). CPU only. Old caches untouched.
+Rules: v2b coord_cache.npz HN points dropped if v2e mask!=0, within 0.3 m (6 px) of v2e PV, or within 0.3 m of trusted hand labels (core_hand_sam + batch004, no GE, seg130 excluded by area<20000).
+Result: 492 HN tiles in, 409 out; 145,998 pts in, 118,143 kept; dropped: not_bg 27,855, near_v2e_pv 0, near_hand 0. Identical to v2d2 (118,143).
+Verification (verify_independent.py, verify_independent.json): HN key set and every HN array identical to v2d2 cache; 0 kept points on mask!=0, on PV, or within 0.3 m of v2e PV; v2e rows 12,370 = v2d2 rows, same (grid,image) set, row order reconstructed v2b-first.
+Why no diff: v2d2->v2e masks changed in 30 HN tiles (G1687: 29,224 px, G1971: 68,664 px, see verify_mask_diff_hn_tiles.csv), but no kept HN point falls on or within 0.3 m of the changed PV. G1240 has no HN tiles. Non-HN keys (pv/swh/val sampled pixels) do differ from v2d2, as expected from changed masks.
+Grid IDs: per-grid csv and summary json carry adr0002_cpt_id (CPT####), all 39 HN grids mapped.
+
+codex
+**剩余 BLOCKERS：无。v1 的方案性阻断已解决。**
+
+- 改为整目录复制、保留原目录，并纳入 `matched/*.py`，解决了仓库外移动失败、代码与数据拆分、旧路径失效的问题。
+- 不移动 evalfix 和仍被使用的模型代码，保留主目录未提交内容，避免影响现有任务。
+- 主机进程与 SSH（远程连接通道）由执行者核查，仍是执行前提；沙箱无法核验不再单独构成方案阻断。
+- STATUS 已补上 HN 审计完成情况及参考标注来源限制，避免把模型比较误当作退役依据。
+
+**一处非阻断修正：**[STATUS 第 3 行](/home/gao/projects/zasolar_plans_20261017/tidy_proposal_v1/STATUS_draft_v2.md:3)仍称缓存“需重建”，但[现有记录](/home/gao/capetown_eval/ds3m_ft/hn_clean_v2e_20261017/README.md:2)表明已生成并核验。宜改为“训练前确认使用已核验的 v2e 缓存”，否则会重复工作并误报进度。
+
+VERDICT: OK
+tokens used
+25,356

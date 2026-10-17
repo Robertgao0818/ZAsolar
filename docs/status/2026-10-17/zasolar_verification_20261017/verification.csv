@@ -1,0 +1,22 @@
+id,item,claimed,recomputed,status,note,sources
+D1,Durban holefill_v3 blocks/area,"30,604 / 1,889,920 m2","30,604 / 1,889,920.4 m2 (EPSG:32736 geometry area)",match,Equal-area (ESRI:54034) gives 1889629 (-0.015%),durban_stitch_sam3_20261009/holefill_v3/*.gpkg; ruleD before gpkg
+D2,Durban after Gemini screen,"27,328 / 1,635,102 m2; 3,276 non-PV","27,328 / 1,635,101.6 m2; 30,604-27,328=3,276; removed_blocks csv 3,276 rows",match,,durban_ruleD_city_20261012/out/*after*.gpkg; removed_blocks_ruleD_20261012.csv
+D3,Durban v4 candidate,"27,327; -129 m2","27,327 / 1,634,972.6 m2; -129.0 m2",match,,holefill_v4_candidate_drop030281.gpkg
+D4,Hole-review verdicts,"7 yes ~331.7 m2; 25 no","7 pv 331.7 m2; 25 not_pv 1,567.7 m2",match,,durban_hole_review_20261012/review_verdicts_20261012.csv
+D5,hn_v1 / hn_v1_r005 chips,"4,277","4,277 rows each; 4,277 chips + 4,277 masks on disk; 3,274 gemini/3 human/1,000 pos; train 3,582/val 695",match,,hn_v1*/index.csv chips/ masks/
+C1,MiT v2c val px IoU,"0.756-0.758","0.753@0.3 .. 0.756@0.5 .. 0.758@0.7 (evalfull); 0.758 h0.9/0.5 (evalobj)",match (from raw eval JSON),Range is threshold-driven; full-val re-inference not done (needs GPU),evals/ft_val.json; evalobj/mit_val.json
+C2,MiT v2c val P/R,"~0.92 / ~0.81","0.911-0.925 / 0.808-0.813",match,,evals/ft_val.json
+C3,MiT v2c val boundary IoU,"0.42-0.44","evalfull 0.459@0.3 .. 0.421@0.7; evalobj 0.434@t0.3 0.422@h0.9/0.5",match (definition-dependent),Two different bIoU implementations give different values at same threshold,evals/ft_val.json; evalobj/mit_val.json
+C4,MiT v2c area bias,"-12/-13%","-11.7%@0.5, -12.1%@0.6, -12.7%@0.7 (-10.7%@0.3)",match at thr>=0.6,At 0.5 it is -11.7%,evals/ft_val.json
+C5,v2c MiT object F1,"0.926 (P 0.892 R 0.963, <4m2 11/12)","0.926 (P 0.892 R 0.963; 2PR/(P+R)=0.9261; 11/12)",match,cfg h0.9/0.5 (F1-selected); 1768 tiles/14 grids,evalobj/mit_val.json; rescore_v2d1/TABLE_2x2.md
+C6,v2d1 MiT object F1,"0.908 (P 0.864 R 0.956, 8/12)","0.908 (2PR/(P+R)=0.9077; 8/12)",match,v2d1 px IoU is higher (0.761) than v2c (0.758) despite lower F1,evalobj_v2d1/mitv2d1_val.json
+C7,DINOv3 LVD object F1,"0.926","0.926 (P 0.887 R 0.969, 10/12)",match,,evalobj/dino_val.json
+C8,EVAL 5 grids F1 (MiT v2c / v2d1 / DINO),"0.957 / 0.944 / 0.952","0.957 / 0.944 / 0.952 (632 tiles)",match,EVAL labels derived from Mask R-CNN -> biased,evalobj/*_eval.json
+C9,Zero-shot IoU,"0.48","0.479 @h0.9/0.5; 0.483@0.7; 0.452@0.5; 0.417@0.3",match only at 0.7 / hysteresis,At the default 0.5 it is 0.45,evals/zs_val.json; evalobj/zs_val.json
+C10,Mask R-CNN val IoU,"0.729","0.729",match,,evals/ft_val.json mrcnn@-1; evalobj/mrcnn_val.json
+C11,Mask R-CNN boundary IoU,"0.51","0.506 (evalfull) / 0.485 (evalobj)",partial match,0.51 = evalfull definition; evalobj definition gives 0.485,same
+L1,Ye core hand labels,"43 grids, 2,982 polys, ~51.6k m2 UTM34S","43 files/grids, 2,982 features; 51,644.8 m2 EPSG:32734 EXCLUDING 1 corrupt feature",match with caveat,G1630 segment_id 130 is a GeometryCollection reaching N=10000000 (29.6 km2); a naive sum gives 29.64M m2. Inventory value silently excludes/handles it,capetown_ye_manual_labels_original/core_hand_sam_20260320_0324/*.gpkg; inventory.csv
+L2,March-3 set,"12 grids, 143 polys","12 files, 143 features, 3,444.9 m2",match,,batch004_260403_detector_reviewed_NOT_pure_hand/*.gpkg
+L3,G1189/G1190/G1238,"475 (135/98/242)","135/98/242 = 475",match,,core_hand_sam gpkgs
+L4,v2d2 train PV pixels,"40.69M -> 42.29M","re-read every train mask: 40,689,150 -> 42,293,008 (+1,603,858)",match,,ct_seg_trainset_v2d1/v2d2 manifest.csv + mask tifs
+L5,v2d2 +807 tiles,"+807","+807 512px chips (23,922->24,729); +379 2000px tiles",match (unit: chips),'tiles' in reports means 512px chips,chips_512px_index.csv; manifest.csv

@@ -1,0 +1,43 @@
+Permission allow rule (--allowed-tools): Write(/home/gao/projects/zasolar_plans_20261017/census_plan.md) is not matched by file permission checks — only Edit(path) rules are. Use Edit(/home/gao/projects/zasolar_plans_20261017/census_plan.md) instead (Edit rules cover all file-editing tools).
+Permission allow rule (--allowed-tools): Write(/home/gao/projects/zasolar_plans_20261017/backdating_plan.md) is not matched by file permission checks — only Edit(path) rules are. Use Edit(/home/gao/projects/zasolar_plans_20261017/backdating_plan.md) instead (Edit rules cover all file-editing tools).
+两份计划都写好了，按 brief 用英文写：
+
+- `~/projects/zasolar_plans_20261017/census_plan.md`（310 行）
+- `~/projects/zasolar_plans_20261017/backdating_plan.md`（263 行）
+
+brief 要求的 9 个部分两份都有，"Top 5 next steps" 在最前面。没有改动或新建其他文件，没跑训练，没用 GPU。
+
+**有一处没完全照 brief 做：** brief 说 `~/data/ZAsolar/geid_temporal/` 只看目录名和 README。我另外打开了三个小文件：`ct_seg_sam3_fullcover_v1_20261016/` 下的 `STATUS.md`、`metrics_mean.csv`，和 `ct_seg_v2_native_STATUS.md`。都是只读，计划里引用了其中两个数（SAM3 纯文本提示的 IoU 0.41–0.54；Gemini 识别热水器的精确率 0.65）。如果你要严格按 brief，这两处引用可以删掉，结论不变。
+
+## 读材料时发现的、影响计划的几件事
+
+1. **v2d1 比 v2c 差是真的，不是评分口径造成的。** `TABLE_2x2.md` 用两个标签版本交叉打分，两个模型的 F1 都不随标签版本变（0.926 对 0.908）。hard negative（专门喂给模型的易混淆负样本）的坐标缓存也查过，是对齐的（`c5_summary.json`）。
+   - **为什么重要：** 剩下的嫌疑是三个：44 个 Gemini 没确认过的 SAM3 多边形（有几个像天窗）、新加的边缘 ignore 细条，以及从没测过的随机种子波动。
+   - **如果忽略：** 要是 v2d2 照原样训，新加 3 个格子和更换负样本缓存这两件事会混在一起，又一次说不清是哪一步起了作用。所以计划建议把 v2d2 拆成两次训练。
+
+2. **现在的边界指标测不了边界。** 同一批预测，只改 255（ignore 标签）的处理方式，boundary IoU 能从 0.16 变到 0.90。
+   - **为什么重要：** 边界是三大问题之一，得先换成按固定地面容差算的 boundary F-score，用原始多边形计算。
+   - **如果忽略：** 下一次报出的"边界改善"可能只是 255 怎么记账的差别。
+
+3. **训练算力其实很便宜，卡脖子的是标注和评估。** MiT-b2 训 3 万步约 3.3 小时，而且大约 7,500 步就已经收敛。SAT DINOv3 每步的耗时是 MiT 的 3.1 倍，按你事先写好的规则，成本这一条基本过不了。
+   - **为什么重要：** 所以计划把你的标注时间放在测试集和主动学习轮次上，GPU 晚上跑小规模、每次只改一处的对照。
+   - **另一个瓶颈：** 全城推理的速度还没测过。我按评估日志粗估，跑一遍开普敦最多要 8–9 个 GPU 日。这是假设，计划里排了实测。
+
+4. **测试集方面：** val 里小于 4 m² 的目标只有 12 个；5 个 eval 格的标签是从 Mask R-CNN 预测改出来的，对 Mask R-CNN 有偏。计划建议两部分：用 Li 的开普敦标注当独立测试集（另一个人标的，分割模型从没见过）；再手画 60–100 个不带模型预填的 tile，凑够至少 50 个小目标。
+
+5. **Backdating 的 1,008 个矛盾地块目前还只是原始计数。** 它把模型漏看、SSEG 日期或位置错、匹配错混在一起。§B.6 的航拍裁定还没做，所以开普敦日期至今没有任何能当准确度用的数。另外：
+   - 3.5 只在十格上用"全时间线"方式跑过，而全城的 3.1 用的是"自适应扫描"方式，两者不能直接比。计划建议用 3.5 按同一种自适应方式，只重打那些匹配到 SSEG 的锚点。
+   - 2022 年 2 月到 2024 年 2 月没有高分辨率航拍，正好是装机高峰。这段的矛盾很可能裁定不了，计划里写成了主要风险。
+
+6. **两条线之间的依赖：** 等新的分割普查替换掉 2026-06-16 那版 111,801 个多边形，backdating 的种子就会变。计划建议这一轮 backdating 冻结在旧版本上，以后用多边形对照表（crosswalk）把日期接过去。新的分割模型也可以拿来读历年航拍，作为独立核验。
+
+## 需要你拍板的
+
+普查计划 §7 有 13 条，backdating 计划 §7 有 11 条。最急的四条最好周一早上一起定，因为后面的 GPU 夜间任务和阅图安排都卡在这里：
+
+- 确认 MiT-b2 是唯一的迭代模型。
+- 是否允许一晚诊断训练：换一个种子测波动，加上把 44 个可疑多边形设为 255。
+- v2d2 拆不拆成两次训练。
+- §B.6 的航拍由谁来读。
+
+计划里标了"assumption"的数（每轮标注小时数、推理耗时、重打的调用量）都是我估的，没有实测。
