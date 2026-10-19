@@ -8,8 +8,9 @@ the same G16 save convention (uint8 COG, ZSTD level 15, predictor 2, 256 blocks,
 avg2 = (pv_convnext + pv_b2)/2 is recomputed downstream from the saved per-model uint8 maps; --save-avg also
 writes <out>/avg2/{pv,swh}/<tile>.tif (uint8 round of the mean of the two uint8 maps).
 
-Resumable: a tile is skipped only when every file it should produce exists; files are written to *.tmp and
-renamed, so a crash never leaves a half-written COG under the final name. Never overwrites an existing output.
+Resumable: a tile is skipped only when every file it should produce exists; files are written to a unique temp file and
+published with os.link, so a crash never leaves a half-written COG under the final name and an existing output
+is never replaced, even by a concurrent run.
 Score/save only: no thresholding, merging or keep/drop here.
 """
 import argparse, hashlib, json, os, sys, time
@@ -45,16 +46,46 @@ def out_paths(out, tile, models, save_avg):
 
 
 def save_cog(path, a, profile_src):
-    import rasterio
+    """Write a uint8 COG to a unique temp file, then publish with os.link (fails if the target exists),
+    so concurrent writers or reruns can never replace an existing output."""
+    import tempfile, rasterio
+    path = Path(path)
     if path.exists():
         raise FileExistsError(f'refusing to overwrite {path}')
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix('.tif.tmp')
-    with rasterio.open(tmp, 'w', driver='COG', width=a.shape[1], height=a.shape[0], count=1, dtype='uint8',
-                       crs=profile_src.crs, transform=profile_src.transform, COMPRESS='ZSTD', LEVEL=15,
-                       PREDICTOR=2, BLOCKSIZE=256, OVERVIEWS='NONE') as d:
-        d.write(a, 1)
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent); os.close(fd)
+    try:
+        with rasterio.open(tmp, 'w', driver='COG', width=a.shape[1], height=a.shape[0], count=1, dtype='uint8',
+                           crs=profile_src.crs, transform=profile_src.transform, COMPRESS='ZSTD', LEVEL=15,
+                           PREDICTOR=2, BLOCKSIZE=256, OVERVIEWS='NONE') as d:
+            d.write(a, 1)
+        os.link(tmp, path)  # atomic, raises FileExistsError if another writer published first
+    finally:
+        os.unlink(tmp)  # our own temp name only
+
+
+def process_tile(tile, models, out, save_avg, prob_fn):
+    """Infer one tile and write every missing output. prob_fn(model, x) -> prob [3,H,W] in [0,1].
+    Returns the number of files written (0 = tile already complete)."""
+    import numpy as np, rasterio
+    paths = out_paths(out, tile, models, save_avg)
+    if all(p.exists() for p in paths.values()):
+        return 0
+    with rasterio.open(tile) as src:
+        x = src.read([1, 2, 3]).astype(np.float32)
+        q = {}
+        for name, m in models.items():
+            prob = prob_fn(m, x)
+            for c, k in CLASS_IDX.items():
+                q[(name, c)] = to_u8(prob[k])
+        if save_avg:
+            for c in CLASS_IDX:
+                q[('avg2', c)] = avg_u8(q[('convnext_t_s0', c)], q[('mit_b2_s2', c)])
+        n = 0
+        for key, p in paths.items():
+            if not p.exists():
+                save_cog(p, q[key], src); n += 1
+    return n
 
 
 def sliding_probs(model, x, device, norm):
@@ -106,24 +137,15 @@ def main(argv=None):
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
     log = open(out / 'infer_log_v1.csv', 'a')
     t0 = time.time(); n = skipped = 0
+
+    def prob_fn(m, x):
+        with torch.inference_mode():
+            return sliding_probs(m, torch.from_numpy(x), a.device, pc.norm)
+
     for t in tiles:
-        paths = out_paths(out, t, models, a.save_avg)
-        if all(p.exists() for p in paths.values()):
-            skipped += 1; continue
         ts = time.time()
-        with rasterio.open(t) as src, torch.inference_mode():
-            x = torch.from_numpy(src.read([1, 2, 3]).astype(np.float32))
-            q = {}
-            for name, m in models.items():
-                prob = sliding_probs(m, x, a.device, pc.norm)
-                for c, k in CLASS_IDX.items():
-                    q[(name, c)] = to_u8(prob[k])
-            if a.save_avg:
-                for c in CLASS_IDX:
-                    q[('avg2', c)] = avg_u8(q[('convnext_t_s0', c)], q[('mit_b2_s2', c)])
-            for key, p in paths.items():
-                if not p.exists():
-                    save_cog(p, q[key], src)
+        if process_tile(t, models, out, a.save_avg, prob_fn) == 0:
+            skipped += 1; continue
         n += 1
         log.write(f'{t},{time.time() - ts:.3f},{time.strftime("%F %T %Z")}\n'); log.flush()
     el = time.time() - t0
