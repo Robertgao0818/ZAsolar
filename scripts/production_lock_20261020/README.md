@@ -30,5 +30,5 @@ python3 scripts/production_lock_20261020/citywide_infer/ct_city_infer_v2.py infe
 # merge stage: NOT reviewed yet (refuses to run without --allow-unreviewed-merge); run on rog after infer.
 ```
 `--ckpt-root` must hold `convnext_t_s0/` and `mit_b2_s2/`, each with `best_objf1.pt` (md5-checked) and `config.json`.
-Setup: `bash scripts/production_lock_20261020/citywide_infer/pod_setup.sh` (checks torch sees the GPU arch, e.g. sm_120).
+Setup: `bash scripts/production_lock_20261020/citywide_infer/pod_setup.sh` (venv /workspace/venv via uv, Python 3.12, torch 2.11.0+cu128 and rog-pinned libs; asserts sm_120 + bf16 matmul + GDAL COG). Run with `/workspace/venv/bin/python`.
 Smoke: same infer command with `--limit 100 --out /workspace/out_smoke`.
