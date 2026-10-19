@@ -335,9 +335,10 @@ def main(argv=None):
             with torch.inference_mode():
                 return sliding_probs(models[name], torch.from_numpy(x), a.device, norm)
         if a.follow or a.ready_file:
+            ready = read_ready(a.ready_file) if a.ready_file else None
             res = follow_infer(tiles, a.tile_dir, out, prob_fn, ready_file=a.ready_file, poll_s=a.poll_s if a.follow else 0,
                                writers=a.writers, log=log) if a.follow else run_infer(
-                [t for t in tiles if t in read_ready(a.ready_file)], a.tile_dir, out, prob_fn, writers=a.writers, log=log)
+                [t for t in tiles if t in ready], a.tile_dir, out, prob_fn, writers=a.writers, log=log)
         else:
             res = run_infer(tiles, a.tile_dir, out, prob_fn, writers=a.writers, log=log)
         update_done_manifest(tiles, out)
