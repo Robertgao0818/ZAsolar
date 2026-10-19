@@ -27,7 +27,8 @@ Weights and tiles are NOT in git; copy them to the pod separately (tile list: ~/
 ```
 python3 scripts/production_lock_20261020/citywide_infer/ct_city_infer_v2.py infer --tiles-csv seg_tiles_kept_plus_qa_v1.csv \
     --tile-dir /workspace/tiles --ckpt-root /workspace/ckpt --out /workspace/out --writers 4
-python3 scripts/production_lock_20261020/citywide_infer/ct_city_infer_v2.py merge --tiles-csv seg_tiles_kept_plus_qa_v1.csv --out /workspace/out --workers 4
+# merge stage: NOT reviewed yet (refuses to run without --allow-unreviewed-merge); run on rog after infer.
 ```
 `--ckpt-root` must hold `convnext_t_s0/` and `mit_b2_s2/`, each with `best_objf1.pt` (md5-checked) and `config.json`.
-Needs torch, transformers, rasterio, scipy, geopandas, shapely, pandas.
+Setup: `bash scripts/production_lock_20261020/citywide_infer/pod_setup.sh` (checks torch sees the GPU arch, e.g. sm_120).
+Smoke: same infer command with `--limit 100 --out /workspace/out_smoke`.

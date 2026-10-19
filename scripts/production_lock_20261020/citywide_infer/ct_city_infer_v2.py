@@ -110,8 +110,11 @@ def load_models(ckpt_root, device):
             for b in iter(lambda: f.read(1 << 24), b''): h.update(b)
         assert h.hexdigest() == md5, f'md5 mismatch {ck}'
         cfg = json.loads((ck.parent / 'config.json').read_text())['args']
-        m = training.build_model(arch, init=None, allow_mscan_download=False, pretrained_convnext=False,
-                                 upernet_ch=int(cfg.get('upernet_ch', 512)), drop_path=float(cfg.get('drop_path', 0.3)))
+        if arch == 'mit_b2':  # architecture only; build_model('mit_b2') would load the DS3M init from ~/capetown_eval
+            m = training.SegformerForSemanticSegmentation(training.mit_config(training.B2_DEPTHS))
+        else:
+            m = training.build_model(arch, init=None, allow_mscan_download=False, pretrained_convnext=False,
+                                     upernet_ch=int(cfg.get('upernet_ch', 512)), drop_path=float(cfg.get('drop_path', 0.3)))
         m.load_state_dict(training.extract_state_dict(torch.load(ck, map_location='cpu', weights_only=True)), strict=True)
         models[name] = m.to(device).eval()
     return models, training.norm
@@ -277,7 +280,7 @@ def main(argv=None):
         a.add_argument('--tiles-csv', required=True); a.add_argument('--out', required=True); a.add_argument('--limit', type=int, default=0)
     a1.add_argument('--tile-dir', required=True); a1.add_argument('--ckpt-root', required=True)
     a1.add_argument('--device', default='cuda', choices=['cuda', 'cpu']); a1.add_argument('--writers', type=int, default=4)
-    a2.add_argument('--workers', type=int, default=4)
+    a2.add_argument('--workers', type=int, default=4); a2.add_argument('--allow-unreviewed-merge', action='store_true')
     a = ap.parse_args(argv)
     tiles = read_tile_list(a.tiles_csv)
     if a.limit: tiles = tiles[:a.limit]
@@ -292,6 +295,11 @@ def main(argv=None):
                 return sliding_probs(models[name], torch.from_numpy(x), a.device, norm)
         res = run_infer(tiles, a.tile_dir, out, prob_fn, writers=a.writers, log=log)
     else:
+        if not a.allow_unreviewed_merge:
+            raise SystemExit('merge stage is NOT reviewed yet (Codex r3: block-halo ownership can double-count long objects); '
+                             'run only infer on the pod. --allow-unreviewed-merge for development only.')
+        if a.limit:
+            raise SystemExit('merge --limit would write partial blocks into the real output; not allowed')
         res = run_merge(tiles, out, workers=a.workers)
     log.write(f'END,{a.stage},{json.dumps(res)},{time.strftime("%F %T %Z")}\n'); log.flush()
     print(json.dumps(res), flush=True)
