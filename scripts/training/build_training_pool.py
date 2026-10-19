@@ -30,10 +30,10 @@ label_source derivation
 -----------------------
 The discovered annotation gpkgs do not carry a ``label_source`` column; they
 carry a per-polygon ``source`` column (or none). We derive ``label_source``
-from ``source`` using the same enum mapping as the production builder
+from ``source`` using the production builder
 ``core.training.positive_sources._ct_source_to_label_source`` (extracted
 2026-06-12 from build_unified_reviewall), **extended and intentionally
-DIVERGENT** to cover all observed values across both regions:
+DIVERGENT** on the cases below.
 
   DIVERGENCE (do NOT unify — verified 2026-06-12 architecture review step 8):
   this pool builder is fail-closed (unknown / empty / google_earth source →
@@ -44,6 +44,10 @@ DIVERGENT** to cover all observed values across both regions:
   schema-aware column-absent defaults, a responsibility the train-loader
   partitions into ``_load_ct_grid_annotations`` instead. The two derivations
   have different output domains by design and are kept separate.
+  Owner decision 2026-10-15 additionally moved ``sam_fn_marker`` /
+  ``sam_fn_review`` to trusted ``human_manual_sam_assisted`` in the detector
+  loader. This fork still returns ``sam_added_true_fn`` so an existing pool
+  manifest is not silently rebucketed; rebuild the pool before unifying.
 
 extended to cover all observed values across both regions:
 
@@ -137,9 +141,11 @@ def _source_to_label_source(src, schema_type: str, has_source_column: bool) -> s
 
     Returns None when provenance cannot be determined (→ fail-closed untrusted).
 
-    Critical distinction (matches the known ``source`` values of
-    core.training.positive_sources._ct_source_to_label_source, but diverges on
-    the unknown/empty/google_earth tail — see module docstring):
+    Critical distinction (see module docstring). Known CT values match
+    ``_ct_source_to_label_source`` except ``sam_fn_marker`` / ``sam_fn_review``
+    (this fork stays ``sam_added_true_fn``; the detector loader maps them to
+    trusted ``human_manual_sam_assisted`` as of owner decision 2026-10-15)
+    and the unknown/empty/google_earth tail:
       - ``source`` column PRESENT but null  → V3-C accepted reviewed prediction
         → ``reviewed_prediction`` (untrusted). Many CT batch003/004 ``_SAM2_``
         files carry a null ``source`` column for this reason.
@@ -162,6 +168,8 @@ def _source_to_label_source(src, schema_type: str, has_source_column: bool) -> s
         return "reviewed_prediction"
     s = str(src).lower().strip()
     if s in ("sam_fn_marker", "sam_fn_review"):
+        # Detector loader: human_manual_sam_assisted (owner 2026-10-15).
+        # Kept here so pool manifests are not silently rebucketed.
         return "sam_added_true_fn"
     if s == "sam2":
         return "human_manual_sam_assisted"

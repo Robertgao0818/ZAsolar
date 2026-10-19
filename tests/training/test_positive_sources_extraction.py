@@ -36,8 +36,10 @@ def test_ct_source_to_label_source_known_values():
     f = psrc._ct_source_to_label_source
     assert f(None) == "reviewed_prediction"
     assert f(float("nan")) == "reviewed_prediction"
-    assert f("sam_fn_marker") == "sam_added_true_fn"
-    assert f("sam_fn_review") == "sam_added_true_fn"
+    # Owner decision 2026-10-15: human-confirmed, trusted Class A.
+    assert f("sam_fn_marker") == "human_manual_sam_assisted"
+    assert f("sam_fn_review") == "human_manual_sam_assisted"
+    assert f(" SAM_FN_Review ") == "human_manual_sam_assisted"
     assert f("sam2") == "human_manual_sam_assisted"
     assert f("reviewed_prediction") == "reviewed_prediction"
     assert f("human_manual_sam_assisted") == "human_manual_sam_assisted"
@@ -117,10 +119,15 @@ def test_build_training_pool_fork_is_divergent_by_design():
     assert tp_f(None, "v4_reviewed", False) == "reviewed_prediction"
     assert tp_f(None, "other_schema", False) is None
 
-    # shared/known values still agree (the overlap that keeps them recognisable).
-    for v in ("sam2", "reviewed_prediction", "human_manual_sam_assisted",
-              "sam_fn_marker", "sam_fn_review"):
+    # shared/known values still agree, except sam_fn_* (owner 2026-10-15):
+    # the detector loader trusts them; this pool fork still returns
+    # sam_added_true_fn so existing manifests are not silently rebucketed.
+    for v in ("sam2", "reviewed_prediction", "human_manual_sam_assisted"):
         assert tp_f(v, "sam2", True) == ct_f(v)
+    assert ct_f("sam_fn_marker") == "human_manual_sam_assisted"
+    assert ct_f("sam_fn_review") == "human_manual_sam_assisted"
+    assert tp_f("sam_fn_marker", "sam2", True) == "sam_added_true_fn"
+    assert tp_f("sam_fn_review", "sam2", True) == "sam_added_true_fn"
 
 
 # ── 5. _src_rel repo-relativisation ────────────────────────────────────────
