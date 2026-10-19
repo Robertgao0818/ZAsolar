@@ -18,6 +18,16 @@ not a relocatable package.
 | g14_bldg_assoc | ~/capetown_eval/g14_bldg_assoc_v1_20261019 | G14 building association |
 | jhb_union | ~/capetown_eval/jhb_union_v1_20261019 | Joburg union scoring |
 | avg2_bench | ~/capetown_eval/avg2_bench_v1_20261020 | rog 4070 avg2 timing benchmark |
-| citywide_infer | new | CT citywide inference save step: per model PV **and SWH** uint8 COGs (v5) |
+| citywide_infer | new | `ct_city_infer_v1.py`: first PV+SWH save step (ZSTD15, superseded, kept). `ct_city_infer_v2.py`: **production pod script** — `infer` (convnext_t_s0 + mit_b2_s2, PV+SWH uint8 COG ZSTD3 PREDICTOR2, writer processes, resumable) and `merge` (avg2 + h0.9_0.5 + A3 per 1 km block with 1-tile halo). `train2_v2e.py` = pinned model source (md5 961e2e8e…). |
 
 Tests: `python3 -m pytest tests/production_lock` and `cd scripts/production_lock_20261020/ct_xtile_merge && python3 -m pytest tests`.
+
+## Pod run (ct_city_infer_v2.py)
+Weights and tiles are NOT in git; copy them to the pod separately (tile list: ~/capetown_eval/ct_avg2_upload_v1_20261020/files_v1.txt).
+```
+python3 scripts/production_lock_20261020/citywide_infer/ct_city_infer_v2.py infer --tiles-csv seg_tiles_kept_plus_qa_v1.csv \
+    --tile-dir /workspace/tiles --ckpt-root /workspace/ckpt --out /workspace/out --writers 4
+python3 scripts/production_lock_20261020/citywide_infer/ct_city_infer_v2.py merge --tiles-csv seg_tiles_kept_plus_qa_v1.csv --out /workspace/out --workers 4
+```
+`--ckpt-root` must hold `convnext_t_s0/` and `mit_b2_s2/`, each with `best_objf1.pt` (md5-checked) and `config.json`.
+Needs torch, transformers, rasterio, scipy, geopandas, shapely, pandas.
