@@ -204,13 +204,15 @@ def run_infer(tiles, tile_dir, out, prob_fn, writers=4, max_pending=32, max_cons
 
 
 def update_done_manifest(tiles, out):
-    """Append tiles whose 4 outputs all exist to <out>/done_manifest.txt (once each). Returns #done total."""
+    """Append tiles of THIS list whose 4 outputs all exist to <out>/done_manifest.txt (once each).
+    Returns how many tiles of this list are complete, re-checked on disk (the manifest is a record, not the truth)."""
     mf = Path(out) / 'done_manifest.txt'
     have = set(mf.read_text().split()) if mf.exists() else set()
-    new = [t for t in tiles if t not in have and all(p.exists() for p in tile_outputs(out, t))]
+    complete = [t for t in tiles if all(p.exists() for p in tile_outputs(out, t))]
+    new = [t for t in complete if t not in have]
     if new:
         with open(mf, 'a') as f: f.write(''.join(t + '\n' for t in new))
-    return len(have) + len(new)
+    return len(complete)
 
 
 def read_ready(path):

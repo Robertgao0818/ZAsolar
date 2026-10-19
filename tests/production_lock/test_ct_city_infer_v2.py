@@ -140,3 +140,9 @@ def test_follow_ready_file_and_done_manifest(tmp_path, monkeypatch):
     assert r['done_total'] == 2 and len(calls) == 1
     assert (out / 'done_manifest.txt').read_text().split() == names
     assert M.update_done_manifest(names, out) == 2 and (out / 'done_manifest.txt').read_text().split() == names
+
+
+def test_done_count_ignores_foreign_manifest_entries(tmp_path):
+    out = tmp_path / 'out'; out.mkdir()
+    (out / 'done_manifest.txt').write_text('E9_N9.tif\nE8_N8.tif\n')
+    assert M.update_done_manifest(['E1000_N2000.tif', 'E1100_N2000.tif'], out) == 0
