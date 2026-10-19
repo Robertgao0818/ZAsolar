@@ -149,7 +149,7 @@ def assign_actions(grids: list[dict], state_dir: Path, output_root: Path) -> lis
 
 
 def engine_record(plan: dict) -> dict:
-    return {
+    record = {
         "schema": "durban_citywide_pregate_v1",
         "threshold": plan["threshold"],
         "heads": list(plan["heads"]),
@@ -160,6 +160,14 @@ def engine_record(plan: dict) -> dict:
         "gpu_slots": 1,
         "imagery_layer": plan["imagery_layer"],
     }
+    # Absent unless rescue is on, so a flags-off run still matches an
+    # engine file written before this flag existed.
+    if plan.get("pregate_rescue"):
+        record["pregate_rescue"] = True
+        record["pregate_rescue_min_score"] = float(plan["pregate_rescue_min_score"])
+        record["pregate_rescue_require_edge"] = bool(plan.get("pregate_rescue_require_edge", False))
+        record["pregate_rescue_edge_px"] = int(plan.get("pregate_rescue_edge_px", 2))
+    return record
 
 
 def check_engine(state_dir: Path, engine: dict) -> None:
@@ -278,6 +286,10 @@ def _detect_args(args: argparse.Namespace, heads: tuple[Path, ...], output_root:
         "dry_run_windows": False,
         "stage_timing": True,
         "profile": False,
+        "pregate_rescue": bool(getattr(args, "pregate_rescue", False)),
+        "pregate_rescue_min_score": float(getattr(args, "pregate_rescue_min_score", 0.3)),
+        "pregate_rescue_require_edge": bool(getattr(args, "pregate_rescue_require_edge", False)),
+        "pregate_rescue_edge_px": int(getattr(args, "pregate_rescue_edge_px", 2)),
     }
 
 
@@ -361,7 +373,21 @@ def build_plan(args: argparse.Namespace) -> dict:
         "reading": READING,
         # Default keeps raw_detections.pkl. --reap-raw restores the old delete.
         "reap_raw": bool(getattr(args, "reap_raw", False)),
+        "pregate_rescue": bool(getattr(args, "pregate_rescue", False)),
+        "pregate_rescue_min_score": float(getattr(args, "pregate_rescue_min_score", 0.3)),
+        "pregate_rescue_require_edge": bool(getattr(args, "pregate_rescue_require_edge", False)),
+        "pregate_rescue_edge_px": int(getattr(args, "pregate_rescue_edge_px", 2)),
     }
+    if plan["pregate_rescue"] and not (0.0 <= plan["pregate_rescue_min_score"] <= 1.0):
+        raise ValueError(
+            "pregate rescue min score must be inside [0, 1], "
+            f"got {plan['pregate_rescue_min_score']}"
+        )
+    if plan["pregate_rescue"] and plan["pregate_rescue_edge_px"] < 0:
+        raise ValueError(
+            "pregate rescue edge px must be >= 0, "
+            f"got {plan['pregate_rescue_edge_px']}"
+        )
     plan["detect_args"] = _detect_args(args, heads, output_root)
     plan["engine"] = engine_record(plan)
     return plan
@@ -776,6 +802,17 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--imagery-layer", default=DEFAULT_LAYER)
     parser.add_argument("--pregate-head", action="append", default=None)
     parser.add_argument("--pregate-threshold", type=float, default=TRIAL_THRESHOLD)
+    parser.add_argument("--pregate-rescue", action="store_true",
+                        help="Re-run the detector on a rejected chip when a kept "
+                             "neighbour detection overlaps its window. Off by default.")
+    parser.add_argument("--pregate-rescue-min-score", type=float, default=0.3,
+                        help="Score a kept detection needs to trigger --pregate-rescue.")
+    parser.add_argument("--pregate-rescue-require-edge", action="store_true",
+                        help="With --pregate-rescue, require the kept box to touch "
+                             "the kept chip's valid-window edge on the side facing "
+                             "the rejected chip. Off by default.")
+    parser.add_argument("--pregate-rescue-edge-px", type=int, default=2,
+                        help="Pixel tolerance for --pregate-rescue-require-edge. Default 2.")
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--postproc-config", type=Path, default=DEFAULT_POSTPROC)
     parser.add_argument("--batch-size", type=int, default=8)

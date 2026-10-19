@@ -298,6 +298,10 @@ class StageClock:
     n_kept: int = 0
     n_rejected: int = 0
     n_detections: int = 0
+    # Filled only when --pregate-rescue ran. build_timing_payload omits
+    # them unless include_rescue is set, so a gate-off timing file is unchanged.
+    n_rescued: int = 0
+    rescue_s: float = 0.0
 
 
 def chip_skip_fraction(clock: StageClock) -> float | None:
@@ -311,6 +315,7 @@ def build_timing_payload(
     clock: StageClock,
     settings: PregateSettings | None,
     head_sha256: Sequence[str] = (),
+    include_rescue: bool = False,
 ) -> dict:
     heads = []
     if settings is not None:
@@ -322,7 +327,7 @@ def build_timing_payload(
                 item["sha256"] = head_sha256[index]
             heads.append(item)
     skip = chip_skip_fraction(clock)
-    return {
+    payload = {
         "schema": TIMING_SCHEMA,
         "gate_enabled": settings is not None,
         "threshold": None if settings is None else settings.threshold,
@@ -344,6 +349,12 @@ def build_timing_payload(
         "chip_skip_fraction": skip,
         "note": TIMING_NOTE,
     }
+    # Extra keys only when the rescue pass was requested. Flags-off timing
+    # stays byte-for-byte the same as before this field existed.
+    if include_rescue:
+        payload["n_rescued"] = int(clock.n_rescued)
+        payload["rescue_s"] = float(clock.rescue_s)
+    return payload
 
 
 def timing_path(raw_path: Path) -> Path:
@@ -362,10 +373,23 @@ def write_timing(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def write_decisions(path: Path, rows: Sequence[dict], head_labels: Sequence[str]) -> None:
+def write_decisions(
+    path: Path,
+    rows: Sequence[dict],
+    head_labels: Sequence[str],
+    *,
+    include_rescued: bool = False,
+) -> None:
+    """Write the per-chip gate table.
+
+    ``rescued`` is omitted unless this call asks for it. A run with the
+    rescue flag off must keep the historical column list.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = ["chip_index", "kept", "score_max", *list(head_labels)]
+    if include_rescued:
+        fieldnames.append("rescued")
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()

@@ -55,6 +55,7 @@ from core.inference.raw_artifact import (
     utc_now_iso,
     write_artifact,
 )
+from core.inference.pregate_rescue import rescue_candidates
 from core.inference.presence_pregate import (
     PresencePregate,
     StageClock,
@@ -139,6 +140,23 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pregate-allow-non400", action="store_true",
                    help="Allow the pregate on a chip size other than the 400px "
                         "chips it was trained on.")
+    p.add_argument("--pregate-rescue", action="store_true",
+                   help="After the pregate, re-run the detector on a rejected "
+                        "chip when a kept neighbour detection overlaps its window. "
+                        "Off by default. Does nothing unless a pregate head is set.")
+    p.add_argument("--pregate-rescue-min-score", type=float, default=0.3,
+                   help="Score a kept detection needs before it can trigger "
+                        "--pregate-rescue.")
+    p.add_argument("--pregate-rescue-require-edge", action="store_true",
+                   help="With --pregate-rescue, a kept box triggers a rejected "
+                        "chip only when it also touches that kept chip's "
+                        "valid-window edge on the side facing the rejected "
+                        "chip. Off by default, which keeps the overlap-only "
+                        "trigger.")
+    p.add_argument("--pregate-rescue-edge-px", type=int, default=2,
+                   help="How close, in kept-chip pixels, a box must be to the "
+                        "facing valid-window edge. Used only with "
+                        "--pregate-rescue-require-edge. Default 2.")
     p.add_argument("--stage-timing", action="store_true",
                    help="Write stage_timing.json beside the raw artifact. "
                         "Implied when a pregate head is set.")
@@ -559,6 +577,39 @@ def infer_grid(args: argparse.Namespace, runtime: LoadedRuntime) -> int:
             clock.loop_wall_s = time.perf_counter() - loop_started
             clock.n_detections = n_detections
 
+        # One extra detector pass. Rescued chips are not triggers, so a
+        # rescue cannot nominate a further chip. Flags off: this block
+        # does not run and the artifact is the main-loop result.
+        rescue_requested = bool(getattr(args, "pregate_rescue", False)) and gate is not None
+        if rescue_requested:
+            min_score = float(getattr(args, "pregate_rescue_min_score", 0.3))
+            if not (0.0 <= min_score <= 1.0):
+                raise ValueError(
+                    f"pregate rescue min score must be inside [0, 1], got {min_score}"
+                )
+            edge_px = int(getattr(args, "pregate_rescue_edge_px", 2))
+            if edge_px < 0:
+                raise ValueError(
+                    f"pregate rescue edge px must be >= 0, got {edge_px}"
+                )
+            n_candidates, n_rescued, rescue_s, added = _rescue_rejected_chips(
+                args, dataset, model, device, all_chips, decision_rows, min_score,
+            )
+            n_detections += added
+            if clock is not None:
+                clock.n_rescued = n_rescued
+                clock.rescue_s = rescue_s
+                clock.n_detections = n_detections
+            require_edge = bool(getattr(args, "pregate_rescue_require_edge", False))
+            print(
+                "[detect_direct] pregate_rescue "
+                f"n_candidates={n_candidates} n_rescued={n_rescued} "
+                f"rescue_s={rescue_s:.3f} "
+                f"require_edge={int(require_edge)} edge_px={edge_px}"
+            )
+        elif bool(getattr(args, "pregate_rescue", False)):
+            print("[detect_direct] pregate_rescue ignored: pregate is off")
+
         elapsed = time.time() - t_start
         chips_per_sec = n_chips_done / elapsed if elapsed > 0 else 0.0
         peak_vram_gb = (
@@ -631,13 +682,19 @@ def infer_grid(args: argparse.Namespace, runtime: LoadedRuntime) -> int:
                 clock=clock,
                 settings=pregate_settings,
                 head_sha256=digests,
+                include_rescue=rescue_requested,
             )
             timing_file = timing_path(raw_path)
             write_timing(timing_file, payload)
             print(f"[detect_direct] wrote {timing_file}")
             if pregate_settings is not None:
                 decision_file = decisions_path(raw_path)
-                write_decisions(decision_file, decision_rows, pregate_settings.head_labels)
+                write_decisions(
+                    decision_file,
+                    decision_rows,
+                    pregate_settings.head_labels,
+                    include_rescued=rescue_requested,
+                )
                 print(f"[detect_direct] wrote {decision_file}")
 
         if args.profile:
@@ -674,6 +731,83 @@ def run(args: argparse.Namespace) -> int:
 def _sync_device(device: str) -> None:
     if device == "cuda":
         torch.cuda.synchronize()
+
+
+def _rescue_rejected_chips(args, dataset, model, device, all_chips, decision_rows, min_score):
+    """Re-detect rejected chips whose window a kept detection crosses.
+
+    ``ChipMeta.chip_index`` is the dataset position (see tile_dataset).
+    The read-back checks that, then runs the same ``_process_one_chip``
+    path as the main loop and replaces the empty chip in place.
+    """
+    rejected = [int(row["chip_index"]) for row in decision_rows if int(row["kept"]) == 0]
+    rejected_set = set(rejected)
+    windows = []
+    kept_dets = []
+    position = {}
+    for index, chip in enumerate(all_chips):
+        chip_index = int(chip.chip_index)
+        position[chip_index] = index
+        windows.append({
+            "chip_index": chip_index,
+            "tif_index": chip.source_tif,
+            "window": tuple(int(value) for value in chip.window),
+            "valid_window": tuple(int(value) for value in chip.valid_window),
+        })
+        if chip_index in rejected_set:
+            continue
+        for det in chip.detections:
+            kept_dets.append({
+                "chip_index": chip_index,
+                "score": float(det.score),
+                "box_chip_xyxy": tuple(float(value) for value in det.box_chip_xyxy),
+            })
+    chosen = rescue_candidates(
+        windows, kept_dets, rejected, min_score,
+        require_edge=bool(getattr(args, "pregate_rescue_require_edge", False)),
+        edge_px=int(getattr(args, "pregate_rescue_edge_px", 2)),
+    )
+    ordered = sorted(chosen)
+    done: set[int] = set()
+    rescue_s = 0.0
+    added = 0
+    batch_size = max(1, int(args.batch_size))
+    for start in range(0, len(ordered), batch_size):
+        batch_ids = ordered[start:start + batch_size]
+        tensors = []
+        metas = []
+        for chip_index in batch_ids:
+            tensor, meta = dataset[chip_index]
+            if int(meta.chip_index) != chip_index:
+                raise RuntimeError(
+                    f"chip_index {chip_index} is not the dataset index "
+                    f"(dataset returned {meta.chip_index})"
+                )
+            tensors.append(tensor)
+            metas.append(meta)
+        detected_at = time.perf_counter()
+        with torch.inference_mode():
+            tensors_on_device = [tensor.to(device, non_blocking=True) for tensor in tensors]
+            outputs = model(tensors_on_device)
+        _sync_device(device)
+        rescue_s += time.perf_counter() - detected_at
+        for meta, out in zip(metas, outputs):
+            chip = _process_one_chip(
+                chip_meta=meta,
+                out=out,
+                chip_size=args.chip_size,
+                raw_mask_storage=args.raw_mask_storage,
+                geoai_binary_mask_threshold=(
+                    float(args.mask_threshold) if args.parity_mode == "geoai" else None
+                ),
+            )
+            slot = position[int(meta.chip_index)]
+            added += len(chip.detections) - len(all_chips[slot].detections)
+            all_chips[slot] = chip
+            done.add(int(meta.chip_index))
+    for row in decision_rows:
+        row["rescued"] = 1 if int(row["chip_index"]) in done else 0
+    return len(ordered), len(done), rescue_s, added
 
 
 def _empty_chip(chip_meta) -> Chip:
