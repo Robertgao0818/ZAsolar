@@ -127,3 +127,16 @@ def test_run_merge_writes_gpkg_once_and_resumes(tmp_path):
 def pd_concat(x):
     import pandas as pd
     return pd.concat(x, ignore_index=True)
+
+
+def test_follow_ready_file_and_done_manifest(tmp_path, monkeypatch):
+    names = ['E1000_N2000.tif', 'E1100_N2000.tif']; d = tmp_path / 'tiles'; mk_tiles(d, names)
+    ready = tmp_path / 'READY.txt'; ready.write_text(names[0] + '\n'); out = tmp_path / 'out'
+    calls = []
+    def fake_sleep(s):
+        calls.append(s); ready.write_text('\n'.join(names) + '\n')   # second tile becomes ready
+    monkeypatch.setattr(M.time, 'sleep', fake_sleep)
+    r = M.follow_infer(names, d, out, fake_prob, ready_file=ready, poll_s=1, writers=1)
+    assert r['done_total'] == 2 and len(calls) == 1
+    assert (out / 'done_manifest.txt').read_text().split() == names
+    assert M.update_done_manifest(names, out) == 2 and (out / 'done_manifest.txt').read_text().split() == names

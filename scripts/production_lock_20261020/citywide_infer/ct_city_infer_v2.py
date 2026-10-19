@@ -203,6 +203,37 @@ def run_infer(tiles, tile_dir, out, prob_fn, writers=4, max_pending=32, max_cons
                 s_per_tile=round((time.time() - t0) / max(n, 1), 3))
 
 
+def update_done_manifest(tiles, out):
+    """Append tiles whose 4 outputs all exist to <out>/done_manifest.txt (once each). Returns #done total."""
+    mf = Path(out) / 'done_manifest.txt'
+    have = set(mf.read_text().split()) if mf.exists() else set()
+    new = [t for t in tiles if t not in have and all(p.exists() for p in tile_outputs(out, t))]
+    if new:
+        with open(mf, 'a') as f: f.write(''.join(t + '\n' for t in new))
+    return len(have) + len(new)
+
+
+def read_ready(path):
+    p = Path(path)
+    return {Path(l.strip()).name for l in p.read_text().splitlines() if l.strip()} if p.exists() else set()
+
+
+def follow_infer(tiles, tile_dir, out, prob_fn, ready_file=None, poll_s=30, writers=4, log=None, max_idle_h=6.0):
+    """Process tiles as they become ready (listed in ready_file, if given) until all are done."""
+    total = len(tiles); idle_since = time.time(); passes = []
+    while True:
+        ready = read_ready(ready_file) if ready_file else None
+        now = [t for t in tiles if ready is None or t in ready]
+        r = run_infer(now, tile_dir, out, prob_fn, writers=writers, log=log) if now else dict(done=0)
+        ndone = update_done_manifest(tiles, out); passes.append(r)
+        if log: log.write(f'PASS,{json.dumps(r)},done_total={ndone}/{total},{time.strftime("%F %T %Z")}\n'); log.flush()
+        if ndone >= total: return dict(done_total=ndone, passes=len(passes))
+        if r.get('done'): idle_since = time.time()
+        elif time.time() - idle_since > max_idle_h * 3600:
+            raise RuntimeError(f'no new tiles for {max_idle_h} h; done {ndone}/{total}')
+        time.sleep(poll_s)
+
+
 # ---------------- merge ----------------
 def block_of(name):
     x, y = tile_xy(name)
@@ -285,6 +316,9 @@ def main(argv=None):
         a.add_argument('--tiles-csv', required=True); a.add_argument('--out', required=True); a.add_argument('--limit', type=int, default=0)
     a1.add_argument('--tile-dir', required=True); a1.add_argument('--ckpt-root', required=True)
     a1.add_argument('--device', default='cuda', choices=['cuda', 'cpu']); a1.add_argument('--writers', type=int, default=4)
+    a1.add_argument('--follow', action='store_true', help='keep polling until every listed tile is done')
+    a1.add_argument('--ready-file', default=None, help='only process tiles named in this file (e.g. READY.txt)')
+    a1.add_argument('--poll-s', type=int, default=30)
     a2.add_argument('--workers', type=int, default=4); a2.add_argument('--allow-unreviewed-merge', action='store_true')
     a = ap.parse_args(argv)
     tiles = read_tile_list(a.tiles_csv)
@@ -298,7 +332,13 @@ def main(argv=None):
         def prob_fn(name, x):
             with torch.inference_mode():
                 return sliding_probs(models[name], torch.from_numpy(x), a.device, norm)
-        res = run_infer(tiles, a.tile_dir, out, prob_fn, writers=a.writers, log=log)
+        if a.follow or a.ready_file:
+            res = follow_infer(tiles, a.tile_dir, out, prob_fn, ready_file=a.ready_file, poll_s=a.poll_s if a.follow else 0,
+                               writers=a.writers, log=log) if a.follow else run_infer(
+                [t for t in tiles if t in read_ready(a.ready_file)], a.tile_dir, out, prob_fn, writers=a.writers, log=log)
+        else:
+            res = run_infer(tiles, a.tile_dir, out, prob_fn, writers=a.writers, log=log)
+        update_done_manifest(tiles, out)
     else:
         if not a.allow_unreviewed_merge:
             raise SystemExit('merge stage is NOT reviewed yet (Codex r3: block-halo ownership can double-count long objects); '
