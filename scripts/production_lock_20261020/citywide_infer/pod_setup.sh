@@ -5,8 +5,9 @@ set -euo pipefail
 V=${VENV:-/workspace/venv}; PY=${PYVER:-3.12}
 command -v uv >/dev/null || { python3 -m pip install -q uv || curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$HOME/.local/bin:$PATH"; }
 [ -x "$V/bin/python" ] || uv venv --python "$PY" "$V"
-uv pip install --python "$V/bin/python" --index-url https://download.pytorch.org/whl/cu128 "torch==2.11.0"
-uv pip install --python "$V/bin/python" "timm==1.0.25" "transformers==5.16.1" "segmentation_models_pytorch==0.5.0" \
+# one resolve, torch pinned to the cu128 build (PyPI torch 2.11 is cu13 and needs driver >= 580)
+uv pip install --python "$V/bin/python" --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match \
+  "torch==2.11.0+cu128" "torchvision==0.26.0+cu128" "timm==1.0.25" "transformers==5.16.1" "segmentation_models_pytorch==0.5.0" \
   "rasterio==1.5.1" "scipy==1.18.1" "pandas==3.0.5" "geopandas==1.1.2" "shapely==2.1.2" "pyogrio==0.12.1" "numpy==2.5.2" affine pytest
 "$V/bin/python" - <<'PY'
 import torch, transformers, timm, rasterio, rasterio.env
