@@ -155,6 +155,10 @@ def run_infer(tiles, tile_dir, out, prob_fn, writers=4, max_pending=32, max_cons
     out = Path(out)
     todo = [t for t in tiles if not all(p.exists() for p in tile_outputs(out, t))]
     skipped = len(tiles) - len(todo)
+    absent = [t for t in todo if not (Path(tile_dir) / t).is_file()]
+    if absent:  # tiles not transferred yet: skip now, a later rerun picks them up
+        todo = [t for t in todo if (Path(tile_dir) / t).is_file()]
+        if log: log.write(f'ABSENT,{len(absent)},first={absent[0]}\n'); log.flush()
     ex = cf.ProcessPoolExecutor(max_workers=writers, mp_context=mp.get_context('spawn'))
     rd = cf.ThreadPoolExecutor(max_workers=2)
     sem = threading.BoundedSemaphore(max_pending); pending = set(); lock = threading.Lock(); errors = []
@@ -195,7 +199,8 @@ def run_infer(tiles, tile_dir, out, prob_fn, writers=4, max_pending=32, max_cons
     finally:
         ex.shutdown(wait=True); rd.shutdown(wait=True)
     if errors: raise RuntimeError(f'writer failed: {errors[0]}')
-    return dict(done=n, skipped=skipped, failed=fails, wall_s=round(time.time() - t0, 1))
+    return dict(done=n, skipped=skipped, absent=len(absent), failed=fails, wall_s=round(time.time() - t0, 1),
+                s_per_tile=round((time.time() - t0) / max(n, 1), 3))
 
 
 # ---------------- merge ----------------

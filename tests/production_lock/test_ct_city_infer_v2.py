@@ -41,7 +41,7 @@ def test_infer_writes_pv_swh_lossless_and_resumes(tmp_path):
     names = ['E1000_N2000.tif', 'E1100_N2000.tif', 'E1200_N2000.tif']; mk_tiles(tmp_path / 'tiles', names)
     out = tmp_path / 'out'
     r = M.run_infer(names, tmp_path / 'tiles', out, fake_prob, writers=2, max_pending=3)
-    assert r == dict(done=3, skipped=0, failed=0, wall_s=r['wall_s'])
+    assert (r['done'], r['skipped'], r['absent'], r['failed']) == (3, 0, 0, 0)
     exp = {('convnext_t_s0', 'pv'): 51, ('convnext_t_s0', 'swh'): 153, ('mit_b2_s2', 'pv'): 102, ('mit_b2_s2', 'swh'): 26}
     for (m, c), v in exp.items():
         with rasterio.open(M.out_path(out, m, c, names[0])) as d:
@@ -56,10 +56,21 @@ def test_infer_writes_pv_swh_lossless_and_resumes(tmp_path):
     assert M.out_path(out, 'convnext_t_s0', 'pv', names[0]).stat().st_mtime_ns == keep
 
 
+def test_infer_skips_absent_tiles_then_picks_them_up(tmp_path):
+    names = ['E1000_N2000.tif', 'E1100_N2000.tif']; mk_tiles(tmp_path / 'tiles', names[:1])
+    r = M.run_infer(names, tmp_path / 'tiles', tmp_path / 'out', fake_prob, writers=1)
+    assert (r['done'], r['absent']) == (1, 1)
+    mk_tiles(tmp_path / 'tiles', names[1:])
+    r = M.run_infer(names, tmp_path / 'tiles', tmp_path / 'out', fake_prob, writers=1)
+    assert (r['done'], r['skipped'], r['absent']) == (1, 1, 0)
+
+
 def test_infer_stops_after_two_consecutive_failures(tmp_path):
     names = ['E1000_N2000.tif', 'E1100_N2000.tif', 'E1200_N2000.tif']
+    d = tmp_path / 'tiles'; d.mkdir()
+    for n in names: (d / n).write_bytes(b'not a tif')
     with pytest.raises(RuntimeError, match='2 consecutive'):
-        M.run_infer(names, tmp_path / 'missing', tmp_path / 'out', fake_prob, writers=1)
+        M.run_infer(names, d, tmp_path / 'out', fake_prob, writers=1)
 
 
 def test_publish_never_overwrites(tmp_path):
