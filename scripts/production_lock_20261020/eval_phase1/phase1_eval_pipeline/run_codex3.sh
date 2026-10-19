@@ -1,0 +1,5 @@
+#!/bin/bash
+cd ~/capetown_eval/ds3m_ft/phase1_eval_pipeline_20261018
+while tmux has-session -t p1eval2 2>/dev/null; do sleep 30; done
+codex exec --dangerously-bypass-approvals-and-sandbox -C . "Continue in this directory (read LOG.md, TEST_REPORT_v2.md, ../claude_review_overnight_20261018.md eval section). Never overwrite; new suffix _v3. Same hard rules. Fix review MAJOR M1: rebuild the 300 val tiles that training uses for best_objf1 selection (train2_v2e.py ~1362 vpool.sample(300, random_state=1), same row order as load_bundle) and report metrics in two columns val_sel300 and val_holdout (main), and reconcile val_sel300 pixel IoU against the checkpoint's log.jsonl best step where available. Add per-grid bootstrap 95% CI for object F1@0.5 and pixel IoU (M2). Re-score from saved preds of the GPU run (no new inference needed unless preds missing; if GPU needed check nvidia-smi, <8GB, never PID 374974). Update pod_bundle as pod_bundle_v3/ with MD5SUMS and README_v3.md with exact commands per arch. Write TEST_REPORT_v3.md. Log to LOG.md. Stop after two consecutive failures." > codex_task1c.log 2>&1
+echo CODEX_EXIT $? >> codex_task1c.log
