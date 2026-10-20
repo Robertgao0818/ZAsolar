@@ -48,20 +48,35 @@ def read_bld(paths, box, crs):
         g = pyogrio.read_dataframe(f, bbox=tuple(gpd.GeoSeries([box], crs=crs).to_crs(pyogrio.read_info(f)['crs']).total_bounds), fid_as_index=True)
         if not len(g): continue
         g = g.to_crs(crs); v = shapely.make_valid(g.geometry.values)
-        v = np.array([shapely.union_all([p for p in shapely.get_parts(x) if p.geom_type in ('Polygon', 'MultiPolygon')]) for x in v], dtype=object)
-        ok = ~shapely.is_empty(v) & (shapely.area(v) > 0)
-        geo.extend(v[ok]); key.extend(f'{li}:{fid}' for fid in g.index.values[ok])
+        parts, idx = shapely.get_parts(v, return_index=True)  # each separate polygon part is its own node (G14: dissolve+explode)
+        fids = g.index.values
+        for k, (p, i) in enumerate(zip(parts, idx)):
+            if p.geom_type == 'Polygon' and p.area > 0:
+                geo.append(p); key.append(f'{li}:{fids[i]}:{k - np.searchsorted(idx, i)}')
     if not geo: return gpd.GeoDataFrame({'bld_id': []}, geometry=[], crs=crs)
     geo = np.array(geo, dtype=object); key = np.array(key)
-    from scipy.sparse import coo_matrix
-    from scipy.sparse.csgraph import connected_components
-    a, b = STRtree(geo).query(geo, predicate='intersects')
-    _, lab = connected_components(coo_matrix((np.ones(len(a)), (a, b)), shape=(len(geo), len(geo))), directed=False)
+    lab = components(geo)
     out_g, out_id = [], []
     for c in np.unique(lab):
         m = lab == c
         out_g.append(shapely.union_all(geo[m])); out_id.append('B' + hashlib.sha1('|'.join(sorted(key[m])).encode()).hexdigest()[:20])
     return gpd.GeoDataFrame({'bld_id': out_id}, geometry=out_g, crs=crs)
+
+
+def components(geo, chunk=2000):
+    """Connected components of the 'intersects' graph, queried in chunks into a union-find so pair arrays stay bounded."""
+    par = np.arange(len(geo)); tree = STRtree(geo)
+    def find(x):
+        r = x
+        while par[r] != r: r = par[r]
+        while par[x] != r: par[x], x = r, par[x]
+        return r
+    for s0 in range(0, len(geo), chunk):
+        a, b = tree.query(geo[s0:s0 + chunk], predicate='intersects'); a = a + s0
+        for x, y in zip(a[a < b], b[a < b]):
+            rx, ry = find(x), find(y)
+            if rx != ry: par[max(rx, ry)] = min(rx, ry)
+    return np.array([find(i) for i in range(len(geo))])
 
 
 def buildings_for(paths, need, crs, pad=100.0, max_iter=50):
@@ -93,12 +108,15 @@ def do_block(task):
         ob['geometry'] = shapely.make_valid(ob.geometry.values)
         rp = shapely.point_on_surface(ob.geometry.values); px, py = shapely.get_x(rp), shapely.get_y(rp)
         ob = ob[(px >= x0) & (px < x0 + S) & (py >= y0) & (py < y0 + S)].reset_index(drop=True)
-    res = dict(block=(bx, by), n_obj=len(ob), degenerate=None, buildings=None, pieces=None, unmatched=None, bld_complete=True, n_bld_window=0)
+    res = dict(block=(bx, by), n_obj=len(ob), degenerate=None, buildings=None, pieces=None, unmatched=None, bld_complete=True, n_bld_window=0,
+               obj_area=0.0, alloc_area=0.0, orphan_area=0.0, n_obj_on_bld=0, n_split_obj=0)
     if len(ob):
         ob['area'] = ob.area; dg = ob[~(ob.area > 0)]; ob = ob[ob.area > 0].reset_index(drop=True)
         if len(dg):  # zero-area after make_valid: kept and flagged, never dropped
             res['degenerate'] = gpd.GeoDataFrame({'oid': dg.oid.values, 'kind': 'degenerate', 'area_m2': 0.0, 'obj_area_m2': 0.0,
                                                   'dist_bld_m': np.nan, 'rule_class': 'degenerate'}, geometry=dg.geometry.values, crs=crs)
+            res['unmatched'] = res['degenerate']
+    if len(ob):
         need = shapely.box(*ob.total_bounds)
         bld, ok = buildings_for(a.buildings, need, crs); res['bld_complete'] = ok; res['n_bld_window'] = len(bld)
         if not ok: raise RuntimeError(f'block {task}: building window did not converge; no part written')
@@ -140,8 +158,8 @@ def do_block(task):
             res['unmatched'] = gpd.GeoDataFrame({'oid': ob.oid.values[k], 'kind': np.where(on[k] > 0, 'offroof_residual', 'no_building'),
                                                  'area_m2': orphan[k], 'obj_area_m2': area[k], 'dist_bld_m': d,
                                                  'rule_class': [rule(x, y) for x, y in zip(orphan[k], d)]}, geometry=geo, crs=crs)
-        if res['degenerate'] is not None:
-            res['unmatched'] = res['degenerate'] if res['unmatched'] is None else pd.concat([res['unmatched'], res['degenerate']], ignore_index=True)
+        if res['degenerate'] is not None and res['unmatched'] is not res['degenerate']:
+            res['unmatched'] = pd.concat([res['unmatched'], res['degenerate']], ignore_index=True)
         cov = set(res['pieces'].oid.tolist() if res['pieces'] is not None else []) | set(res['unmatched'].oid.tolist() if res['unmatched'] is not None else [])
         assert len(cov) == res['n_obj'], f'block {task}: {res["n_obj"]} owned objects but {len(cov)} in outputs'
         res['n_obj_on_bld'] = int(res['pieces'].oid.nunique()) if res['pieces'] is not None else 0; res['n_split_obj'] = int(res['pieces'][res['pieces'].split].oid.nunique()) if res['pieces'] is not None else 0

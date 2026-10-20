@@ -1,4 +1,5 @@
 import json, os, sys
+import numpy as np
 import geopandas as gpd, pytest, shapely
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'scripts', 'production_lock_20261020', 'jhb_bldg_agg'))
 import jhb_bldg_agg_v1 as J
@@ -80,3 +81,23 @@ def test_resume_refuses_changed_inputs_and_existing_outputs(tmp_path):
     _w(b, [shapely.box(0, 0, 11, 10)])  # building layer changed in place
     with pytest.raises(SystemExit):
         J.main(['--objects', str(o), '--buildings', str(b), '--dest', str(d2), '--workers', '1'])
+
+
+def test_multipolygon_record_split_into_roofs(tmp_path):
+    b = tmp_path / 'b.gpkg'
+    _w(b, [shapely.MultiPolygon([shapely.box(0, 0, 10, 10), shapely.box(20, 0, 30, 10)])])
+    g = J.read_bld([str(b)], shapely.box(-100, -100, 200, 200), CRS)
+    assert len(g) == 2 and g.bld_id.is_unique
+
+
+def test_degenerate_only_block(tmp_path):
+    b = tmp_path / 'b.gpkg'; o = tmp_path / 'o.gpkg'; d = tmp_path / 'out'
+    _w(b, [shapely.box(0, 0, 10, 10)])
+    _w(o, [shapely.box(2, 2, 4, 4), shapely.Polygon([(1500, 5), (1501, 6), (1502, 7), (1500, 5)])], oid=[1, 2])
+    J.main(['--objects', str(o), '--buildings', str(b), '--dest', str(d), '--workers', '1'])
+    S = json.load(open(d / 'final' / 'summary.json')); assert S['degenerate_n'] == 1 and S['installations_ge2m2'] == 1
+
+
+def test_components_chunked():
+    g = np.array([shapely.box(i, 0, i + 1.5, 1) for i in range(50)] + [shapely.box(100, 0, 101, 1)], dtype=object)
+    lab = J.components(g, chunk=7); assert len(set(lab)) == 2
