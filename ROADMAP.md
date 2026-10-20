@@ -35,14 +35,14 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
-- 2026-10-15: feat(training): CT seg v2c patch (HN->0, 2=swh collectors, per-grid swh_labelled)
-- 2026-10-15: fix(training): resolve native VRT tile paths relative to native_dir
-- 2026-10-15: feat(training): CT seg v2 collector mask (confirmed=2, likely=255) + sam_fn Class A
-- 2026-10-14: feat(training): v2 builder reads aerial_2025_native005 layout (--native-dir)
-- 2026-10-14: feat(training): resolution-agnostic CT seg trainset v2 builder
-- 2026-10-14: test(training): v2 manifest parsing, pixel-size and metric band tests
-- 2026-10-14: feat(training): CT semantic-seg training set v1 builder
-- 2026-10-14: test(training): unit tests for CT seg trainset v1 mask/split helpers
+- 2026-10-20: feat(jhb_bldg_agg): JHB building aggregation (roof = installation, split per building, no 1 m merge; G14 rule), per-block streaming, resumable, auto workers; test
+- 2026-10-20: feat(citywide): auto CPU worker defaults (min(cores-2, mem cap 6 GB / per-worker GB)) for writers, readers, merge workers; --mem-cap-gb override
+- 2026-10-20: fix(merge_city_v3): no full read-back in production (return_gdf), label-raster md5 check between passes, summary written last as completion marker; tests
+- 2026-10-20: fix(merge_city_v3): stream pass 2 (bounded in-flight, batched gpkg append, multi-tile pieces staged on disk + chunked dissolve), pass-1/2 input check, object-count check; tests: both-seed double count, spawn workers, pixelwise vs global reference
+- 2026-10-20: feat(citywide-merge): merge_city_v3 — citywide cross-block A3 join (edge-strip union-find), one owner block per object, area check; tests vs global merge_tiles and v2 per-block
+- 2026-10-20: perf(citywide-infer): --model to run each model in its own process on the shared GPU (main loop single-thread bound); pod_run full2
+- 2026-10-20: perf(citywide-infer): put the tile on the GPU before slicing/normalising (main process was CPU-bound at ~26 cores)
+- 2026-10-19: fix(pod_run): smoke passes only if every listed tile has 4 outputs on disk; read READY once
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
