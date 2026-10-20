@@ -333,7 +333,11 @@ def main(argv=None):
         models, norm = load_models(a.ckpt_root, a.device)
         def prob_fn(name, x):
             with torch.inference_mode():
-                return sliding_probs(models[name], torch.from_numpy(x), a.device, norm)
+                # move the tile to the device first so chip slicing + normalisation run on the GPU (was CPU-bound);
+                # same fp32 ops, same result
+                xt = torch.from_numpy(x)
+                if a.device == 'cuda': xt = xt.pin_memory().to('cuda', non_blocking=True)
+                return sliding_probs(models[name], xt, a.device, norm)
         if a.follow or a.ready_file:
             ready = read_ready(a.ready_file) if a.ready_file else None
             res = follow_infer(tiles, a.tile_dir, out, prob_fn, ready_file=a.ready_file, poll_s=a.poll_s if a.follow else 0,
