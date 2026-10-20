@@ -89,3 +89,19 @@ def test_legacy_merge_keeps_object_in_block_without_tile_corner(tmp_path):
     t = 'G0772_E601962_N7099458.tif'; _write(tmp_path / 'inf', {t: a}, 32735)
     r = C.run_merge([t], tmp_path / 'inf', workers=1, gsd=GSD)
     assert r['objects'] == 1 and r['ok'] >= 1
+
+
+def test_v3_n_blocks_from_object_extent_on_offset_tile(tmp_path):
+    """Codex r2: object E601992-602012 on tile G0772_E601962 spans blocks 601000 and 602000."""
+    a = np.zeros((PX, PX), np.float32); a[8:12, 6:10] = 0.95          # px cols 6..9 -> x 601992..602012
+    t = 'G0772_E601962_N7099458.tif'; _write(tmp_path / 'inf', {t: a}, 32735)
+    G, s = V.run([t], tmp_path / 'inf', tmp_path / 'm', workers=0, gsd=GSD, return_gdf=True)
+    assert len(G) == 1 and int(G.n_blocks.iloc[0]) == 2 and s['n_cross_block'] == 1
+
+
+def test_n_blocks_aligned_matches_tile_blocks():
+    from shapely.geometry import box
+    assert V._n_blocks(box(251010, 6230010, 251090, 6230090)) == 1
+    assert V._n_blocks(box(251900, 6230010, 252000, 6230090)) == 1      # touches block edge only
+    assert V._n_blocks(box(251900, 6230010, 252100, 6230090)) == 2
+    assert V._n_blocks(box(251900, 6230900, 252100, 6231100)) == 4

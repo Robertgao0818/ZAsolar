@@ -145,6 +145,18 @@ def pass2_tile(args):
     return tile, polygons({tile: ids}, {tile: tr}, crs) if ids.any() else None
 
 
+def _n_blocks(geom):
+    """Number of 1 km blocks in which the object has positive area. For 1 km-aligned 100 m tiles (CT) this equals the
+    old count of blocks of the tiles holding its pixels; for offset tiles (JHB CBD G-grids) it is the true count."""
+    from shapely.geometry import box
+    x0, y0, x1, y1 = geom.bounds
+    n = 0
+    for bx in range(int(x0 // BLOCK_M * BLOCK_M), int(np.ceil(x1 / BLOCK_M) * BLOCK_M), BLOCK_M):
+        for by in range(int(y0 // BLOCK_M * BLOCK_M), int(np.ceil(y1 / BLOCK_M) * BLOCK_M), BLOCK_M):
+            if geom.intersection(box(bx, by, bx + BLOCK_M, by + BLOCK_M)).area > 0: n += 1
+    return n
+
+
 def _bounded_map(fn, items, workers, ctx, window):
     """Like map, in order, with at most `window` tasks in flight (bounds memory of returned results)."""
     import concurrent.futures as cf, collections
@@ -201,7 +213,7 @@ def run(tiles, out, dest, workers=4, loader=None, gsd=0.05, log=print, batch=200
         r0 = G.oid.values.astype(np.int64) - 1
         G['n_px'] = npx[r0]; G['max_p'] = P['rmax'][r0]
         G['n_tiles'] = [len(obj_tiles[r]) for r in r0]
-        G['n_blocks'] = [len({C.block_of(t) for t in obj_tiles[r]}) for r in r0]
+        G['n_blocks'] = [_n_blocks(g) for g in G.geometry.values]   # blocks the object itself covers (Codex r2)
         rp = G.geometry.representative_point()
         G['block'] = [f'E{int(x // BLOCK_M * BLOCK_M)}_N{int(y // BLOCK_M * BLOCK_M)}' for x, y in zip(rp.x, rp.y)]
         G['area_m2'] = G.geometry.area
