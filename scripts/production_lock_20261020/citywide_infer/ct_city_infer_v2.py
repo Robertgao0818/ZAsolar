@@ -31,7 +31,8 @@ TRAIN_MD5 = '961e2e8e1a3657d1f72aca27c968f83f'
 CHIP, STRIDE, BS = 640, 480, 2
 COG_OPTS = dict(driver='COG', COMPRESS='ZSTD', LEVEL=3, PREDICTOR=2, BLOCKSIZE=256, OVERVIEWS='NONE')
 TILE_M, BLOCK_M, CFG = 100, 1000, 'h0.9_0.5'
-NAME_RE = re.compile(r'^E(\d+)_N(\d+)$')
+# CT: 'E251300_N6230400'; JHB: grid-prefixed 'G0772_E601162_N7099458' / 'JNB0001_E...'. Same lower-left meaning.
+NAME_RE = re.compile(r'^(?:[A-Z]+\d+_)?E(\d+)_N(\d+)$')
 
 
 # ---------------- shared helpers ----------------
@@ -45,7 +46,8 @@ def read_tile_list(csv_path):
 
 
 def tile_xy(name):
-    """'E251300_N6230400.tif' -> (251300, 6230400) = tile lower-left corner in EPSG:32734 metres."""
+    """'E251300_N6230400.tif' (or 'G0772/G0772_E601162_N7099458.tif') -> (x, y) = tile lower-left corner in the tiles'
+    projected CRS metres (CT EPSG:32734, JHB EPSG:32735; see tiles_crs)."""
     m = NAME_RE.match(Path(name).stem)
     if not m:
         raise ValueError(f'bad tile name {name}')
@@ -246,6 +248,35 @@ def follow_infer(tiles, tile_dir, out, prob_fn, ready_file=None, poll_s=30, writ
 
 
 # ---------------- merge ----------------
+def unique_xy(tiles):
+    """{(x, y): tile}; refuses two tiles with the same corner (e.g. same E/N under two grid prefixes)."""
+    by_xy = {}
+    for t in tiles:
+        k = tile_xy(t)
+        if k in by_xy: raise ValueError(f'two tiles share corner {k}: {by_xy[k]} and {t}')
+        by_xy[k] = t
+    return by_xy
+
+
+def tiles_crs(out, tiles, crs=None, sample=200):
+    """CRS of the inference outputs as 'EPSG:<n>' (CT -> 'EPSG:32734', identical to the old constant). Checks the first,
+    last and an even sample of tiles (both models); all must agree, and must equal `crs` when given."""
+    import rasterio
+    if not tiles: return crs or 'EPSG:32734'
+    idx = sorted({0, len(tiles) - 1, *range(0, len(tiles), max(1, len(tiles) // sample))})
+    seen = set()
+    for i in idx:
+        for m in MODELS:
+            with rasterio.open(out_path(out, m, 'pv', tiles[i])) as s:
+                e = s.crs.to_epsg() if s.crs else None
+            if e is None: raise ValueError(f'{tiles[i]} ({m}): output has no EPSG CRS')
+            seen.add(f'EPSG:{e}')
+    if len(seen) != 1: raise ValueError(f'mixed CRS in outputs: {sorted(seen)}')
+    got = seen.pop()
+    if crs is not None and crs != got: raise ValueError(f'--crs {crs} but outputs are {got}')
+    return got
+
+
 def block_of(name):
     x, y = tile_xy(name)
     return x // BLOCK_M * BLOCK_M, y // BLOCK_M * BLOCK_M
@@ -258,7 +289,7 @@ def load_avg2(out, tile):
     return ((a[0] + a[1]) / 2 / 255.).astype(np.float32)
 
 
-def merge_block(out, block, by_xy, gsd=0.05, halo_tiles=1, crs='EPSG:32734'):
+def merge_block(out, block, by_xy, gsd=0.05, halo_tiles=1, crs='EPSG:32734'):  # crs: run_merge passes tiles_crs()
     """Returns GeoDataFrame of objects owned by this block, or None if the block has no tiles."""
     import numpy as np, geopandas as gpd, pandas as pd
     from rasterio.transform import from_origin
@@ -296,25 +327,25 @@ def merge_block(out, block, by_xy, gsd=0.05, halo_tiles=1, crs='EPSG:32734'):
     return P.reset_index(drop=True)
 
 
-def _merge_one(out, block, by_xy, gsd=0.05):
+def _merge_one(out, block, by_xy, gsd=0.05, crs='EPSG:32734'):
     mdir = Path(out) / 'merge'; g = mdir / f'E{block[0]}_N{block[1]}.gpkg'
     if g.exists(): return 'skip', 0, 0
-    P = merge_block(out, block, by_xy, gsd=gsd)
+    P = merge_block(out, block, by_xy, gsd=gsd, crs=crs)
     if P is None: return 'empty', 0, 0
     publish(g, lambda tmp: P.to_file(tmp, driver='GPKG', layer='objects'), suffix='.gpkg')
     return 'ok', len(P), int(P.halo_cut.sum()) if len(P) else 0
 
 
-def run_merge(tiles, out, workers=4, gsd=0.05):
+def run_merge(tiles, out, workers=4, gsd=0.05, crs=None):
     import concurrent.futures as cf, multiprocessing as mp
     missing = [t for t in tiles if not all(out_path(out, m, 'pv', t).exists() for m in MODELS)]
     if missing:
         raise RuntimeError(f'{len(missing)} tiles lack PV outputs (first {missing[0]}); finish infer first')
-    by_xy = {tile_xy(t): t for t in tiles}
+    by_xy = unique_xy(tiles); crs = tiles_crs(out, tiles, crs)
     blocks = sorted({block_of(t) for t in tiles})
     res = dict(ok=0, skip=0, empty=0, objects=0, halo_cut=0)
     with cf.ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context('spawn')) as ex:
-        for st, n, hc in ex.map(_merge_one, [out] * len(blocks), blocks, [by_xy] * len(blocks), [gsd] * len(blocks)):
+        for st, n, hc in ex.map(_merge_one, [out] * len(blocks), blocks, [by_xy] * len(blocks), [gsd] * len(blocks), [crs] * len(blocks)):
             res[st] += 1; res['objects'] += n; res['halo_cut'] += hc
     return res
 

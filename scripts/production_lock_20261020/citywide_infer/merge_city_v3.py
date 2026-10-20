@@ -126,7 +126,7 @@ def pass2_tile(args):
     from scipy import ndimage
     from rasterio.transform import from_origin
     from xtile_merge import parse_cfg, polygons
-    out, tile, loader, oid_map, cnpx, cmax, shape, lab_md5, gsd = args   # oid_map: int64[nl+1], 0 = drop
+    out, tile, loader, oid_map, cnpx, cmax, shape, lab_md5, gsd, crs = args   # oid_map: int64[nl+1], 0 = drop
     hi, lo = parse_cfg(CFG)
     p = loader(out, tile)
     lab, nl = ndimage.label(p >= lo, S8)
@@ -142,7 +142,7 @@ def pass2_tile(args):
     ids = oid_map[lab]
     x, y = C.tile_xy(tile)
     tr = from_origin(x, y + TILE_M, gsd, gsd)
-    return tile, polygons({tile: ids}, {tile: tr}, 'EPSG:32734') if ids.any() else None
+    return tile, polygons({tile: ids}, {tile: tr}, crs) if ids.any() else None
 
 
 def _bounded_map(fn, items, workers, ctx, window):
@@ -158,7 +158,9 @@ def _bounded_map(fn, items, workers, ctx, window):
         while q: yield q.popleft().result()
 
 
-def run(tiles, out, dest, workers=4, loader=None, gsd=0.05, log=print, batch=2000, return_gdf=False):
+def run(tiles, out, dest, workers=4, loader=None, gsd=0.05, log=print, batch=2000, return_gdf=False, crs=None):
+    """crs: None = read from the inference outputs (C.tiles_crs; CT gives 'EPSG:32734'); a custom loader (tests) without crs
+    keeps the old 'EPSG:32734'."""
     import multiprocessing as mp
     import geopandas as gpd, pandas as pd, pyogrio
     loader = loader or C.load_avg2
@@ -167,7 +169,10 @@ def run(tiles, out, dest, workers=4, loader=None, gsd=0.05, log=print, batch=200
     dest.mkdir(parents=True, exist_ok=True)
     missing = [t for t in tiles if not all(C.out_path(out, m, 'pv', t).exists() for m in C.MODELS)] if loader is C.load_avg2 else []
     if missing: raise RuntimeError(f'{len(missing)} tiles lack PV outputs (first {missing[0]})')
-    t0 = time.time(); ctx = mp.get_context('spawn'); crs = 'EPSG:32734'; px_area = gsd * gsd
+    C.unique_xy(tiles)
+    crs = C.tiles_crs(out, tiles, crs) if loader is C.load_avg2 else (crs or 'EPSG:32734')
+    log(f'crs {crs}')
+    t0 = time.time(); ctx = mp.get_context('spawn'); px_area = gsd * gsd
     res = list(_bounded_map(pass1_tile, [(out, t, loader) for t in tiles], workers, ctx, 64))
     cn = {r[0]: (r[3], r[2], r[5], r[6]) for r in res}   # tile -> (cnpx, cmax, shape, label md5)
     log(f'pass1 {len(res)} tiles {time.time() - t0:.0f}s')
@@ -187,7 +192,7 @@ def run(tiles, out, dest, workers=4, loader=None, gsd=0.05, log=print, batch=200
             r = root[b:b + nl]
             if not keep[r].any(): continue
             c_npx, c_max, shape, h = cn[t]
-            yield (out, t, loader, np.r_[0, np.where(keep[r], r + 1, 0)].astype(np.int64), c_npx, c_max, shape, h, gsd)
+            yield (out, t, loader, np.r_[0, np.where(keep[r], r + 1, 0)].astype(np.int64), c_npx, c_max, shape, h, gsd, crs)
     part = dest / '.objects_v3.partial.gpkg'; stage = dest / '.multi_pieces_v3.partial.gpkg'
     stats = dict(n=0, area=0.0, multi=0, cross=0); blocks = {}
     def finish(G):
@@ -254,9 +259,10 @@ def _md5(p):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--tiles-csv', required=True); ap.add_argument('--out', required=True, help='inference output root')
+    ap.add_argument('--crs', default=None, help="e.g. EPSG:32735; default: read from the outputs (must agree)")
     ap.add_argument('--dest', required=True, help='NEW folder for merge outputs'); ap.add_argument('--workers', default='auto', help="'auto' = min(cores-2, mem cap / 0.6 GB)"); ap.add_argument('--mem-cap-gb', type=float, default=6.0)
     a = ap.parse_args(argv)
-    _, s = run(C.read_tile_list(a.tiles_csv), a.out, a.dest, workers=W.resolve(a.workers, 0.6, a.mem_cap_gb), log=lambda m: print(m, flush=True))
+    _, s = run(C.read_tile_list(a.tiles_csv), a.out, a.dest, workers=W.resolve(a.workers, 0.6, a.mem_cap_gb), log=lambda m: print(m, flush=True), crs=a.crs)
     print(json.dumps(s), flush=True)
 
 
