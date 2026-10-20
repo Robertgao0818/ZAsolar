@@ -14,9 +14,9 @@ changed inputs is refused. Final outputs never overwrite existing files. One par
 (atomic rename) -> resumable; the final pass groups pieces by building id across blocks. summary.json written last.
 
 usage: jhb_bldg_agg_v1.py --objects objects_v3.gpkg --buildings a.gpkg b.gpkg ... --dest NEW_DIR [--workers auto]
-outputs (dest): installations.gpkg (one row per building with PV: bld_id, pv_area_m2 (allocated), clip_area_m2, n_pieces,
+outputs (dest/final/): installations.gpkg (one row per building with PV: bld_id, pv_area_m2 (allocated), clip_area_m2, n_pieces,
 n_objects, installed = pv_area_m2 >= 2), pieces.gpkg (object x building clipped pieces: oid, bld_id, clip_area_m2,
-alloc_area_m2, split), unmatched.gpkg (oid, kind = no_building | offroof_residual, area_m2, rule_class, geometry kept),
+alloc_area_m2, split), unmatched.gpkg (oid, kind = no_building | offroof_residual | degenerate, area_m2, rule_class, geometry kept),
 installations.csv, summary.json."""
 import argparse, hashlib, json, os, sys, time
 from multiprocessing import get_context
@@ -27,7 +27,8 @@ sys.path.insert(0, os.path.join(HERE, '..', 'citywide_infer'))
 import cpu_workers as W  # noqa: E402
 BUF, OFF, THR = 0.5, 0.3, 2.0   # = g14_lib_v1 constants
 PER_WORKER_GB = 1.0
-FINAL = ['pieces.gpkg', 'installations.gpkg', 'unmatched.gpkg', 'installations.csv', 'summary.json']
+MAIN_GB = 1.0  # reserved for the main process (finalize state is O(buildings with PV) small ints/floats)
+FINAL = ['final']  # single directory published by one atomic rename
 G = {}
 
 
@@ -39,15 +40,28 @@ def rule(orphan_area, dist):  # g14_lib_v1.rule with no parcel zoning (JHB has n
 
 
 def read_bld(paths, box, crs):
-    src = []
-    for f in paths:
-        g = gpd.read_file(f, bbox=gpd.GeoSeries([box], crs=crs))
-        if len(g): src.append(g.to_crs(crs)[['geometry']])
-    if not src: return gpd.GeoDataFrame(geometry=[], crs=crs)
-    u = shapely.make_valid(np.concatenate([s.geometry.values for s in src]))
-    u = u[~shapely.is_empty(u)]
-    d = gpd.GeoDataFrame(geometry=[shapely.union_all(u)], crs=crs).explode(index_parts=False).reset_index(drop=True)
-    return d[d.geom_type.isin(['Polygon', 'MultiPolygon']) & (d.area > 0)].reset_index(drop=True)
+    """Source features in box -> buildings = connected components (intersects) of the make_valid'ed union of all layers,
+    each unioned. bld_id = sha1 of the sorted source-feature keys (layer index : fid) of the component: identical from every
+    window that sees the whole component, and distinct for distinct buildings by construction (components are disjoint)."""
+    geo, key = [], []
+    for li, f in enumerate(paths):
+        g = pyogrio.read_dataframe(f, bbox=tuple(gpd.GeoSeries([box], crs=crs).to_crs(pyogrio.read_info(f)['crs']).total_bounds), fid_as_index=True)
+        if not len(g): continue
+        g = g.to_crs(crs); v = shapely.make_valid(g.geometry.values)
+        v = np.array([shapely.union_all([p for p in shapely.get_parts(x) if p.geom_type in ('Polygon', 'MultiPolygon')]) for x in v], dtype=object)
+        ok = ~shapely.is_empty(v) & (shapely.area(v) > 0)
+        geo.extend(v[ok]); key.extend(f'{li}:{fid}' for fid in g.index.values[ok])
+    if not geo: return gpd.GeoDataFrame({'bld_id': []}, geometry=[], crs=crs)
+    geo = np.array(geo, dtype=object); key = np.array(key)
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import connected_components
+    a, b = STRtree(geo).query(geo, predicate='intersects')
+    _, lab = connected_components(coo_matrix((np.ones(len(a)), (a, b)), shape=(len(geo), len(geo))), directed=False)
+    out_g, out_id = [], []
+    for c in np.unique(lab):
+        m = lab == c
+        out_g.append(shapely.union_all(geo[m])); out_id.append('B' + hashlib.sha1('|'.join(sorted(key[m])).encode()).hexdigest()[:20])
+    return gpd.GeoDataFrame({'bld_id': out_id}, geometry=out_g, crs=crs)
 
 
 def buildings_for(paths, need, crs, pad=100.0, max_iter=50):
@@ -61,12 +75,6 @@ def buildings_for(paths, need, crs, pad=100.0, max_iter=50):
         if not edge.any(): return b, True
         win = shapely.box(*shapely.box(*b.total_bounds).union(win).buffer(pad, join_style='mitre').bounds)
     return b, False
-
-
-def bid_of(geoms):
-    """Content id: sha1 of the normalized 1 cm-snapped dissolved footprint -> identical from every block, distinct roofs differ."""
-    g = shapely.normalize(shapely.set_precision(geoms, 0.01))
-    return ['B' + hashlib.sha1(w).hexdigest()[:16] for w in shapely.to_wkb(g)]
 
 
 def file_fp(p):
@@ -85,9 +93,12 @@ def do_block(task):
         ob['geometry'] = shapely.make_valid(ob.geometry.values)
         rp = shapely.point_on_surface(ob.geometry.values); px, py = shapely.get_x(rp), shapely.get_y(rp)
         ob = ob[(px >= x0) & (px < x0 + S) & (py >= y0) & (py < y0 + S)].reset_index(drop=True)
-    res = dict(block=(bx, by), n_obj=len(ob), buildings=None, pieces=None, unmatched=None, bld_complete=True, n_bld_window=0)
+    res = dict(block=(bx, by), n_obj=len(ob), degenerate=None, buildings=None, pieces=None, unmatched=None, bld_complete=True, n_bld_window=0)
     if len(ob):
-        ob['area'] = ob.area; ob = ob[ob.area > 0].reset_index(drop=True)
+        ob['area'] = ob.area; dg = ob[~(ob.area > 0)]; ob = ob[ob.area > 0].reset_index(drop=True)
+        if len(dg):  # zero-area after make_valid: kept and flagged, never dropped
+            res['degenerate'] = gpd.GeoDataFrame({'oid': dg.oid.values, 'kind': 'degenerate', 'area_m2': 0.0, 'obj_area_m2': 0.0,
+                                                  'dist_bld_m': np.nan, 'rule_class': 'degenerate'}, geometry=dg.geometry.values, crs=crs)
         need = shapely.box(*ob.total_bounds)
         bld, ok = buildings_for(a.buildings, need, crs); res['bld_complete'] = ok; res['n_bld_window'] = len(bld)
         if not ok: raise RuntimeError(f'block {task}: building window did not converge; no part written')
@@ -105,11 +116,11 @@ def do_block(task):
         if len(P):
             sumA = P.groupby('o').a.transform('sum').values; o = P.o.values.astype(int)
             P['alloc'] = np.where(offf[o] < OFF, P.a / sumA * area[o], P.a / sumA * on[o])
-            P['bld_id'] = bid_of(bld.geometry.values[P.b.values.astype(int)]); P['oid'] = ob.oid.values[o]
+            P['bld_id'] = bld.bld_id.values[P.b.values.astype(int)]; P['oid'] = ob.oid.values[o]
             P['n_bld_of_obj'] = P.groupby('o').b.transform('nunique').values
             P['split'] = P.n_bld_of_obj >= 2
-            ub = np.unique(P.b.values.astype(int)); bids = bid_of(bld.geometry.values[ub])
-            res['buildings'] = gpd.GeoDataFrame({'bld_id': bids, 'bld_area_m2': shapely.area(bld.geometry.values[ub])}, geometry=bld.geometry.values[ub], crs=crs)
+            ub = np.unique(P.b.values.astype(int))
+            res['buildings'] = gpd.GeoDataFrame({'bld_id': bld.bld_id.values[ub], 'bld_area_m2': shapely.area(bld.geometry.values[ub])}, geometry=bld.geometry.values[ub], crs=crs)
             res['pieces'] = gpd.GeoDataFrame(P[['oid', 'bld_id', 'a', 'alloc', 'n_bld_of_obj', 'split']].rename(columns={'a': 'clip_area_m2', 'alloc': 'alloc_area_m2'}),
                                              geometry=P.geometry.values, crs=crs)
         orphan = np.where(offf < OFF, 0.0, area - on)
@@ -129,6 +140,11 @@ def do_block(task):
             res['unmatched'] = gpd.GeoDataFrame({'oid': ob.oid.values[k], 'kind': np.where(on[k] > 0, 'offroof_residual', 'no_building'),
                                                  'area_m2': orphan[k], 'obj_area_m2': area[k], 'dist_bld_m': d,
                                                  'rule_class': [rule(x, y) for x, y in zip(orphan[k], d)]}, geometry=geo, crs=crs)
+        if res['degenerate'] is not None:
+            res['unmatched'] = res['degenerate'] if res['unmatched'] is None else pd.concat([res['unmatched'], res['degenerate']], ignore_index=True)
+        cov = set(res['pieces'].oid.tolist() if res['pieces'] is not None else []) | set(res['unmatched'].oid.tolist() if res['unmatched'] is not None else [])
+        assert len(cov) == res['n_obj'], f'block {task}: {res["n_obj"]} owned objects but {len(cov)} in outputs'
+        res['n_obj_on_bld'] = int(res['pieces'].oid.nunique()) if res['pieces'] is not None else 0; res['n_split_obj'] = int(res['pieces'][res['pieces'].split].oid.nunique()) if res['pieces'] is not None else 0
         res['obj_area'] = float(area.sum()); res['alloc_area'] = float(P.alloc.sum()) if len(P) else 0.0; res['orphan_area'] = float(orphan.sum())
     pd.to_pickle(res, out + '.tmp'); os.replace(out + '.tmp', out)
     return out, 'done'
@@ -145,7 +161,7 @@ def main(argv=None):
     ap.add_argument('--dest', required=True, help='NEW folder (resume = same dest)'); ap.add_argument('--block', type=float, default=1000.0)
     ap.add_argument('--workers', default='auto'); ap.add_argument('--mem-cap-gb', type=float, default=6.0)
     a = ap.parse_args(argv)
-    if os.path.exists(os.path.join(a.dest, 'summary.json')): sys.exit(f'{a.dest}/summary.json exists: finished run, refusing to overwrite')
+    if os.path.exists(os.path.join(a.dest, 'final')): sys.exit(f'{a.dest}/final exists: finished run, refusing to overwrite')
     os.makedirs(os.path.join(a.dest, 'parts'), exist_ok=True)
     info = pyogrio.read_info(a.objects); crs = info['crs']; x0, y0, x1, y1 = info['total_bounds']
     x0, y0 = np.floor(x0 / a.block) * a.block, np.floor(y0 / a.block) * a.block
@@ -157,7 +173,7 @@ def main(argv=None):
     if os.path.exists(cp):
         if json.load(open(cp)) != cfg: sys.exit('config differs from existing parts: use a new --dest')
     else: json.dump(cfg, open(cp, 'w'), indent=1)
-    nw = W.resolve(a.workers, PER_WORKER_GB, a.mem_cap_gb); t0 = time.time()
+    nw = W.resolve(a.workers, PER_WORKER_GB, max(a.mem_cap_gb - MAIN_GB, PER_WORKER_GB)); t0 = time.time()
     print(f'blocks {len(tasks)} workers {nw}', flush=True)
     if nw <= 1:
         init(a, x0, y0, crs); [do_block(t) for t in tasks]
@@ -173,68 +189,64 @@ def _append(path, df, layer):
 
 
 def finalize(a, tasks, crs, nw, secs):
-    """Streams parts one by one: pieces/unmatched appended to *.tmp.gpkg; per-building stats kept as a small table;
-    building geometry written once per id (consistency-checked by area). Final names appear only via os.replace at the end."""
-    tmp = {n: os.path.join(a.dest, n + '.tmp.gpkg') for n in ['pieces', 'unmatched', 'bld']}
-    for p in tmp.values():
-        if os.path.exists(p): os.remove(p)  # our own unfinished temp files from an interrupted finalize
-    n_obj, oa, aa, ra, seen_oid = 0, 0.0, 0.0, 0.0, set()
-    st, barea, n_split_obj, n_split_pc, n_pc, objs_on = {}, {}, 0, 0, 0, set()
-    um_n = {'no_building': 0, 'offroof_residual': 0}; um_a = {'no_building': 0.0, 'offroof_residual': 0.0}; rc = {}
+    """Streams parts one by one into dest/final.staging/ (our own scratch: removed and rebuilt if a previous finalize was
+    interrupted), then publishes it with ONE atomic rename to dest/final/ (never replaced once present). In-memory state is
+    O(buildings with PV): per building 3 floats/ints (pieces are unique per (object, building), so n_objects == n_pieces)."""
+    import shutil
+    stg = os.path.join(a.dest, 'final.staging'); fin = os.path.join(a.dest, 'final')
+    if os.path.exists(stg): shutil.rmtree(stg)
+    os.makedirs(stg)
+    tp = {n: os.path.join(stg, n + '.gpkg') for n in ['pieces', 'unmatched', 'bld']}
+    n_obj, n_on, n_split_obj, n_pc, n_split_pc, oa, aa, ra = 0, 0, 0, 0, 0, 0.0, 0.0, 0.0
+    st, barea = {}, {}
+    um_n = {'no_building': 0, 'offroof_residual': 0, 'degenerate': 0}; um_a = dict.fromkeys(um_n, 0.0); rc = {}
     for t in tasks:
         r = pd.read_pickle(os.path.join(a.dest, 'parts', f'b_{t[0]}_{t[1]}.pkl')); n_obj += r['n_obj']
         if not r['bld_complete']: raise RuntimeError(f'part {t} has an incomplete building window')
-        if r['n_obj']: oa += r['obj_area']; aa += r['alloc_area']; ra += r['orphan_area']
+        if r['n_obj']: oa += r['obj_area']; aa += r['alloc_area']; ra += r['orphan_area']; n_on += r['n_obj_on_bld']; n_split_obj += r['n_split_obj']
         p = r['pieces']
         if p is not None and len(p):
-            _append(tmp['pieces'], p, 'pieces'); n_pc += len(p); n_split_pc += int(p.split.sum())
-            objs_on.update(p.oid.tolist()); n_split_obj += int(p[p.split].oid.nunique())
-            for b, g in p.groupby('bld_id'):
-                s_ = st.setdefault(b, [0.0, 0.0, 0, set(), 0]); s_[0] += g.alloc_area_m2.sum(); s_[1] += g.clip_area_m2.sum()
-                s_[2] += len(g); s_[3].update(g.oid.tolist()); s_[4] += int(g.split.sum())
+            _append(tp['pieces'], p, 'pieces'); n_pc += len(p); n_split_pc += int(p.split.sum())
+            g = p.groupby('bld_id').agg(al=('alloc_area_m2', 'sum'), cl=('clip_area_m2', 'sum'), n=('oid', 'size'), sp=('split', 'sum'))
+            for b, al, cl, n, sp in g.itertuples():
+                s_ = st.setdefault(b, [0.0, 0.0, 0, 0]); s_[0] += al; s_[1] += cl; s_[2] += n; s_[3] += int(sp)
             B = r['buildings']; new = ~B.bld_id.isin(barea.keys())
             for b, ar in zip(B.bld_id, B.bld_area_m2):
                 if b in barea and abs(barea[b] - ar) > 0.01: raise RuntimeError(f'building {b} differs between blocks')
-                barea[b] = ar
-            if new.any(): _append(tmp['bld'], B[new], 'bld')
+                barea[b] = float(ar)
+            if new.any(): _append(tp['bld'], B[new], 'bld')
         u = r['unmatched']
         if u is not None and len(u):
-            _append(tmp['unmatched'], u, 'unmatched')
+            _append(tp['unmatched'], u, 'unmatched')
             for k in um_n: um_n[k] += int((u.kind == k).sum()); um_a[k] += float(u.area_m2[u.kind == k].sum())
             for k, g in u.groupby('rule_class'): x = rc.setdefault(k, [0, 0.0]); x[0] += len(g); x[1] += float(g.area_m2.sum())
-    src = pyogrio.read_dataframe(a.objects, columns=['oid'], read_geometry=False)
-    assert n_obj == len(src) and src.oid.is_unique, f'object count {n_obj} != input {len(src)} (or oid not unique)'
-    inst = pd.DataFrame([(b, v[0], v[1], v[2], len(v[3]), v[4]) for b, v in st.items()],
-                        columns=['bld_id', 'pv_area_m2', 'clip_area_m2', 'n_pieces', 'n_objects', 'n_split_pieces'])
-    inst['installed'] = inst.pv_area_m2 >= THR
-    # installations layer = building footprint + stats, written in chunks from the bld temp layer
-    ip = os.path.join(a.dest, 'installations.gpkg.tmp.gpkg')
-    if os.path.exists(ip): os.remove(ip)
-    if os.path.exists(tmp['bld']):
-        ib = inst.set_index('bld_id'); nb = pyogrio.read_info(tmp['bld'])['features']
+    n_src = pyogrio.read_info(a.objects)['features']
+    assert n_obj == n_src, f'object count {n_obj} != input {n_src}'
+    assert n_on + um_n['no_building'] + um_n['degenerate'] == n_src, 'objects not fully covered by pieces + unmatched'
+    inst = pd.DataFrame([(b, v[0], v[1], v[2], v[3]) for b, v in st.items()], columns=['bld_id', 'pv_area_m2', 'clip_area_m2', 'n_pieces', 'n_split_pieces'])
+    inst['n_objects'] = inst.n_pieces; inst['installed'] = inst.pv_area_m2 >= THR
+    ip = os.path.join(stg, 'installations.gpkg')
+    if os.path.exists(tp['bld']):
+        ib = inst.set_index('bld_id'); nb = pyogrio.read_info(tp['bld'])['features']; assert nb == len(inst), 'building table / geometry mismatch'
         for k in range(0, nb, 50000):
-            g = pyogrio.read_dataframe(tmp['bld'], skip_features=k, max_features=50000)
-            g = g.join(ib, on='bld_id'); _append(ip, g, 'installations')
-        assert nb == len(inst), 'building table / geometry mismatch'
-    S = dict(objects_in=int(len(src)), objects_area_m2=round(oa, 3), objects_on_any_building=len(objs_on),
+            g = pyogrio.read_dataframe(tp['bld'], skip_features=k, max_features=50000); _append(ip, g.join(ib, on='bld_id'), 'installations')
+        os.remove(tp['bld'])
+    inst.to_csv(os.path.join(stg, 'installations.csv'), index=False)
+    S = dict(objects_in=int(n_src), objects_area_m2=round(oa, 3), objects_on_any_building=n_on,
              objects_split_2plus_buildings=n_split_obj, pieces=n_pc, split_pieces=n_split_pc,
              buildings_with_pv=int(len(inst)), installations_ge2m2=int(inst.installed.sum()),
              installations_ge2m2_area_m2=round(float(inst.pv_area_m2[inst.installed].sum()), 3), alloc_area_m2=round(aa, 3),
              unmatched_no_building_n=um_n['no_building'], unmatched_no_building_area_m2=round(um_a['no_building'], 3),
              offroof_residual_n=um_n['offroof_residual'], offroof_residual_area_m2=round(um_a['offroof_residual'], 3),
+             degenerate_n=um_n['degenerate'],
              unmatched_by_rule_class={k: dict(n=v[0], area_m2=round(v[1], 3)) for k, v in sorted(rc.items())},
              area_check_m2=round(oa - aa - ra, 6), blocks=len(tasks), workers=nw, seconds=round(secs, 1),
              rule=dict(buffer_m=BUF, offroof_frac=OFF, installed_m2=THR, merge_gap_m=0),
              config=json.load(open(os.path.join(a.dest, 'config.json'))))
     assert abs(S['area_check_m2']) < 1e-3 * max(oa, 1), 'area not conserved'
-    for n in FINAL:
-        if os.path.exists(os.path.join(a.dest, n)): sys.exit(f'{n} appeared during run: refusing to overwrite')
-    inst.to_csv(os.path.join(a.dest, 'installations.csv.tmp'), index=False)
-    for src_, n in [(tmp['pieces'], 'pieces.gpkg'), (ip, 'installations.gpkg'), (tmp['unmatched'], 'unmatched.gpkg'),
-                    (os.path.join(a.dest, 'installations.csv.tmp'), 'installations.csv')]:
-        if os.path.exists(src_): os.replace(src_, os.path.join(a.dest, n))
-    if os.path.exists(tmp['bld']): os.remove(tmp['bld'])
-    json.dump(S, open(os.path.join(a.dest, 'summary.json.tmp'), 'w'), indent=1); os.replace(os.path.join(a.dest, 'summary.json.tmp'), os.path.join(a.dest, 'summary.json'))
+    json.dump(S, open(os.path.join(stg, 'summary.json'), 'w'), indent=1)
+    if os.path.exists(fin): sys.exit(f'{fin} appeared during run: refusing to overwrite')
+    os.rename(stg, fin)
     print(json.dumps(S, indent=1))
 
 
