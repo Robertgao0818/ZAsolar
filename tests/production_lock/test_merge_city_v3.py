@@ -107,3 +107,76 @@ def test_inside_block_objects_identical_to_v2_per_block(tmp_path):
 def test_refuses_nonempty_dest(tmp_path):
     (tmp_path / 'm').mkdir(); (tmp_path / 'm' / 'x').write_text('1')
     with pytest.raises(FileExistsError): run({name(0, 0): np.zeros((PX, PX), np.float32)}, tmp_path)
+
+
+def _write_cogs(out, arrs):
+    from rasterio.transform import from_origin
+    for t, a in arrs.items():
+        x, y = C.tile_xy(t); u = np.rint(a * 255).astype(np.uint8)
+        for m in C.MODELS:
+            C.save_cog(C.out_path(out, m, 'pv', t), u, 'EPSG:32734', from_origin(x, y + 100, GSD, GSD).to_gdal())
+
+
+def ref_geoms(arrs):
+    """global merge_tiles -> dissolved polygons per object (spatial reference)."""
+    import pandas as pd
+    from rasterio.transform import from_origin
+    from xtile_merge import polygons
+    tiles, trs = [], {}
+    for t, a in arrs.items():
+        x, y = C.tile_xy(t); trs[t] = from_origin(x, y + 100, GSD, GSD)
+        tiles.append(TileIn(t, x // 5, -(y + 100) // 5, (lambda a=a: a)))
+    _, ids, _ = merge_tiles(tiles, 'h0.9_0.5')
+    parts = [polygons({k: v}, {k: trs[k]}, 'EPSG:32734') for k, v in ids.items() if v.any()]
+    import geopandas as gpd
+    P = gpd.GeoDataFrame(pd.concat(parts, ignore_index=True), geometry='geometry', crs='EPSG:32734')
+    return list(P.dissolve(by='oid').geometry)
+
+
+def same_geoms(a, b):
+    b = list(b)
+    if len(a) != len(b): return False
+    for g in a:
+        j = next((k for k, h in enumerate(b) if g.symmetric_difference(h).area < 1e-6), None)
+        if j is None: return False
+        b.pop(j)
+    return True
+
+
+def test_both_ends_seeded_long_object_v2_double_counts_v3_does_not(tmp_path):
+    arrs = long_row(20, seed_tile=0)
+    arrs[name(19, 50)][10, 5] = 0.95                      # second seed at the far end
+    out = tmp_path / 'inf'; _write_cogs(out, arrs)
+    by_xy = {C.tile_xy(t): t for t in arrs}
+    v2 = [C.merge_block(out, (bx, 5000), by_xy, gsd=GSD) for bx in (0, 1000)]
+    assert sum(len(g) for g in v2) == 2                   # old per-block code: same object twice
+    G, s = V.run(sorted(arrs), out, tmp_path / 'v3', workers=2, gsd=GSD)   # real spawn workers + COG loader
+    assert len(G) == 1 and s['n_objects'] == 1 and s['n_cross_block'] == 1
+    assert G.area_m2.sum() == pytest.approx(20 * 2 * PX * GSD * GSD)
+
+
+def test_spawn_workers_pixelwise_equal_to_global_reference(tmp_path):
+    rng = np.random.default_rng(11); arrs = {}
+    for i in range(8, 13):
+        for j in range(48, 52):
+            if (i, j) == (10, 50): continue                # a missing tile (pregate-dropped) = background
+            arrs[name(i, j)] = np.rint((rng.random((PX, PX)) ** 5) * 255).astype(np.float32) / 255
+    out = tmp_path / 'inf'; _write_cogs(out, arrs)
+    G, s = V.run(sorted(arrs), out, tmp_path / 'v3', workers=2, gsd=GSD, batch=3)   # tiny batch: exercises append + chunked dissolve
+    assert same_geoms(list(G.geometry), ref_geoms(arrs))
+    assert G.oid.is_unique and s['n_objects'] == len(G) and s['n_multi_tile'] >= 1
+    bc = __import__('pandas').read_csv(tmp_path / 'v3' / 'block_counts_v3.csv')
+    assert bc.n_objects.sum() == len(G) and bc.area_m2.sum() == pytest.approx(G.area_m2.sum())
+    assert not list((tmp_path / 'v3').glob('.*partial*'))
+
+
+def test_input_change_between_passes_detected(tmp_path):
+    class Flip:
+        def __init__(self): self.n = 0
+        def __call__(self, out, tile):
+            self.n += 1; a = np.zeros((PX, PX), np.float32)
+            if self.n == 1: a[0, 0] = 0.95
+            else: a[-1, -1] = 0.6
+            return a
+    with pytest.raises(RuntimeError, match='changed between passes'):
+        V.run([name(0, 0)], None, tmp_path / 'm', workers=0, loader=Flip(), gsd=GSD)
