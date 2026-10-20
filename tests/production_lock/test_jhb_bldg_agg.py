@@ -110,3 +110,13 @@ def test_corner_touch_separate_and_nested_collection(tmp_path):
     g = J.read_bld([str(b)], shapely.box(-100, -100, 300, 300), CRS)
     assert len(g) == 4 and g.bld_id.is_unique
     assert sorted(g.area.round(3)) == [25, 25, 100, 100]
+
+
+def test_roof_id_stable_across_windows_in_corner_chain(tmp_path):
+    b = tmp_path / 'b.gpkg'
+    _w(b, [shapely.box(950 + 100 * i, 950 + 100 * i, 1050 + 100 * i, 1050 + 100 * i) for i in range(12)])
+    ids = []
+    for need in [shapely.box(980, 980, 990, 990), shapely.box(1010, 1010, 1350, 1350)]:
+        g, ok = J.buildings_for([str(b)], need, CRS); assert ok
+        ids.append(g[g.geometry.covers(shapely.Point(1000, 1000))].bld_id.iloc[0])
+    assert ids[0] == ids[1]

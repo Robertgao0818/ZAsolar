@@ -42,7 +42,7 @@ def rule(orphan_area, dist):  # g14_lib_v1.rule with no parcel zoning (JHB has n
 def read_bld(paths, box, crs):
     """Source features in box -> buildings = connected components (intersects) of the make_valid'ed union of all layers,
     each unioned. bld_id = sha1 of the sorted source-feature keys (layer index : fid) of the component: identical from every
-    window that sees the whole component, and distinct for distinct buildings by construction (components are disjoint)."""
+    window that sees the whole roof, and distinct for distinct roofs by construction (each source part lies in one roof)."""
     geo, key = [], []
     for li, f in enumerate(paths):
         g = pyogrio.read_dataframe(f, bbox=tuple(gpd.GeoSeries([box], crs=crs).to_crs(pyogrio.read_info(f)['crs']).total_bounds), fid_as_index=True)
@@ -59,12 +59,14 @@ def read_bld(paths, box, crs):
     out_g, out_id = [], []
     for c in np.unique(lab):
         m = lab == c
-        h = 'B' + hashlib.sha1('|'.join(sorted(key[m])).encode()).hexdigest()[:20]
         u = [p for p in polys(np.array([shapely.union_all(geo[m])], dtype=object))[0] if p.geom_type == 'Polygon' and p.area > 0]
-        rp = [(q.x, q.y) for q in shapely.point_on_surface(u)]  # parts joined only at a point stay separate roofs (G14 explode)
-        for r_, k in enumerate(sorted(range(len(u)), key=lambda t: rp[t])):
-            out_g.append(u[k]); out_id.append(f'{h}_{r_}')
-    return gpd.GeoDataFrame({'bld_id': out_id}, geometry=out_g, crs=crs)
+        mg, mk = geo[m], key[m]; mrp = shapely.point_on_surface(mg)
+        for p in u:  # parts joined only at a point stay separate roofs (G14 explode); id = this roof's own member keys only
+            own = shapely.covers(p, mrp)
+            out_g.append(p); out_id.append('B' + hashlib.sha1('|'.join(sorted(mk[own])).encode()).hexdigest()[:20])
+    out = gpd.GeoDataFrame({'bld_id': out_id}, geometry=out_g, crs=crs)
+    assert out.bld_id.is_unique, 'building id collision'
+    return out
 
 
 def polys(v):
