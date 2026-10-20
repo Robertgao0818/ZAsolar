@@ -101,3 +101,12 @@ def test_degenerate_only_block(tmp_path):
 def test_components_chunked():
     g = np.array([shapely.box(i, 0, i + 1.5, 1) for i in range(50)] + [shapely.box(100, 0, 101, 1)], dtype=object)
     lab = J.components(g, chunk=7); assert len(set(lab)) == 2
+
+
+def test_corner_touch_separate_and_nested_collection(tmp_path):
+    b = tmp_path / 'b.gpkg'
+    _w(b, [shapely.box(0, 0, 10, 10), shapely.box(10, 10, 20, 20),
+           shapely.from_wkt('POLYGON ((100 0,110 10,100 10,110 0,100 0,95 0,100 0))')])
+    g = J.read_bld([str(b)], shapely.box(-100, -100, 300, 300), CRS)
+    assert len(g) == 4 and g.bld_id.is_unique
+    assert sorted(g.area.round(3)) == [25, 25, 100, 100]

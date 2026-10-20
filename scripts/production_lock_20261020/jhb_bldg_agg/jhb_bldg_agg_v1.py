@@ -48,7 +48,7 @@ def read_bld(paths, box, crs):
         g = pyogrio.read_dataframe(f, bbox=tuple(gpd.GeoSeries([box], crs=crs).to_crs(pyogrio.read_info(f)['crs']).total_bounds), fid_as_index=True)
         if not len(g): continue
         g = g.to_crs(crs); v = shapely.make_valid(g.geometry.values)
-        parts, idx = shapely.get_parts(v, return_index=True)  # each separate polygon part is its own node (G14: dissolve+explode)
+        parts, idx = polys(v)  # each separate polygon part is its own node (G14: dissolve+explode)
         fids = g.index.values
         for k, (p, i) in enumerate(zip(parts, idx)):
             if p.geom_type == 'Polygon' and p.area > 0:
@@ -59,8 +59,23 @@ def read_bld(paths, box, crs):
     out_g, out_id = [], []
     for c in np.unique(lab):
         m = lab == c
-        out_g.append(shapely.union_all(geo[m])); out_id.append('B' + hashlib.sha1('|'.join(sorted(key[m])).encode()).hexdigest()[:20])
+        h = 'B' + hashlib.sha1('|'.join(sorted(key[m])).encode()).hexdigest()[:20]
+        u = [p for p in polys(np.array([shapely.union_all(geo[m])], dtype=object))[0] if p.geom_type == 'Polygon' and p.area > 0]
+        rp = [(q.x, q.y) for q in shapely.point_on_surface(u)]  # parts joined only at a point stay separate roofs (G14 explode)
+        for r_, k in enumerate(sorted(range(len(u)), key=lambda t: rp[t])):
+            out_g.append(u[k]); out_id.append(f'{h}_{r_}')
     return gpd.GeoDataFrame({'bld_id': out_id}, geometry=out_g, crs=crs)
+
+
+def polys(v):
+    """Recursively flatten (Multi)Polygons / GeometryCollections to Polygons; returns (parts, index of source geometry)."""
+    parts, idx = shapely.get_parts(v, return_index=True)
+    while True:
+        multi = np.array([p.geom_type in ('MultiPolygon', 'GeometryCollection') for p in parts], bool)
+        if not multi.any(): return parts, idx
+        sub, si = shapely.get_parts(parts[multi], return_index=True)
+        keep = ~multi; parts = np.concatenate([parts[keep], sub]); idx = np.concatenate([idx[keep], idx[multi][si]])
+        o = np.argsort(idx, kind='stable'); parts, idx = parts[o], idx[o]
 
 
 def components(geo, chunk=2000):
