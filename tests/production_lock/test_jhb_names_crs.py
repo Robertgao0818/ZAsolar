@@ -68,3 +68,24 @@ def test_legacy_merge_block_path_uses_output_crs(tmp_path):
     by_xy = C.unique_xy(sorted(arrs)); crs = C.tiles_crs(tmp_path / 'inf', sorted(arrs))
     P = C.merge_block(tmp_path / 'inf', (600000, 7100000), by_xy, gsd=GSD, crs=crs)
     assert P.crs.to_epsg() == 32735 and len(P) == 1
+
+
+def test_tiles_crs_checks_every_tile_not_a_sample(tmp_path):
+    a = np.zeros((PX, PX), np.float32); names = [f'E{600000 + 100 * i}_N7100000.tif' for i in range(401)]
+    for i, t in enumerate(names): _write(tmp_path / 'inf', {t: a}, 32734 if i == 1 else 32735)
+    with pytest.raises(ValueError, match='mixed'): C.tiles_crs(tmp_path / 'inf', names, 'EPSG:32735')
+
+
+def test_blocks_of_tile_offset_and_aligned():
+    assert C.blocks_of_tile('E251300_N6230400.tif') == {(251000, 6230000)}
+    assert C.blocks_of_tile('E251900_N6230900.tif') == {(251000, 6230000)}
+    assert C.blocks_of_tile('G0772_E601962_N7099458.tif') == {(601000, 7099000), (602000, 7099000)}
+    assert C.blocks_of_tile('G0772_E601962_N7099958.tif') == {(601000, 7099000), (602000, 7099000), (601000, 7100000), (602000, 7100000)}
+
+
+def test_legacy_merge_keeps_object_in_block_without_tile_corner(tmp_path):
+    """Codex r1: tile at E601962 spans into block E602000; an object there must not be lost."""
+    a = np.zeros((PX, PX), np.float32); a[8:12, 14:18] = 0.95       # x 601962+70..90 = 602032..602052 -> block 602000
+    t = 'G0772_E601962_N7099458.tif'; _write(tmp_path / 'inf', {t: a}, 32735)
+    r = C.run_merge([t], tmp_path / 'inf', workers=1, gsd=GSD)
+    assert r['objects'] == 1 and r['ok'] >= 1

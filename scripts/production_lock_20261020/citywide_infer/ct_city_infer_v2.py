@@ -258,14 +258,14 @@ def unique_xy(tiles):
     return by_xy
 
 
-def tiles_crs(out, tiles, crs=None, sample=200):
-    """CRS of the inference outputs as 'EPSG:<n>' (CT -> 'EPSG:32734', identical to the old constant). Checks the first,
-    last and an even sample of tiles (both models); all must agree, and must equal `crs` when given."""
+def tiles_crs(out, tiles, crs=None):
+    """CRS of the inference outputs as 'EPSG:<n>' (CT -> 'EPSG:32734', identical to the old constant). Reads the header
+    of EVERY tile's PV output for both models (Codex r1: sampling missed mixed CRS); all must agree, and must equal
+    `crs` when given."""
     import rasterio
     if not tiles: return crs or 'EPSG:32734'
-    idx = sorted({0, len(tiles) - 1, *range(0, len(tiles), max(1, len(tiles) // sample))})
     seen = set()
-    for i in idx:
+    for i in range(len(tiles)):
         for m in MODELS:
             with rasterio.open(out_path(out, m, 'pv', tiles[i])) as s:
                 e = s.crs.to_epsg() if s.crs else None
@@ -280,6 +280,14 @@ def tiles_crs(out, tiles, crs=None, sample=200):
 def block_of(name):
     x, y = tile_xy(name)
     return x // BLOCK_M * BLOCK_M, y // BLOCK_M * BLOCK_M
+
+
+def blocks_of_tile(name):
+    """Every 1 km block the tile's 100 m extent overlaps (JHB tile corners are not 1 km aligned; Codex r1). For
+    1 km-aligned 100 m tiles (CT) this is exactly {block_of(name)}."""
+    x, y = tile_xy(name)
+    return {(bx, by) for bx in range(x // BLOCK_M * BLOCK_M, x + TILE_M, BLOCK_M)
+            for by in range(y // BLOCK_M * BLOCK_M, y + TILE_M, BLOCK_M)}
 
 
 def load_avg2(out, tile):
@@ -298,7 +306,7 @@ def merge_block(out, block, by_xy, gsd=0.05, halo_tiles=1, crs='EPSG:32734'):  #
     from xtile_merge import TileIn, merge_plan, plan_tile_ids, plan_objects, global_origin, polygons
     bx, by = block; h = halo_tiles * TILE_M
     sel = [(x, y, t) for (x, y), t in by_xy.items() if bx - h <= x < bx + BLOCK_M + h and by - h <= y < by + BLOCK_M + h]
-    if not any(bx <= x < bx + BLOCK_M and by <= y < by + BLOCK_M for x, y, _ in sel):
+    if not any(x < bx + BLOCK_M and x + TILE_M > bx and y < by + BLOCK_M and y + TILE_M > by for x, y, _ in sel):  # tile overlaps core (== corner-in-core for 1 km-aligned CT tiles)
         return None
     trs = {t: from_origin(x, y + TILE_M, gsd, gsd) for x, y, t in sel}
     tiles = [TileIn(t, *global_origin(trs[t], gsd), (lambda t=t: load_avg2(out, t))) for _, _, t in sel]
@@ -342,7 +350,7 @@ def run_merge(tiles, out, workers=4, gsd=0.05, crs=None):
     if missing:
         raise RuntimeError(f'{len(missing)} tiles lack PV outputs (first {missing[0]}); finish infer first')
     by_xy = unique_xy(tiles); crs = tiles_crs(out, tiles, crs)
-    blocks = sorted({block_of(t) for t in tiles})
+    blocks = sorted(set().union(*(blocks_of_tile(t) for t in tiles))) if tiles else []
     res = dict(ok=0, skip=0, empty=0, objects=0, halo_cut=0)
     with cf.ProcessPoolExecutor(max_workers=workers, mp_context=mp.get_context('spawn')) as ex:
         for st, n, hc in ex.map(_merge_one, [out] * len(blocks), blocks, [by_xy] * len(blocks), [gsd] * len(blocks), [crs] * len(blocks)):
@@ -362,7 +370,7 @@ def main(argv=None):
     a1.add_argument('--ready-file', default=None, help='only process tiles named in this file (e.g. READY.txt)')
     a1.add_argument('--poll-s', type=int, default=30)
     a1.add_argument('--model', choices=list(MODELS), default=None, help='run only this model (two processes share the GPU)')
-    a2.add_argument('--workers', default='auto'); a2.add_argument('--mem-cap-gb', type=float, default=6.0); a2.add_argument('--allow-unreviewed-merge', action='store_true')
+    a2.add_argument('--crs', default=None, help="e.g. EPSG:32735; default: read from the outputs (must agree)"); a2.add_argument('--workers', default='auto'); a2.add_argument('--mem-cap-gb', type=float, default=6.0); a2.add_argument('--allow-unreviewed-merge', action='store_true')
     a = ap.parse_args(argv)
     if hasattr(a, 'writers'):
         a.writers = max(1, W.resolve(a.writers, 0.4, a.mem_cap_gb))
@@ -399,7 +407,7 @@ def main(argv=None):
                              'run only infer on the pod. --allow-unreviewed-merge for development only.')
         if a.limit:
             raise SystemExit('merge --limit would write partial blocks into the real output; not allowed')
-        res = run_merge(tiles, out, workers=W.resolve(a.workers, 1.0, a.mem_cap_gb))
+        res = run_merge(tiles, out, workers=W.resolve(a.workers, 1.0, a.mem_cap_gb), crs=a.crs)
     log.write(f'END,{a.stage},{json.dumps(res)},{time.strftime("%F %T %Z")}\n'); log.flush()
     print(json.dumps(res), flush=True)
 
