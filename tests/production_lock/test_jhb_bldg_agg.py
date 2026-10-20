@@ -120,3 +120,15 @@ def test_roof_id_stable_across_windows_in_corner_chain(tmp_path):
         g, ok = J.buildings_for([str(b)], need, CRS); assert ok
         ids.append(g[g.geometry.covers(shapely.Point(1000, 1000))].bld_id.iloc[0])
     assert ids[0] == ids[1]
+
+
+def test_resume_refuses_parts_from_other_code(tmp_path, monkeypatch):
+    b = tmp_path / 'b.gpkg'; o = tmp_path / 'o.gpkg'; d = tmp_path / 'out'
+    _w(b, [shapely.box(0, 0, 10, 10)]); _w(o, [shapely.box(2, 2, 4, 4)], oid=[1])
+    monkeypatch.setattr(J, 'code_md5', lambda: 'old')
+    with pytest.raises(RuntimeError):
+        monkeypatch.setattr(J, 'finalize', lambda *a, **k: (_ for _ in ()).throw(RuntimeError("interrupted")))  # interrupt after parts
+        J.main(['--objects', str(o), '--buildings', str(b), '--dest', str(d), '--workers', '1'])
+    monkeypatch.undo()
+    with pytest.raises(SystemExit):  # config.json records the old code md5
+        J.main(['--objects', str(o), '--buildings', str(b), '--dest', str(d), '--workers', '1'])

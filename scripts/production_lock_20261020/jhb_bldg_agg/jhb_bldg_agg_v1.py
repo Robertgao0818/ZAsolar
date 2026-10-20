@@ -30,6 +30,13 @@ PER_WORKER_GB = 1.0
 MAIN_GB = 1.0  # reserved for the main process (finalize state is O(buildings with PV) small ints/floats)
 FINAL = ['final']  # single directory published by one atomic rename
 G = {}
+CODE_MD5 = None  # md5 of this file + cpu_workers.py: recorded in config.json and every part; resume refuses any mismatch
+
+
+def code_md5():
+    h = hashlib.md5()
+    for f in [os.path.abspath(__file__), os.path.join(HERE, '..', 'citywide_infer', 'cpu_workers.py')]: h.update(open(f, 'rb').read())
+    return h.hexdigest()
 
 
 def rule(orphan_area, dist):  # g14_lib_v1.rule with no parcel zoning (JHB has none)
@@ -125,7 +132,7 @@ def do_block(task):
         ob['geometry'] = shapely.make_valid(ob.geometry.values)
         rp = shapely.point_on_surface(ob.geometry.values); px, py = shapely.get_x(rp), shapely.get_y(rp)
         ob = ob[(px >= x0) & (px < x0 + S) & (py >= y0) & (py < y0 + S)].reset_index(drop=True)
-    res = dict(block=(bx, by), n_obj=len(ob), degenerate=None, buildings=None, pieces=None, unmatched=None, bld_complete=True, n_bld_window=0,
+    res = dict(code_md5=G['code_md5'], block=(bx, by), n_obj=len(ob), degenerate=None, buildings=None, pieces=None, unmatched=None, bld_complete=True, n_bld_window=0,
                obj_area=0.0, alloc_area=0.0, orphan_area=0.0, n_obj_on_bld=0, n_split_obj=0)
     if len(ob):
         ob['area'] = ob.area; dg = ob[~(ob.area > 0)]; ob = ob[ob.area > 0].reset_index(drop=True)
@@ -186,7 +193,7 @@ def do_block(task):
 
 
 def init(args, x0, y0, crs):
-    G.update(args=args, x0=x0, y0=y0, crs=crs)
+    G.update(args=args, x0=x0, y0=y0, crs=crs, code_md5=code_md5())
     os.environ.setdefault('OMP_NUM_THREADS', '1')
 
 
@@ -203,7 +210,7 @@ def main(argv=None):
     tasks = [(i, j) for i in range(int(np.ceil((x1 - x0) / a.block)) + 1) for j in range(int(np.ceil((y1 - y0) / a.block)) + 1)]
     for n in FINAL:
         if os.path.exists(os.path.join(a.dest, n)): sys.exit(f'{a.dest}/{n} exists: refusing to overwrite; use a new --dest')
-    cfg = dict(objects=file_fp(a.objects), buildings=[file_fp(b) for b in a.buildings], block=a.block, x0=float(x0), y0=float(y0), crs=str(crs))
+    cfg = dict(objects=file_fp(a.objects), buildings=[file_fp(b) for b in a.buildings], block=a.block, x0=float(x0), y0=float(y0), crs=str(crs), code_md5=code_md5())
     cp = os.path.join(a.dest, 'config.json')
     if os.path.exists(cp):
         if json.load(open(cp)) != cfg: sys.exit('config differs from existing parts: use a new --dest')
@@ -237,6 +244,7 @@ def finalize(a, tasks, crs, nw, secs):
     um_n = {'no_building': 0, 'offroof_residual': 0, 'degenerate': 0}; um_a = dict.fromkeys(um_n, 0.0); rc = {}
     for t in tasks:
         r = pd.read_pickle(os.path.join(a.dest, 'parts', f'b_{t[0]}_{t[1]}.pkl')); n_obj += r['n_obj']
+        if r.get('code_md5') != code_md5(): raise RuntimeError(f'part {t} was written by different code: use a new --dest')
         if not r['bld_complete']: raise RuntimeError(f'part {t} has an incomplete building window')
         if r['n_obj']: oa += r['obj_area']; aa += r['alloc_area']; ra += r['orphan_area']; n_on += r['n_obj_on_bld']; n_split_obj += r['n_split_obj']
         p = r['pieces']

@@ -35,6 +35,7 @@
 ## Execution Track
 <!-- progress:roadmap:start -->
 ### Recently Completed
+- 2026-10-20: fix(jhb_bldg_agg): Codex r5 — building id from the roof's own source parts only (stable across windows in corner-touch chains), id uniqueness assert; test
 - 2026-10-20: fix(jhb_bldg_agg): Codex r4 — corner-touching roofs stay separate (explode after union), recursive polygon extraction from nested collections; test
 - 2026-10-20: fix(jhb_bldg_agg): Codex r3 — explode multipolygon footprint records into separate roofs, degenerate-only blocks, chunked union-find components; tests
 - 2026-10-20: fix(jhb_bldg_agg): Codex r2 — degenerate objects kept+flagged with per-block coverage check, atomic final/ dir publish (resumable), source-feature-key building ids, O(buildings) finalize state, main-process memory reserve; tests
@@ -42,7 +43,6 @@
 - 2026-10-20: feat(jhb_bldg_agg): JHB building aggregation (roof = installation, split per building, no 1 m merge; G14 rule), per-block streaming, resumable, auto workers; test
 - 2026-10-20: feat(citywide): auto CPU worker defaults (min(cores-2, mem cap 6 GB / per-worker GB)) for writers, readers, merge workers; --mem-cap-gb override
 - 2026-10-20: fix(merge_city_v3): no full read-back in production (return_gdf), label-raster md5 check between passes, summary written last as completion marker; tests
-- 2026-10-20: fix(merge_city_v3): stream pass 2 (bounded in-flight, batched gpkg append, multi-tile pieces staged on disk + chunked dissolve), pass-1/2 input check, object-count check; tests: both-seed double count, spawn workers, pixelwise vs global reference
 
 ### Next Up
 - Repository structure cleanup: reduce root-level script clutter and group workflows by purpose.
