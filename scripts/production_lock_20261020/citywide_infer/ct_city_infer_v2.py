@@ -22,6 +22,8 @@ import argparse, json, os, re, sys, tempfile, time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import cpu_workers as W  # noqa: E402
 CLASS_IDX = {'pv': 1, 'swh': 2}
 MODELS = {'convnext_t_s0': ('convnext_t', 'a7365650d0f3b99c89d385e80e26d0bc'),
           'mit_b2_s2': ('mit_b2', 'd74b8273a1e1aa61b5365615f24109e0')}
@@ -156,7 +158,7 @@ def read_tile(path):
         return s.read([1, 2, 3]).astype(np.float32), s.crs.to_wkt(), s.transform.to_gdal()
 
 
-def run_infer(tiles, tile_dir, out, prob_fn, writers=4, max_pending=32, max_consec_fail=2, log=None):
+def run_infer(tiles, tile_dir, out, prob_fn, writers=4, readers=2, max_pending=32, max_consec_fail=2, log=None):
     """prob_fn(model_name, x_float32_numpy) -> prob [3,H,W] (tensor or array). Returns counts."""
     import concurrent.futures as cf, multiprocessing as mp, threading
     out = Path(out)
@@ -167,7 +169,7 @@ def run_infer(tiles, tile_dir, out, prob_fn, writers=4, max_pending=32, max_cons
         todo = [t for t in todo if (Path(tile_dir) / t).is_file()]
         if log: log.write(f'ABSENT,{len(absent)},first={absent[0]}\n'); log.flush()
     ex = cf.ProcessPoolExecutor(max_workers=writers, mp_context=mp.get_context('spawn'))
-    rd = cf.ThreadPoolExecutor(max_workers=2)
+    rd = cf.ThreadPoolExecutor(max_workers=max(1, readers))
     sem = threading.BoundedSemaphore(max_pending); pending = set(); lock = threading.Lock(); errors = []
     def done_cb(f):
         sem.release()
@@ -227,13 +229,13 @@ def read_ready(path):
     return {Path(l.strip()).name for l in p.read_text().splitlines() if l.strip()} if p.exists() else set()
 
 
-def follow_infer(tiles, tile_dir, out, prob_fn, ready_file=None, poll_s=30, writers=4, log=None, max_idle_h=6.0):
+def follow_infer(tiles, tile_dir, out, prob_fn, ready_file=None, poll_s=30, writers=4, readers=2, log=None, max_idle_h=6.0):
     """Process tiles as they become ready (listed in ready_file, if given) until all are done."""
     total = len(tiles); idle_since = time.time(); passes = []
     while True:
         ready = read_ready(ready_file) if ready_file else None
         now = [t for t in tiles if ready is None or t in ready]
-        r = run_infer(now, tile_dir, out, prob_fn, writers=writers, log=log) if now else dict(done=0)
+        r = run_infer(now, tile_dir, out, prob_fn, writers=writers, readers=readers, log=log) if now else dict(done=0)
         ndone = update_done_manifest(tiles, out); passes.append(r)
         if log: log.write(f'PASS,{json.dumps(r)},done_total={ndone}/{total},{time.strftime("%F %T %Z")}\n'); log.flush()
         if ndone >= total: return dict(done_total=ndone, passes=len(passes))
@@ -324,13 +326,17 @@ def main(argv=None):
     for a in (a1, a2):
         a.add_argument('--tiles-csv', required=True); a.add_argument('--out', required=True); a.add_argument('--limit', type=int, default=0)
     a1.add_argument('--tile-dir', required=True); a1.add_argument('--ckpt-root', required=True)
-    a1.add_argument('--device', default='cuda', choices=['cuda', 'cpu']); a1.add_argument('--writers', type=int, default=4)
+    a1.add_argument('--device', default='cuda', choices=['cuda', 'cpu']); a1.add_argument('--writers', default='auto', help="COG writer processes; 'auto' = min(cores-2, mem cap / 0.4 GB)"); a1.add_argument('--readers', default='auto', help="tile read/decode threads; 'auto' = min(4, writers)"); a1.add_argument('--mem-cap-gb', type=float, default=6.0)
     a1.add_argument('--follow', action='store_true', help='keep polling until every listed tile is done')
     a1.add_argument('--ready-file', default=None, help='only process tiles named in this file (e.g. READY.txt)')
     a1.add_argument('--poll-s', type=int, default=30)
     a1.add_argument('--model', choices=list(MODELS), default=None, help='run only this model (two processes share the GPU)')
-    a2.add_argument('--workers', type=int, default=4); a2.add_argument('--allow-unreviewed-merge', action='store_true')
+    a2.add_argument('--workers', default='auto'); a2.add_argument('--mem-cap-gb', type=float, default=6.0); a2.add_argument('--allow-unreviewed-merge', action='store_true')
     a = ap.parse_args(argv)
+    if hasattr(a, 'writers'):
+        a.writers = max(1, W.resolve(a.writers, 0.4, a.mem_cap_gb))
+        a.readers = max(1, min(4, a.writers) if str(a.readers).lower() == 'auto' else int(a.readers))
+        print(f'workers: writers={a.writers} readers={a.readers}', flush=True)
     tiles = read_tile_list(a.tiles_csv)
     if a.limit: tiles = tiles[:a.limit]
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
@@ -351,10 +357,10 @@ def main(argv=None):
         if a.follow or a.ready_file:
             ready = read_ready(a.ready_file) if a.ready_file else None
             res = follow_infer(tiles, a.tile_dir, out, prob_fn, ready_file=a.ready_file, poll_s=a.poll_s if a.follow else 0,
-                               writers=a.writers, log=log) if a.follow else run_infer(
-                [t for t in tiles if t in ready], a.tile_dir, out, prob_fn, writers=a.writers, log=log)
+                               writers=a.writers, readers=a.readers, log=log) if a.follow else run_infer(
+                [t for t in tiles if t in ready], a.tile_dir, out, prob_fn, writers=a.writers, readers=a.readers, log=log)
         else:
-            res = run_infer(tiles, a.tile_dir, out, prob_fn, writers=a.writers, log=log)
+            res = run_infer(tiles, a.tile_dir, out, prob_fn, writers=a.writers, readers=a.readers, log=log)
         update_done_manifest(tiles, out)
     else:
         if not a.allow_unreviewed_merge:
@@ -362,7 +368,7 @@ def main(argv=None):
                              'run only infer on the pod. --allow-unreviewed-merge for development only.')
         if a.limit:
             raise SystemExit('merge --limit would write partial blocks into the real output; not allowed')
-        res = run_merge(tiles, out, workers=a.workers)
+        res = run_merge(tiles, out, workers=W.resolve(a.workers, 1.0, a.mem_cap_gb))
     log.write(f'END,{a.stage},{json.dumps(res)},{time.strftime("%F %T %Z")}\n'); log.flush()
     print(json.dumps(res), flush=True)
 

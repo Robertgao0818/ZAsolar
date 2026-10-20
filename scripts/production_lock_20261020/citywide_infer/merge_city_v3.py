@@ -21,6 +21,7 @@ import numpy as np
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE)); sys.path.insert(0, str(HERE.parent / 'ct_xtile_merge'))
+import cpu_workers as W  # noqa: E402
 import ct_city_infer_v2 as C  # noqa: E402  (tile_xy, out_path, load_avg2, read_tile_list, publish, MODELS)
 
 CFG = 'h0.9_0.5'; TILE_M = 100; BLOCK_M = 1000
@@ -253,9 +254,9 @@ def _md5(p):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--tiles-csv', required=True); ap.add_argument('--out', required=True, help='inference output root')
-    ap.add_argument('--dest', required=True, help='NEW folder for merge outputs'); ap.add_argument('--workers', type=int, default=4)
+    ap.add_argument('--dest', required=True, help='NEW folder for merge outputs'); ap.add_argument('--workers', default='auto', help="'auto' = min(cores-2, mem cap / 0.6 GB)"); ap.add_argument('--mem-cap-gb', type=float, default=6.0)
     a = ap.parse_args(argv)
-    _, s = run(C.read_tile_list(a.tiles_csv), a.out, a.dest, workers=a.workers, log=lambda m: print(m, flush=True))
+    _, s = run(C.read_tile_list(a.tiles_csv), a.out, a.dest, workers=W.resolve(a.workers, 0.6, a.mem_cap_gb), log=lambda m: print(m, flush=True))
     print(json.dumps(s), flush=True)
 
 
