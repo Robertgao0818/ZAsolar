@@ -10,6 +10,7 @@ labelled pixels of each tile's 1-px border strips; union-find over those. Pass 2
 re-checks each tile against pass 1, polygonises, appends single-tile objects to the output gpkg in batches and
 stages multi-tile pieces on disk; those are dissolved at the end in oid chunks.
 Each object is owned by exactly one 1 km block: the block containing its representative point.
+summary_v3.json is written LAST and marks a complete run; a folder without it is incomplete (do not use).
 Outputs (new dir, never overwritten): objects_v3.gpkg (layer objects), multi_pieces_v3.gpkg (per-tile pieces of
 multi-tile objects, for audit), block_counts_v3.csv, summary_v3.json.
 CPU only.
@@ -48,11 +49,12 @@ def pass1_tile(args):
     p = loader(out, tile)
     lab, nl = ndimage.label(p >= lo, S8)
     if nl == 0:
-        return tile, 0, np.zeros(0, np.float32), np.zeros(0, np.int64), None, p.shape
+        return tile, 0, np.zeros(0, np.float32), np.zeros(0, np.int64), None, p.shape, None
     idx = np.arange(1, nl + 1)
     cmax = np.asarray(ndimage.maximum(p, lab, idx), np.float32)
     cnpx = np.bincount(lab.ravel(), minlength=nl + 1)[1:].astype(np.int64)
-    return tile, nl, cmax, cnpx, {k: _sparse(v) for k, v in _strips(lab).items()}, p.shape
+    import hashlib
+    return tile, nl, cmax, cnpx, {k: _sparse(v) for k, v in _strips(lab).items()}, p.shape, hashlib.md5(lab.astype(np.int32).tobytes()).hexdigest()
 
 
 class UF:
@@ -85,7 +87,7 @@ def plan_city(results):
     hi, lo = parse_cfg(CFG)
     base, nls, shapes, strips = {}, {}, {}, {}
     cmax_all, cnpx_all = [], []; off = 0
-    for tile, nl, cmax, cnpx, st, shape in results:
+    for tile, nl, cmax, cnpx, st, shape, _h in results:
         base[tile] = off; nls[tile] = nl; shapes[tile] = shape; off += nl
         cmax_all.append(cmax); cnpx_all.append(cnpx)
         if st is not None: strips[tile] = st
@@ -123,7 +125,7 @@ def pass2_tile(args):
     from scipy import ndimage
     from rasterio.transform import from_origin
     from xtile_merge import parse_cfg, polygons
-    out, tile, loader, oid_map, cnpx, cmax, shape, gsd = args   # oid_map: int64[nl+1], 0 = drop
+    out, tile, loader, oid_map, cnpx, cmax, shape, lab_md5, gsd = args   # oid_map: int64[nl+1], 0 = drop
     hi, lo = parse_cfg(CFG)
     p = loader(out, tile)
     lab, nl = ndimage.label(p >= lo, S8)
@@ -133,6 +135,9 @@ def pass2_tile(args):
     if not (np.array_equal(np.bincount(lab.ravel(), minlength=nl + 1)[1:], cnpx)
             and np.array_equal(np.asarray(ndimage.maximum(p, lab, idx), np.float32), cmax)):
         raise RuntimeError(f'{tile}: input changed between passes (component stats)')
+    import hashlib
+    if hashlib.md5(lab.astype(np.int32).tobytes()).hexdigest() != lab_md5:
+        raise RuntimeError(f'{tile}: input changed between passes (label raster)')
     ids = oid_map[lab]
     x, y = C.tile_xy(tile)
     tr = from_origin(x, y + TILE_M, gsd, gsd)
@@ -152,7 +157,7 @@ def _bounded_map(fn, items, workers, ctx, window):
         while q: yield q.popleft().result()
 
 
-def run(tiles, out, dest, workers=4, loader=None, gsd=0.05, log=print, batch=2000):
+def run(tiles, out, dest, workers=4, loader=None, gsd=0.05, log=print, batch=2000, return_gdf=False):
     import multiprocessing as mp
     import geopandas as gpd, pandas as pd, pyogrio
     loader = loader or C.load_avg2
@@ -163,7 +168,7 @@ def run(tiles, out, dest, workers=4, loader=None, gsd=0.05, log=print, batch=200
     if missing: raise RuntimeError(f'{len(missing)} tiles lack PV outputs (first {missing[0]})')
     t0 = time.time(); ctx = mp.get_context('spawn'); crs = 'EPSG:32734'; px_area = gsd * gsd
     res = list(_bounded_map(pass1_tile, [(out, t, loader) for t in tiles], workers, ctx, 64))
-    cn = {r[0]: (r[3], r[2], r[5]) for r in res}   # tile -> (cnpx, cmax, shape)
+    cn = {r[0]: (r[3], r[2], r[5], r[6]) for r in res}   # tile -> (cnpx, cmax, shape, label md5)
     log(f'pass1 {len(res)} tiles {time.time() - t0:.0f}s')
     P = plan_city(res); del res
     root, keep = P['root'], P['keep']
@@ -180,8 +185,8 @@ def run(tiles, out, dest, workers=4, loader=None, gsd=0.05, log=print, batch=200
             if nl == 0: continue
             r = root[b:b + nl]
             if not keep[r].any(): continue
-            c_npx, c_max, shape = cn[t]
-            yield (out, t, loader, np.r_[0, np.where(keep[r], r + 1, 0)].astype(np.int64), c_npx, c_max, shape, gsd)
+            c_npx, c_max, shape, h = cn[t]
+            yield (out, t, loader, np.r_[0, np.where(keep[r], r + 1, 0)].astype(np.int64), c_npx, c_max, shape, h, gsd)
     part = dest / '.objects_v3.partial.gpkg'; stage = dest / '.multi_pieces_v3.partial.gpkg'
     stats = dict(n=0, area=0.0, multi=0, cross=0); blocks = {}
     def finish(G):
@@ -234,9 +239,11 @@ def run(tiles, out, dest, workers=4, loader=None, gsd=0.05, log=print, batch=200
                 wall_s=round(time.time() - t0, 1), time=time.strftime('%F %T %Z'), script_md5=_md5(__file__),
                 xtile_merge_md5=_md5(HERE.parent / 'ct_xtile_merge' / 'xtile_merge.py'))
     C.publish(dest / 'summary_v3.json', lambda tmp: Path(tmp).write_text(json.dumps(summ, indent=1)), suffix='.json')
+    if not return_gdf:          # production: never read the city back into memory
+        return None, summ
     G = gpd.read_file(dest / 'objects_v3.gpkg', layer='objects') if (dest / 'objects_v3.gpkg').exists() else \
         gpd.GeoDataFrame(dict(oid=[], n_px=[], max_p=[], n_tiles=[], n_blocks=[], block=[], area_m2=[]), geometry=[], crs=crs)
-    return (G if len(G) < 200000 else None), summ
+    return G, summ
 
 
 def _md5(p):

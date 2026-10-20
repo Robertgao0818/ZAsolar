@@ -22,7 +22,7 @@ def name(i, j): return f'E{i * 100}_N{j * 100}.tif'
 
 
 def run(arrs, tmp_path, sub='m'):
-    G, s = V.run(sorted(arrs), None, tmp_path / sub, workers=0, loader=Loader(arrs), gsd=GSD)
+    G, s = V.run(sorted(arrs), None, tmp_path / sub, workers=0, loader=Loader(arrs), gsd=GSD, return_gdf=True)
     return G, s
 
 
@@ -96,7 +96,7 @@ def test_inside_block_objects_identical_to_v2_per_block(tmp_path):
         from rasterio.transform import from_origin
         for m in C.MODELS:
             C.save_cog(C.out_path(out, m, 'pv', t), u, 'EPSG:32734', from_origin(x, y + 100, GSD, GSD).to_gdal())
-    G, _ = V.run(sorted(arrs), out, tmp_path / 'v3', workers=0, gsd=GSD)
+    G, _ = V.run(sorted(arrs), out, tmp_path / 'v3', workers=0, gsd=GSD, return_gdf=True)
     by_xy = {C.tile_xy(t): t for t in arrs}
     old = C.merge_block(out, (0, 2000), by_xy, gsd=GSD)
     key = lambda g: sorted((int(n), round(float(a), 3)) for n, a in zip(g.n_px, g.geometry.area))
@@ -150,7 +150,7 @@ def test_both_ends_seeded_long_object_v2_double_counts_v3_does_not(tmp_path):
     by_xy = {C.tile_xy(t): t for t in arrs}
     v2 = [C.merge_block(out, (bx, 5000), by_xy, gsd=GSD) for bx in (0, 1000)]
     assert sum(len(g) for g in v2) == 2                   # old per-block code: same object twice
-    G, s = V.run(sorted(arrs), out, tmp_path / 'v3', workers=2, gsd=GSD)   # real spawn workers + COG loader
+    G, s = V.run(sorted(arrs), out, tmp_path / 'v3', workers=2, gsd=GSD, return_gdf=True)   # real spawn workers + COG loader
     assert len(G) == 1 and s['n_objects'] == 1 and s['n_cross_block'] == 1
     assert G.area_m2.sum() == pytest.approx(20 * 2 * PX * GSD * GSD)
 
@@ -162,7 +162,7 @@ def test_spawn_workers_pixelwise_equal_to_global_reference(tmp_path):
             if (i, j) == (10, 50): continue                # a missing tile (pregate-dropped) = background
             arrs[name(i, j)] = np.rint((rng.random((PX, PX)) ** 5) * 255).astype(np.float32) / 255
     out = tmp_path / 'inf'; _write_cogs(out, arrs)
-    G, s = V.run(sorted(arrs), out, tmp_path / 'v3', workers=2, gsd=GSD, batch=3)   # tiny batch: exercises append + chunked dissolve
+    G, s = V.run(sorted(arrs), out, tmp_path / 'v3', workers=2, gsd=GSD, batch=3, return_gdf=True)   # tiny batch: exercises append + chunked dissolve
     assert same_geoms(list(G.geometry), ref_geoms(arrs))
     assert G.oid.is_unique and s['n_objects'] == len(G) and s['n_multi_tile'] >= 1
     bc = __import__('pandas').read_csv(tmp_path / 'v3' / 'block_counts_v3.csv')
@@ -180,3 +180,20 @@ def test_input_change_between_passes_detected(tmp_path):
             return a
     with pytest.raises(RuntimeError, match='changed between passes'):
         V.run([name(0, 0)], None, tmp_path / 'm', workers=0, loader=Flip(), gsd=GSD)
+
+
+def test_moved_component_same_stats_detected(tmp_path):
+    class Move:
+        def __init__(self): self.n = 0
+        def __call__(self, out, tile):
+            self.n += 1; a = np.zeros((PX, PX), np.float32)
+            if self.n == 1: a[0, 0:3] = 0.95          # on the tile edge in pass 1
+            else: a[8, 8:11] = 0.95                   # same n_px and max, moved inside in pass 2
+            return a
+    with pytest.raises(RuntimeError, match='label raster'):
+        V.run([name(0, 0)], None, tmp_path / 'm', workers=0, loader=Move(), gsd=GSD)
+
+
+def test_production_mode_returns_no_geodataframe(tmp_path):
+    G, s = V.run(sorted(long_row(3, 1)), None, tmp_path / 'm', workers=0, loader=Loader(long_row(3, 1)), gsd=GSD)
+    assert G is None and s['n_objects'] == 1 and (tmp_path / 'm' / 'summary_v3.json').exists()
