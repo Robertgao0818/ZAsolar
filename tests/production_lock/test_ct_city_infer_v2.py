@@ -146,3 +146,15 @@ def test_done_count_ignores_foreign_manifest_entries(tmp_path):
     out = tmp_path / 'out'; out.mkdir()
     (out / 'done_manifest.txt').write_text('E9_N9.tif\nE8_N8.tif\n')
     assert M.update_done_manifest(['E1000_N2000.tif', 'E1100_N2000.tif'], out) == 0
+
+
+def test_single_model_process_writes_only_its_outputs(tmp_path, monkeypatch):
+    names = ['E1000_N2000.tif']; d = tmp_path / 'tiles'; mk_tiles(d, names); out = tmp_path / 'out'
+    monkeypatch.setattr(M, 'ACTIVE', ['mit_b2_s2'])
+    assert M.run_infer(names, d, out, fake_prob, writers=1)['done'] == 1
+    assert M.out_path(out, 'mit_b2_s2', 'swh', names[0]).exists() and not M.out_path(out, 'convnext_t_s0', 'pv', names[0]).exists()
+    assert M.update_done_manifest(names, out) == 1 and (out / 'done_manifest_mit_b2_s2.txt').exists()
+    monkeypatch.setattr(M, 'ACTIVE', list(M.MODELS))
+    assert M.update_done_manifest(names, out) == 0          # full tile not complete until convnext also ran
+    assert M.run_infer(names, d, out, fake_prob, writers=1)['done'] == 1
+    assert M.update_done_manifest(names, out) == 1

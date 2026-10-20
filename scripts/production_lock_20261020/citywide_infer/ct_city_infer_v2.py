@@ -54,8 +54,15 @@ def out_path(out, model, cls, tile):
     return Path(out) / model / cls / f'{Path(tile).stem}.tif'
 
 
+ACTIVE = list(MODELS)  # models this process runs (--model splits the two models over two processes)
+
+
 def tile_outputs(out, tile):
-    return [out_path(out, m, c, tile) for m in MODELS for c in CLASS_IDX]
+    return [out_path(out, m, c, tile) for m in ACTIVE for c in CLASS_IDX]
+
+
+def manifest_name():
+    return 'done_manifest.txt' if ACTIVE == list(MODELS) else f'done_manifest_{ACTIVE[0]}.txt'
 
 
 def to_u8(p):
@@ -103,7 +110,7 @@ def load_models(ckpt_root, device):
     spec = importlib.util.spec_from_file_location('train2_v2e_pinned', tr); training = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(training)
     models = {}
-    for name, (arch, md5) in MODELS.items():
+    for name, (arch, md5) in ((k, MODELS[k]) for k in ACTIVE):
         ck = Path(ckpt_root) / name / 'best_objf1.pt'
         h = hashlib.md5()
         with open(ck, 'rb') as f:
@@ -175,7 +182,7 @@ def run_infer(tiles, tile_dir, out, prob_fn, writers=4, max_pending=32, max_cons
             try:
                 x, crs, tr = futs[i].result(); futs[i] = None
                 arrays = {}
-                for m in MODELS:
+                for m in ACTIVE:
                     prob = prob_fn(m, x)
                     for c, k in CLASS_IDX.items():
                         arrays[out_path(out, m, c, t)] = to_u8(prob[k])
@@ -206,7 +213,7 @@ def run_infer(tiles, tile_dir, out, prob_fn, writers=4, max_pending=32, max_cons
 def update_done_manifest(tiles, out):
     """Append tiles of THIS list whose 4 outputs all exist to <out>/done_manifest.txt (once each).
     Returns how many tiles of this list are complete, re-checked on disk (the manifest is a record, not the truth)."""
-    mf = Path(out) / 'done_manifest.txt'
+    mf = Path(out) / manifest_name()
     have = set(mf.read_text().split()) if mf.exists() else set()
     complete = [t for t in tiles if all(p.exists() for p in tile_outputs(out, t))]
     new = [t for t in complete if t not in have]
@@ -321,12 +328,15 @@ def main(argv=None):
     a1.add_argument('--follow', action='store_true', help='keep polling until every listed tile is done')
     a1.add_argument('--ready-file', default=None, help='only process tiles named in this file (e.g. READY.txt)')
     a1.add_argument('--poll-s', type=int, default=30)
+    a1.add_argument('--model', choices=list(MODELS), default=None, help='run only this model (two processes share the GPU)')
     a2.add_argument('--workers', type=int, default=4); a2.add_argument('--allow-unreviewed-merge', action='store_true')
     a = ap.parse_args(argv)
     tiles = read_tile_list(a.tiles_csv)
     if a.limit: tiles = tiles[:a.limit]
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
-    log = open(out / f'{a.stage}_log_v2.csv', 'a')
+    global ACTIVE
+    if getattr(a, 'model', None): ACTIVE = [a.model]
+    log = open(out / (f'{a.stage}_log_v2.csv' if ACTIVE == list(MODELS) else f'{a.stage}_log_v2_{ACTIVE[0]}.csv'), 'a')
     log.write(f'START,{a.stage},{len(tiles)},{time.strftime("%F %T %Z")},{json.dumps(vars(a))}\n'); log.flush()
     if a.stage == 'infer':
         import torch
