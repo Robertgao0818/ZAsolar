@@ -255,13 +255,15 @@ wait "$DL_PID" 2>/dev/null
 log "Phase B complete. infer ok=$(ls "$STATE"/infer_*.ok 2>/dev/null|wc -l) empty=$(ls "$STATE"/infer_*.empty 2>/dev/null|wc -l) fail=$(ls "$STATE"/infer_*.fail 2>/dev/null|wc -l)"
 
 # ── Coverage gate (mandatory, before merge/delivery) ────────────────────────
-# Every grid in $GLIST must have a terminal infer_<g>.ok/.empty marker, or be listed
+# Every grid in $GLIST must have a COMPLETE download (dl_<g>.ok = errors=0, i.e. no tile
+# missing inside the grid) AND a terminal infer_<g>.ok/.empty marker, or be listed
 # in $STATE/coverage_exclusions.csv (grid,reason). Otherwise stop: a silent gap is
 # worse than a late census (CT 2026-10: 12,922 tiles never scored).
 GATE_DIR="$STATE/coverage_gate"; mkdir -p "$GATE_DIR"
 { echo grid; tr -d '\r' < "$GLIST" | sed '/^$/d'; } > "$GATE_DIR/aoi_grids.csv"
 { echo grid; for f in "$STATE"/infer_*.ok "$STATE"/infer_*.empty; do [ -e "$f" ] || continue
-    b=${f##*/infer_}; echo "${b%.*}"; done; } > "$GATE_DIR/scored_grids.csv"
+    b=${f##*/infer_}; g=${b%.*}; [ -f "$STATE/dl_$g.ok" ] && echo "$g"; done; } | sort -u > "$GATE_DIR/scored_grids.csv.tmp"
+{ echo grid; grep -vx grid "$GATE_DIR/scored_grids.csv.tmp"; } > "$GATE_DIR/scored_grids.csv"
 EXCL=(); [ -f "$STATE/coverage_exclusions.csv" ] && EXCL=(--exclusions "$STATE/coverage_exclusions.csv")
 if ! python "$ZAS/scripts/check_coverage.py" --city ct --key grid --aoi "$GATE_DIR/aoi_grids.csv" \
      --scored "$GATE_DIR/scored_grids.csv" "${EXCL[@]}" --out-dir "$GATE_DIR" > "$LOGS/coverage_gate.log" 2>&1; then

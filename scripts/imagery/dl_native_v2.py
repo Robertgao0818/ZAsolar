@@ -37,18 +37,32 @@ def _read_keys(p):
     try:
         with open(p) as f: return {r[0] for r in csv.reader(f) if r}
     except FileNotFoundError: return set()
-in_man=_read_keys(MAN);in_src=_read_keys(SRC)
+def _read_src(p):
+    try:
+        with open(p) as f: return {r[0]:r[1] for r in csv.reader(f) if len(r)>=2}  # last row per tile wins
+    except FileNotFoundError: return {}
+in_man=_read_keys(MAN);in_src=_read_src(SRC)
+def link_into_root(n,path):
+    """Expose a valid tile from an --existing dir at ROOT/tiles/<n> (symlink) so manifest consumers that open
+    ROOT/tiles/<tile> can read it. Never replaces an existing ROOT/tiles entry."""
+    dst=f"{a.root}/tiles/{n}"
+    if os.path.abspath(path)==os.path.abspath(dst): return path
+    if os.path.lexists(dst):
+        print(f"WARN {dst} exists but is not the valid tile used ({path}); not replaced",flush=True);return path
+    os.symlink(os.path.abspath(path),dst);return dst
 def record(x,y,path,source):
     """Append tile to the manifest (once) and its resolved path to the sidecar. Thread-safe."""
     n=f"E{x}_N{y}.tif"
     with lk:
+        if source=="existing": path=link_into_root(n,path)
         if n not in in_man:
             row=[n,os.path.getsize(path),hashlib.sha256(open(path,"rb").read()).hexdigest(),time.strftime("%Y-%m-%dT%H:%M:%S%z")]
             with open(MAN,"a") as f: csv.writer(f).writerow(row)
             in_man.add(n)
-        if n not in in_src:
-            with open(SRC,"a") as f: csv.writer(f).writerow([n,os.path.abspath(path),source])
-            in_src.add(n)
+        p=os.path.abspath(path)
+        if in_src.get(n)!=p:  # new tile or path changed on resume: append; readers take the last row
+            with open(SRC,"a") as f: csv.writer(f).writerow([n,p,source])
+            in_src[n]=p
 def sess():
     if not hasattr(tl,"s"): tl.s=requests.Session()
     return tl.s
@@ -88,6 +102,7 @@ unlisted=sum(f"E{x}_N{y}.tif" not in in_man for x,y in present)
 print(f"already present={len(present)} (not yet in manifest: {unlisted})",flush=True)
 if a.dry: sys.exit()
 for x,y in present: record(x,y,loc[(x,y)],"existing" if not loc[(x,y)].startswith(f"{a.root}/tiles/") else "downloaded")
+for x,y in need: loc[(x,y)]=None
 st={};t0=time.time();done=0
 with ThreadPoolExecutor(a.workers) as ex:
     for f in as_completed([ex.submit(fetch_block,bx,by,v) for (bx,by),v in blocks.items()]):
@@ -97,7 +112,7 @@ with ThreadPoolExecutor(a.workers) as ex:
 for g,ts in grid_tiles.items():
     files=[]
     for x,y in ts:
-        n=f"E{x}_N{y}.tif";files.append(next((f"{d}/{n}" for d in [f"{a.root}/tiles"]+a.existing if os.path.exists(f"{d}/{n}")),f"{a.root}/tiles/{n}"))
+        files.append(loc.get((x,y)) or find(x,y) or f"{a.root}/tiles/E{x}_N{y}.tif")  # same validity rule as the manifest
     nf=sum(st.get(t,"").startswith("fail") for t in ts)
     if nf==0 and not os.path.exists(f"{a.root}/vrt/{g}.vrt"): subprocess.run(["gdalbuildvrt","-q",f"{a.root}/vrt/{g}.vrt"]+files,check=True)
     with open(f"{a.root}/manifest_grids_v2.csv","a") as f: csv.writer(f).writerow([g,len(ts),nf,"done" if nf==0 else "incomplete",time.strftime("%Y-%m-%dT%H:%M:%S%z")])

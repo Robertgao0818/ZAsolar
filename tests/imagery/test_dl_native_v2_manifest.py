@@ -30,3 +30,21 @@ def test_existing_tiles_go_into_manifest(tmp_path):
     src = {r[0]: r[2] for r in csv.reader(open(root / "manifest_tiles_v2_src.csv"))}
     assert sorted(man) == ["E100_N200.tif", "E200_N200.tif"]
     assert src == {"E100_N200.tif": "existing", "E200_N200.tif": "downloaded"}
+    # legacy consumers open ROOT/tiles/<tile>: the existing tile must be reachable there (symlink, not a copy)
+    link = root / "tiles/E100_N200.tif"
+    assert link.is_symlink() and link.resolve() == (ext / "tiles/E100_N200.tif").resolve()
+    assert sum(1 for _ in open(root / "manifest_tiles_v2_src.csv")) == 2
+
+
+def test_sidecar_updates_when_path_changes(tmp_path):
+    root, a_dir, b_dir = tmp_path / "root", tmp_path / "A", tmp_path / "B"
+    fake_tile(a_dir / "E100_N200.tif", 100, 200)
+    base = [sys.executable, str(SCRIPT), "--root", str(root), "--only-tiles", "E100_N200"]
+    subprocess.run(base + ["--existing", str(a_dir)], check=True, capture_output=True)
+    (root / "tiles/E100_N200.tif").unlink()          # simulate A going away (link and source)
+    (a_dir / "E100_N200.tif").rename(tmp_path / "gone.tif")
+    fake_tile(b_dir / "E100_N200.tif", 100, 200)
+    subprocess.run(base + ["--existing", str(b_dir)], check=True, capture_output=True)
+    rows = list(csv.reader(open(root / "manifest_tiles_v2_src.csv")))
+    assert rows[-1][1] == str(root / "tiles/E100_N200.tif") and (root / "tiles/E100_N200.tif").resolve() == (b_dir / "E100_N200.tif").resolve()
+    assert [r[0] for r in csv.reader(open(root / "manifest_tiles_v2.csv"))] == ["E100_N200.tif"]

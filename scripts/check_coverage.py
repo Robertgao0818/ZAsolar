@@ -19,7 +19,15 @@ Inputs
   --reference GPKG   optional old/reference inventory; objects whose representative point
                      falls in an unscored unit are counted (needs AOI bounds).
 Outputs (--out-dir): coverage_summary.json, unscored_units.csv, [unscored_reference.csv]
-Exit codes: 0 pass, 2 unscored units / bad exclusions, 1 input error.
+Exit codes: 0 pass, 2 unscored units / bad exclusions, 1 input error. There is no tolerance knob:
+a unit that is legitimately not scored must be listed in an exclusions file with its reason.
+
+Wiring
+  * scripts/ct_census_run.sh (grid-level legacy pipeline) runs this before cls+merge.
+  * Tile-level pregate pipelines (CT native 0.05 m, JHB Vexcel) must run, before merge/delivery:
+      python scripts/build_aoi_tiles.py ct-native --grids content_grids_1301.csv --out aoi.csv
+      python scripts/check_coverage.py --city ct --aoi aoi.csv --scored tile_scores_v1.csv \
+          --score-col max_score [--exclusions excl.csv] --out-dir gate/ || exit 2
 """
 from __future__ import annotations
 
@@ -61,7 +69,6 @@ def main(argv=None) -> int:
     ap.add_argument("--basename", action="store_true", help="compare file basenames only")
     ap.add_argument("--reference", default=None)
     ap.add_argument("--crs", default=None, help="CRS of AOI bounds, e.g. EPSG:32734")
-    ap.add_argument("--max-unscored", type=int, default=0, help="tolerated unscored units (default 0)")
     ap.add_argument("--out-dir", required=True)
     a = ap.parse_args(argv)
     os.makedirs(a.out_dir, exist_ok=True)
@@ -70,7 +77,11 @@ def main(argv=None) -> int:
     if a.key not in aoi.columns:
         print(f"[gate] input error: AOI has no column '{a.key}'", file=sys.stderr)
         return 1
+    raw_n = aoi[a.key].astype(str).str.strip().nunique()
     aoi[a.key] = norm(aoi[a.key], a.basename)
+    if a.basename and aoi[a.key].nunique() != raw_n:
+        print("[gate] input error: --basename merges distinct AOI units (names not unique); drop --basename", file=sys.stderr)
+        return 1
     dup = int(aoi[a.key].duplicated().sum())
     aoi = aoi.drop_duplicates(a.key)
     if aoi.empty:
@@ -98,7 +109,6 @@ def main(argv=None) -> int:
         "scored": len(scored), "excluded": len(excluded), "excluded_by_reason": reasons,
         "unscored": len(unscored), "unscored_share": round(len(unscored) / len(A), 6),
         "scored_outside_aoi": len(S - A), "exclusions_without_reason": len(bad_ex),
-        "max_unscored": a.max_unscored,
         "inputs": {"aoi": a.aoi, "scored": a.scored, "exclusions": a.exclusions, "reference": a.reference},
     }
     pd.DataFrame({a.key: unscored}).merge(aoi, on=a.key, how="left").to_csv(
@@ -126,7 +136,7 @@ def main(argv=None) -> int:
         summ["reference_by_status"] = {k: {"n": int(v.n), "area_m2": float(v.area_m2)} for k, v in g.iterrows()}
         j[j.status == "unscored"][["ref_idx", a.key, "area_m2"]].to_csv(f"{a.out_dir}/unscored_reference.csv", index=False)
 
-    fail = len(unscored) > a.max_unscored or bool(bad_ex)
+    fail = bool(unscored) or bool(bad_ex)
     summ["result"] = "FAIL" if fail else "PASS"
     json.dump(summ, open(f"{a.out_dir}/coverage_summary.json", "w"), indent=1, ensure_ascii=False)
     print(json.dumps({k: v for k, v in summ.items() if k != "inputs"}, ensure_ascii=False))
