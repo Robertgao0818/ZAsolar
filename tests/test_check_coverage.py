@@ -1,0 +1,49 @@
+import csv, json, subprocess, sys
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+import check_coverage  # noqa: E402
+
+
+def w(p, header, rows):
+    with open(p, "w", newline="") as f:
+        c = csv.writer(f); c.writerow(header); c.writerows(rows)
+    return str(p)
+
+
+def test_pass_with_scored_and_excluded(tmp_path):
+    aoi = w(tmp_path / "a.csv", ["tile"], [["a"], ["b"], ["c"]])
+    sc = w(tmp_path / "s.csv", ["tile", "max_score"], [["a", 0.1], ["b", 0.9]])
+    ex = w(tmp_path / "e.csv", ["tile", "reason"], [["c", "no_image_data"]])
+    assert check_coverage.main(["--city", "t", "--aoi", aoi, "--scored", sc, "--score-col", "max_score",
+                                "--exclusions", ex, "--out-dir", str(tmp_path / "o")]) == 0
+    s = json.load(open(tmp_path / "o/coverage_summary.json"))
+    assert (s["scored"], s["excluded"], s["unscored"]) == (2, 1, 0)
+
+
+def test_fail_on_unscored_nan_score_and_empty_reason(tmp_path):
+    aoi = w(tmp_path / "a.csv", ["tile"], [["a"], ["b"], ["c"]])
+    sc = w(tmp_path / "s.csv", ["tile", "max_score"], [["a", 0.1], ["b", ""]])
+    ex = w(tmp_path / "e.csv", ["tile", "reason"], [["c", ""]])
+    rc = check_coverage.main(["--city", "t", "--aoi", aoi, "--scored", sc, "--score-col", "max_score",
+                              "--exclusions", ex, "--out-dir", str(tmp_path / "o")])
+    assert rc == 2
+    s = json.load(open(tmp_path / "o/coverage_summary.json"))
+    assert s["unscored"] == 2 and s["exclusions_without_reason"] == 1 and s["result"] == "FAIL"
+
+
+def test_reference_on_unscored(tmp_path):
+    gpd = pytest.importorskip("geopandas")
+    from shapely.geometry import box
+    aoi = w(tmp_path / "a.csv", ["tile", "minx", "miny", "maxx", "maxy"], [["a", 0, 0, 100, 100], ["b", 100, 0, 200, 100]])
+    sc = w(tmp_path / "s.csv", ["tile"], [["a"]])
+    ref = tmp_path / "r.gpkg"
+    gpd.GeoDataFrame(geometry=[box(10, 10, 20, 20), box(150, 10, 160, 20), box(500, 500, 501, 501)], crs="EPSG:32734").to_file(ref)
+    rc = check_coverage.main(["--city", "t", "--aoi", aoi, "--scored", sc, "--reference", str(ref),
+                              "--crs", "EPSG:32734", "--out-dir", str(tmp_path / "o")])
+    s = json.load(open(tmp_path / "o/coverage_summary.json"))
+    assert rc == 2 and s["reference_by_status"]["unscored"]["n"] == 1 and s["reference_by_status"]["outside_aoi"]["n"] == 1

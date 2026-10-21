@@ -1,7 +1,13 @@
 """dl_native_v2: same output as dl_native.py (EPSG:32734, 0.05 m, 2000x2000 tiles E{x}_N{y}.tif, JPEG q95 YCbCr 512-tiled)
 but fetches 2x2 tiles per WMS GetMap (4000x4000 px = server max) and cuts locally. Fewer requests (~4x), thread pool, keep-alive.
 Usage: python3 dl_native_v2.py --root DIR [--grids grid_list.csv] [--workers 6] [--only-tiles E1_N2,...] [--dry]
-Outputs go to ROOT/tiles, ROOT/vrt, ROOT/manifest_tiles_v2.csv, ROOT/manifest_grids_v2.csv. Skips valid existing tiles. Never overwrites a valid tile."""
+Outputs go to ROOT/tiles, ROOT/vrt, ROOT/manifest_tiles_v2.csv, ROOT/manifest_grids_v2.csv. Skips valid existing tiles. Never overwrites a valid tile.
+Manifest contract (fix 2026-10-22): EVERY wanted tile that ends up valid is in manifest_tiles_v2.csv (tile,size,sha256,time),
+including tiles already present in ROOT/tiles or an --existing dir. Before this fix, already-present tiles were skipped
+without a manifest row, so the CT pregate (which scores manifest tiles only) never saw 12,922 tiles.
+manifest_tiles_v2_src.csv (tile,path,source) gives the file actually used; source = downloaded | existing.
+Consumers must resolve tile paths via this sidecar (existing tiles may live outside ROOT/tiles), and the
+coverage gate scripts/check_coverage.py must pass before merge/delivery."""
 import os,io,sys,time,math,csv,hashlib,argparse,subprocess,threading,numpy as np,pandas as pd,requests,rasterio
 from rasterio.transform import from_origin
 from pyproj import Transformer
@@ -23,8 +29,26 @@ def ok(p):
     try:
         with rasterio.open(p) as s: return s.width==T and s.height==T
     except Exception: return False
-def have(x,y):
-    n=f"E{x}_N{y}.tif";return any(ok(f"{d}/{n}") for d in [f"{a.root}/tiles"]+a.existing)
+def find(x,y):
+    n=f"E{x}_N{y}.tif";return next((f"{d}/{n}" for d in [f"{a.root}/tiles"]+a.existing if ok(f"{d}/{n}")),None)
+def have(x,y): return find(x,y) is not None
+MAN=f"{a.root}/manifest_tiles_v2.csv";SRC=f"{a.root}/manifest_tiles_v2_src.csv"
+def _read_keys(p):
+    try:
+        with open(p) as f: return {r[0] for r in csv.reader(f) if r}
+    except FileNotFoundError: return set()
+in_man=_read_keys(MAN);in_src=_read_keys(SRC)
+def record(x,y,path,source):
+    """Append tile to the manifest (once) and its resolved path to the sidecar. Thread-safe."""
+    n=f"E{x}_N{y}.tif"
+    with lk:
+        if n not in in_man:
+            row=[n,os.path.getsize(path),hashlib.sha256(open(path,"rb").read()).hexdigest(),time.strftime("%Y-%m-%dT%H:%M:%S%z")]
+            with open(MAN,"a") as f: csv.writer(f).writerow(row)
+            in_man.add(n)
+        if n not in in_src:
+            with open(SRC,"a") as f: csv.writer(f).writerow([n,os.path.abspath(path),source])
+            in_src.add(n)
 def sess():
     if not hasattr(tl,"s"): tl.s=requests.Session()
     return tl.s
@@ -43,11 +67,9 @@ def fetch_block(bx,by,need):
     for x,y in need:
         i=(x-x0)//STEP;j=(y-y0)//STEP;r0=(ny-1-j)*T;sub=im[r0:r0+T,i*T:i*T+T]
         dst=f"{a.root}/tiles/E{x}_N{y}.tif";tmp=dst+".tmpv2"
-        if ok(dst): out.append((x,y,"exists"));continue
+        if ok(dst): record(x,y,dst,"existing");out.append((x,y,"exists"));continue
         with rasterio.open(tmp,"w",driver="GTiff",width=T,height=T,count=3,dtype="uint8",crs="EPSG:32734",transform=from_origin(x,y+STEP,R,R),compress="JPEG",jpeg_quality=95,photometric="YCBCR",tiled=True,blockxsize=512,blockysize=512) as o: o.write(sub.transpose(2,0,1))
-        os.replace(tmp,dst)
-        with lk, open(f"{a.root}/manifest_tiles_v2.csv","a") as f:
-            csv.writer(f).writerow([os.path.basename(dst),os.path.getsize(dst),hashlib.sha256(open(dst,"rb").read()).hexdigest(),time.strftime("%Y-%m-%dT%H:%M:%S%z")])
+        os.replace(tmp,dst);record(x,y,dst,"downloaded")
         out.append((x,y,"ok"))
     return out
 # collect all needed tiles (dedup across grids), group into BxB blocks on a global grid
@@ -57,11 +79,15 @@ else:
     G=pd.read_csv(a.grids or f"{a.root}/grid_list.csv")
     for r in G.itertuples(): grid_tiles[r.grid]=tiles_for(r)
     want=sorted({t for v in grid_tiles.values() for t in v})
-need=[t for t in want if not have(*t)]
+loc={t:find(*t) for t in want};need=[t for t in want if loc[t] is None]
+present=[t for t in want if loc[t] is not None]
 blocks={}
 for x,y in need: blocks.setdefault((x//(STEP*B),y//(STEP*B)),[]).append((x,y))
 print(f"tiles wanted={len(want)} missing={len(need)} requests={len(blocks)} (v1 would use {len(need)})",flush=True)
+unlisted=sum(f"E{x}_N{y}.tif" not in in_man for x,y in present)
+print(f"already present={len(present)} (not yet in manifest: {unlisted})",flush=True)
 if a.dry: sys.exit()
+for x,y in present: record(x,y,loc[(x,y)],"existing" if not loc[(x,y)].startswith(f"{a.root}/tiles/") else "downloaded")
 st={};t0=time.time();done=0
 with ThreadPoolExecutor(a.workers) as ex:
     for f in as_completed([ex.submit(fetch_block,bx,by,v) for (bx,by),v in blocks.items()]):

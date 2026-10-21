@@ -254,6 +254,22 @@ for p in "${BK_PIDS[@]}"; do wait "$p" 2>/dev/null; done
 wait "$DL_PID" 2>/dev/null
 log "Phase B complete. infer ok=$(ls "$STATE"/infer_*.ok 2>/dev/null|wc -l) empty=$(ls "$STATE"/infer_*.empty 2>/dev/null|wc -l) fail=$(ls "$STATE"/infer_*.fail 2>/dev/null|wc -l)"
 
+# ── Coverage gate (mandatory, before merge/delivery) ────────────────────────
+# Every grid in $GLIST must have a terminal infer_<g>.ok/.empty marker, or be listed
+# in $STATE/coverage_exclusions.csv (grid,reason). Otherwise stop: a silent gap is
+# worse than a late census (CT 2026-10: 12,922 tiles never scored).
+GATE_DIR="$STATE/coverage_gate"; mkdir -p "$GATE_DIR"
+{ echo grid; tr -d '\r' < "$GLIST" | sed '/^$/d'; } > "$GATE_DIR/aoi_grids.csv"
+{ echo grid; for f in "$STATE"/infer_*.ok "$STATE"/infer_*.empty; do [ -e "$f" ] || continue
+    b=${f##*/infer_}; echo "${b%.*}"; done; } > "$GATE_DIR/scored_grids.csv"
+EXCL=(); [ -f "$STATE/coverage_exclusions.csv" ] && EXCL=(--exclusions "$STATE/coverage_exclusions.csv")
+if ! python "$ZAS/scripts/check_coverage.py" --city ct --key grid --aoi "$GATE_DIR/aoi_grids.csv" \
+     --scored "$GATE_DIR/scored_grids.csv" "${EXCL[@]}" --out-dir "$GATE_DIR" > "$LOGS/coverage_gate.log" 2>&1; then
+  log "COVERAGE GATE FAILED — not merging. See $LOGS/coverage_gate.log and $GATE_DIR/unscored_units.csv"
+  echo "coverage-gate-failed" > "$STATE/PHASE"; write_status; exit 2
+fi
+log "$(tail -1 "$LOGS/coverage_gate.log")"
+
 # ── Phase C: cls v2 over ALL grids (one pass) + merge ───────────────────────
 echo "phaseC-cls+merge" > "$STATE/PHASE"; write_status
 OK_GRIDS=(); for G in "${GRIDS[@]}"; do [ -f "$STATE/infer_$G.ok" ] && OK_GRIDS+=("$G"); done
