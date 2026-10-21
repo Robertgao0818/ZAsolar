@@ -1,0 +1,77 @@
+"""dl_native_v2: same output as dl_native.py (EPSG:32734, 0.05 m, 2000x2000 tiles E{x}_N{y}.tif, JPEG q95 YCbCr 512-tiled)
+but fetches 2x2 tiles per WMS GetMap (4000x4000 px = server max) and cuts locally. Fewer requests (~4x), thread pool, keep-alive.
+Usage: python3 dl_native_v2.py --root DIR [--grids grid_list.csv] [--workers 6] [--only-tiles E1_N2,...] [--dry]
+Outputs go to ROOT/tiles, ROOT/vrt, ROOT/manifest_tiles_v2.csv, ROOT/manifest_grids_v2.csv. Skips valid existing tiles. Never overwrites a valid tile."""
+import os,io,sys,time,math,csv,hashlib,argparse,subprocess,threading,numpy as np,pandas as pd,requests,rasterio
+from rasterio.transform import from_origin
+from pyproj import Transformer
+from PIL import Image
+from concurrent.futures import ThreadPoolExecutor,as_completed
+U="https://cityimg.capetown.gov.za/erdas-iws/ogc/wms/GeoSpatial Datasets";L="Aerial Imagery_Aerial Imagery 2025Jan"
+R=0.05;T=2000;STEP=100;BUF=50.0;B=2  # block = BxB tiles
+ap=argparse.ArgumentParser();ap.add_argument("--root",required=True);ap.add_argument("--grids",default=None)
+ap.add_argument("--existing",action="append",default=[],help="extra tiles dir(s) to treat as already present (read-only)")
+ap.add_argument("--workers",type=int,default=6);ap.add_argument("--only-tiles",default=None);ap.add_argument("--dry",action="store_true")
+a=ap.parse_args();os.makedirs(f"{a.root}/tiles",exist_ok=True);os.makedirs(f"{a.root}/vrt",exist_ok=True)
+tf=Transformer.from_crs(4326,32734,always_xy=True);tl=threading.local();lk=threading.Lock()
+def tiles_for(r):
+    xs,ys=tf.transform([r.minx,r.maxx,r.minx,r.maxx],[r.miny,r.miny,r.maxy,r.maxy])
+    x0=math.floor((min(xs)-BUF)/STEP)*STEP;x1=math.ceil((max(xs)+BUF)/STEP)*STEP
+    y0=math.floor((min(ys)-BUF)/STEP)*STEP;y1=math.ceil((max(ys)+BUF)/STEP)*STEP
+    return [(int(x),int(y)) for x in range(int(x0),int(x1),STEP) for y in range(int(y0),int(y1),STEP)]
+def ok(p):
+    try:
+        with rasterio.open(p) as s: return s.width==T and s.height==T
+    except Exception: return False
+def have(x,y):
+    n=f"E{x}_N{y}.tif";return any(ok(f"{d}/{n}") for d in [f"{a.root}/tiles"]+a.existing)
+def sess():
+    if not hasattr(tl,"s"): tl.s=requests.Session()
+    return tl.s
+def fetch_block(bx,by,need):
+    xs=sorted({x for x,_ in need});ys=sorted({y for _,y in need})
+    x0,y0=min(xs),min(ys);nx=(max(xs)-x0)//STEP+1;ny=(max(ys)-y0)//STEP+1
+    p=dict(service="WMS",version="1.1.1",request="GetMap",layers=L,styles="",srs="EPSG:32734",bbox=f"{x0},{y0},{x0+nx*STEP},{y0+ny*STEP}",width=T*nx,height=T*ny,format="image/jpeg")
+    for k in range(5):
+        try:
+            r=sess().get(U,params=p,timeout=300);r.raise_for_status()
+            if "image" not in r.headers.get("Content-Type",""): raise RuntimeError(r.text[:120])
+            im=np.array(Image.open(io.BytesIO(r.content)).convert("RGB"));assert im.shape[:2]==(T*ny,T*nx);break
+        except Exception as e: err=str(e)[:100];time.sleep(10*(k+1))
+    else: return [(x,y,"fail:"+err) for x,y in need]
+    out=[]
+    for x,y in need:
+        i=(x-x0)//STEP;j=(y-y0)//STEP;r0=(ny-1-j)*T;sub=im[r0:r0+T,i*T:i*T+T]
+        dst=f"{a.root}/tiles/E{x}_N{y}.tif";tmp=dst+".tmpv2"
+        if ok(dst): out.append((x,y,"exists"));continue
+        with rasterio.open(tmp,"w",driver="GTiff",width=T,height=T,count=3,dtype="uint8",crs="EPSG:32734",transform=from_origin(x,y+STEP,R,R),compress="JPEG",jpeg_quality=95,photometric="YCBCR",tiled=True,blockxsize=512,blockysize=512) as o: o.write(sub.transpose(2,0,1))
+        os.replace(tmp,dst)
+        with lk, open(f"{a.root}/manifest_tiles_v2.csv","a") as f:
+            csv.writer(f).writerow([os.path.basename(dst),os.path.getsize(dst),hashlib.sha256(open(dst,"rb").read()).hexdigest(),time.strftime("%Y-%m-%dT%H:%M:%S%z")])
+        out.append((x,y,"ok"))
+    return out
+# collect all needed tiles (dedup across grids), group into BxB blocks on a global grid
+grid_tiles={}
+if a.only_tiles: want=[tuple(int(v[1:]) for v in t.split("_")) for t in a.only_tiles.split(",")]
+else:
+    G=pd.read_csv(a.grids or f"{a.root}/grid_list.csv")
+    for r in G.itertuples(): grid_tiles[r.grid]=tiles_for(r)
+    want=sorted({t for v in grid_tiles.values() for t in v})
+need=[t for t in want if not have(*t)]
+blocks={}
+for x,y in need: blocks.setdefault((x//(STEP*B),y//(STEP*B)),[]).append((x,y))
+print(f"tiles wanted={len(want)} missing={len(need)} requests={len(blocks)} (v1 would use {len(need)})",flush=True)
+if a.dry: sys.exit()
+st={};t0=time.time();done=0
+with ThreadPoolExecutor(a.workers) as ex:
+    for f in as_completed([ex.submit(fetch_block,bx,by,v) for (bx,by),v in blocks.items()]):
+        for x,y,s in f.result(): st[(x,y)]=s
+        done+=1
+        if done%50==0 or done==len(blocks): print(f"{done}/{len(blocks)} req, {time.time()-t0:.0f}s, fails={sum(v.startswith('fail') for v in st.values())}",flush=True)
+for g,ts in grid_tiles.items():
+    files=[]
+    for x,y in ts:
+        n=f"E{x}_N{y}.tif";files.append(next((f"{d}/{n}" for d in [f"{a.root}/tiles"]+a.existing if os.path.exists(f"{d}/{n}")),f"{a.root}/tiles/{n}"))
+    nf=sum(st.get(t,"").startswith("fail") for t in ts)
+    if nf==0 and not os.path.exists(f"{a.root}/vrt/{g}.vrt"): subprocess.run(["gdalbuildvrt","-q",f"{a.root}/vrt/{g}.vrt"]+files,check=True)
+    with open(f"{a.root}/manifest_grids_v2.csv","a") as f: csv.writer(f).writerow([g,len(ts),nf,"done" if nf==0 else "incomplete",time.strftime("%Y-%m-%dT%H:%M:%S%z")])
