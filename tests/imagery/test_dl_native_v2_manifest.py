@@ -48,3 +48,18 @@ def test_sidecar_updates_when_path_changes(tmp_path):
     rows = list(csv.reader(open(root / "manifest_tiles_v2_src.csv")))
     assert rows[-1][1] == str(root / "tiles/E100_N200.tif") and (root / "tiles/E100_N200.tif").resolve() == (b_dir / "E100_N200.tif").resolve()
     assert [r[0] for r in csv.reader(open(root / "manifest_tiles_v2.csv"))] == ["E100_N200.tif"]
+
+
+def test_invalid_root_file_not_manifested_and_dangling_link_replaced(tmp_path):
+    root, ext = tmp_path / "root", tmp_path / "old"
+    fake_tile(ext / "E100_N200.tif", 100, 200); fake_tile(ext / "E200_N200.tif", 200, 200)
+    (root / "tiles").mkdir(parents=True)
+    (root / "tiles/E100_N200.tif").write_bytes(b"corrupt")                     # invalid real file: keep, do not manifest
+    (root / "tiles/E200_N200.tif").symlink_to(tmp_path / "nowhere.tif")        # dangling link: replace
+    subprocess.run([sys.executable, str(SCRIPT), "--root", str(root), "--existing", str(ext),
+                    "--only-tiles", "E100_N200,E200_N200"], check=True, capture_output=True)
+    man = {r[0]: r for r in csv.reader(open(root / "manifest_tiles_v2.csv"))}
+    assert list(man) == ["E200_N200.tif"]
+    assert (root / "tiles/E100_N200.tif").read_bytes() == b"corrupt"
+    assert (root / "tiles/E200_N200.tif").resolve() == (ext / "E200_N200.tif").resolve()
+    assert int(man["E200_N200.tif"][1]) == (ext / "E200_N200.tif").stat().st_size

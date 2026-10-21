@@ -49,12 +49,6 @@ def test_reference_on_unscored(tmp_path):
     assert rc == 2 and s["reference_by_status"]["unscored"]["n"] == 1 and s["reference_by_status"]["outside_aoi"]["n"] == 1
 
 
-def test_basename_collision_rejected(tmp_path):
-    aoi = w(tmp_path / "a.csv", ["tile"], [["g1/a.tif"], ["g2/a.tif"]])
-    sc = w(tmp_path / "s.csv", ["tile"], [["g1/a.tif"]])
-    assert check_coverage.main(["--city", "t", "--aoi", aoi, "--scored", sc, "--basename", "--out-dir", str(tmp_path / "o")]) == 1
-
-
 def test_ct_census_run_gate_requires_complete_download(tmp_path):
     """Shell wiring: grid with infer .ok but dl .fail (partial download) must fail the gate."""
     import re
@@ -62,9 +56,12 @@ def test_ct_census_run_gate_requires_complete_download(tmp_path):
     block = sh[sh.index("# ── Coverage gate"):sh.index("# ── Phase C")]
     st, logs = tmp_path / "state", tmp_path / "logs"; st.mkdir(); logs.mkdir()
     (st / "glist.txt").write_text("CPT1\nCPT2\n")
-    for f in ["infer_CPT1.ok", "dl_CPT1.ok", "infer_CPT2.ok", "dl_CPT2.fail"]: (st / f).touch()
+    import os, time
+    for f in ["dl_CPT1.ok", "infer_CPT1.ok", "infer_CPT2.ok", "dl_CPT2.fail", "dl_CPT3.ok", "infer_CPT3.ok"]: (st / f).touch()
+    (st / "glist.txt").write_text("CPT1\nCPT2\nCPT3\n")
+    t = time.time(); os.utime(st / "infer_CPT3.ok", (t - 100, t - 100))  # CPT3: download completed AFTER inference
     script = (f'set -uo pipefail\nSTATE={st}; LOGS={logs}; GLIST={st}/glist.txt; ZAS={ROOT}\n'
               'log(){ echo "$*"; }; write_status(){ :; }\n' + block + "\necho GATE_PASSED\n")
     r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env={"PATH": __import__("os").environ["PATH"]})
     assert r.returncode == 2 and "GATE_PASSED" not in r.stdout
-    assert (st / "coverage_gate/unscored_units.csv").read_text().split() == ["grid", "CPT2"]
+    assert (st / "coverage_gate/unscored_units.csv").read_text().split() == ["grid", "CPT2", "CPT3"]

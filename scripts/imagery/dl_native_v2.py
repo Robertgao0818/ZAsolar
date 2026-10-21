@@ -41,24 +41,35 @@ def _read_src(p):
     try:
         with open(p) as f: return {r[0]:r[1] for r in csv.reader(f) if len(r)>=2}  # last row per tile wins
     except FileNotFoundError: return {}
-in_man=_read_keys(MAN);in_src=_read_src(SRC)
+def _read_man(p):
+    try:
+        with open(p) as f: return {r[0]:r[1] for r in csv.reader(f) if len(r)>=2}  # tile -> size (last row wins)
+    except FileNotFoundError: return {}
+in_man=_read_man(MAN);in_src=_read_src(SRC)
 def link_into_root(n,path):
     """Expose a valid tile from an --existing dir at ROOT/tiles/<n> (symlink) so manifest consumers that open
-    ROOT/tiles/<tile> can read it. Never replaces an existing ROOT/tiles entry."""
+    ROOT/tiles/<tile> can read it. Returns the ROOT path, or None if ROOT/tiles/<n> holds an invalid real file
+    (never replaced; the tile is then left OUT of the manifest so the coverage gate reports it). Only a dangling
+    symlink (no data) is replaced."""
     dst=f"{a.root}/tiles/{n}"
-    if os.path.abspath(path)==os.path.abspath(dst): return path
-    if os.path.lexists(dst):
-        print(f"WARN {dst} exists but is not the valid tile used ({path}); not replaced",flush=True);return path
+    if os.path.abspath(path)==os.path.abspath(dst): return dst
+    if os.path.islink(dst) and not os.path.exists(dst): os.unlink(dst)
+    elif os.path.lexists(dst):
+        if os.path.islink(dst) and ok(dst): return dst  # live link to a valid tile already
+        print(f"WARN {dst} exists but is invalid; valid copy at {path}; NOT replaced and NOT manifested",flush=True);return None
     os.symlink(os.path.abspath(path),dst);return dst
 def record(x,y,path,source):
     """Append tile to the manifest (once) and its resolved path to the sidecar. Thread-safe."""
     n=f"E{x}_N{y}.tif"
     with lk:
-        if source=="existing": path=link_into_root(n,path)
-        if n not in in_man:
-            row=[n,os.path.getsize(path),hashlib.sha256(open(path,"rb").read()).hexdigest(),time.strftime("%Y-%m-%dT%H:%M:%S%z")]
+        if source=="existing":
+            path=link_into_root(n,path)
+            if path is None: return
+        sz=str(os.path.getsize(path))
+        if in_man.get(n)!=sz:  # new tile, or file replaced since last row: append; readers keep the last row
+            row=[n,sz,hashlib.sha256(open(path,"rb").read()).hexdigest(),time.strftime("%Y-%m-%dT%H:%M:%S%z")]
             with open(MAN,"a") as f: csv.writer(f).writerow(row)
-            in_man.add(n)
+            in_man[n]=sz
         p=os.path.abspath(path)
         if in_src.get(n)!=p:  # new tile or path changed on resume: append; readers take the last row
             with open(SRC,"a") as f: csv.writer(f).writerow([n,p,source])

@@ -262,7 +262,10 @@ log "Phase B complete. infer ok=$(ls "$STATE"/infer_*.ok 2>/dev/null|wc -l) empt
 GATE_DIR="$STATE/coverage_gate"; mkdir -p "$GATE_DIR"
 { echo grid; tr -d '\r' < "$GLIST" | sed '/^$/d'; } > "$GATE_DIR/aoi_grids.csv"
 { echo grid; for f in "$STATE"/infer_*.ok "$STATE"/infer_*.empty; do [ -e "$f" ] || continue
-    b=${f##*/infer_}; g=${b%.*}; [ -f "$STATE/dl_$g.ok" ] && echo "$g"; done; } | sort -u > "$GATE_DIR/scored_grids.csv.tmp"
+    b=${f##*/infer_}; g=${b%.*}
+    # infer marker must be newer than the complete download: a marker left from a partial-download
+    # pass (dl .fail -> later .ok) means the late tiles were never inferred -> unscored.
+    [ -f "$STATE/dl_$g.ok" ] && ! [ "$STATE/dl_$g.ok" -nt "$f" ] && echo "$g"; done; } | sort -u > "$GATE_DIR/scored_grids.csv.tmp"
 { echo grid; grep -vx grid "$GATE_DIR/scored_grids.csv.tmp"; } > "$GATE_DIR/scored_grids.csv"
 EXCL=(); [ -f "$STATE/coverage_exclusions.csv" ] && EXCL=(--exclusions "$STATE/coverage_exclusions.csv")
 if ! python "$ZAS/scripts/check_coverage.py" --city ct --key grid --aoi "$GATE_DIR/aoi_grids.csv" \

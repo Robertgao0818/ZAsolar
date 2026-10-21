@@ -66,7 +66,6 @@ def main(argv=None) -> int:
     ap.add_argument("--exclusions", nargs="*", default=[])
     ap.add_argument("--key", default="tile")
     ap.add_argument("--score-col", default=None)
-    ap.add_argument("--basename", action="store_true", help="compare file basenames only")
     ap.add_argument("--reference", default=None)
     ap.add_argument("--crs", default=None, help="CRS of AOI bounds, e.g. EPSG:32734")
     ap.add_argument("--out-dir", required=True)
@@ -77,18 +76,14 @@ def main(argv=None) -> int:
     if a.key not in aoi.columns:
         print(f"[gate] input error: AOI has no column '{a.key}'", file=sys.stderr)
         return 1
-    raw_n = aoi[a.key].astype(str).str.strip().nunique()
-    aoi[a.key] = norm(aoi[a.key], a.basename)
-    if a.basename and aoi[a.key].nunique() != raw_n:
-        print("[gate] input error: --basename merges distinct AOI units (names not unique); drop --basename", file=sys.stderr)
-        return 1
+    aoi[a.key] = norm(aoi[a.key], False)
     dup = int(aoi[a.key].duplicated().sum())
     aoi = aoi.drop_duplicates(a.key)
     if aoi.empty:
         print("[gate] input error: AOI is empty", file=sys.stderr)
         return 1
     A = set(aoi[a.key])
-    S = load_keys(a.scored, a.key, a.basename, a.score_col)
+    S = load_keys(a.scored, a.key, False, a.score_col)
 
     E, bad_ex = {}, []
     for p in a.exclusions:
@@ -96,7 +91,7 @@ def main(argv=None) -> int:
         if a.key not in ex.columns or "reason" not in ex.columns:
             print(f"[gate] input error: {p} needs columns {a.key},reason", file=sys.stderr)
             return 1
-        for k, r in zip(norm(ex[a.key], a.basename), ex["reason"]):
+        for k, r in zip(norm(ex[a.key], False), ex["reason"]):
             r = "" if pd.isna(r) else str(r).strip()
             (E.__setitem__(k, r) if r else bad_ex.append(k))
 
