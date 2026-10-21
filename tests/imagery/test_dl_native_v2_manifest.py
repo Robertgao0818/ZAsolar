@@ -78,3 +78,15 @@ def test_corrupt_after_registration_drops_row_and_resize_keeps_one_row(tmp_path)
     names = [r[0] for r in csv.reader(open(man))]
     assert names == ["E200_N200.tif"]
     assert int(next(csv.reader(open(man)))[1]) == (root / "tiles/E200_N200.tif").stat().st_size
+
+
+def test_registered_tile_lost_and_redownload_fails_drops_row(tmp_path):
+    import os
+    root = tmp_path / "root"; fake_tile(root / "tiles/E100_N200.tif", 100, 200)
+    args = [sys.executable, str(SCRIPT), "--root", str(root), "--only-tiles", "E100_N200"]
+    subprocess.run(args, check=True, capture_output=True)
+    assert [r[0] for r in csv.reader(open(root / "manifest_tiles_v2.csv"))] == ["E100_N200.tif"]
+    (root / "tiles/E100_N200.tif").unlink()
+    env = dict(os.environ, DL_NATIVE_TRIES="0")   # no network: every fetch fails immediately
+    subprocess.run(args, check=True, capture_output=True, env=env)
+    assert list(csv.reader(open(root / "manifest_tiles_v2.csv"))) == []

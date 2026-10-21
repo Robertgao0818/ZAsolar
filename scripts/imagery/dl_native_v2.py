@@ -93,7 +93,8 @@ def fetch_block(bx,by,need):
     xs=sorted({x for x,_ in need});ys=sorted({y for _,y in need})
     x0,y0=min(xs),min(ys);nx=(max(xs)-x0)//STEP+1;ny=(max(ys)-y0)//STEP+1
     p=dict(service="WMS",version="1.1.1",request="GetMap",layers=L,styles="",srs="EPSG:32734",bbox=f"{x0},{y0},{x0+nx*STEP},{y0+ny*STEP}",width=T*nx,height=T*ny,format="image/jpeg")
-    for k in range(5):
+    err="no attempt"
+    for k in range(int(os.environ.get("DL_NATIVE_TRIES","5"))):
         try:
             r=sess().get(U,params=p,timeout=300);r.raise_for_status()
             if "image" not in r.headers.get("Content-Type",""): raise RuntimeError(r.text[:120])
@@ -124,6 +125,12 @@ print(f"tiles wanted={len(want)} missing={len(need)} requests={len(blocks)} (v1 
 unlisted=sum(f"E{x}_N{y}.tif" not in in_man for x,y in present)
 print(f"already present={len(present)} (not yet in manifest: {unlisted})",flush=True)
 if a.dry: sys.exit()
+# Wanted tiles with no valid copy anywhere must not keep an old manifest row (file lost/corrupted
+# since registration). Drop it now; a successful re-download below writes a fresh row.
+with lk:
+    for x,y in need:
+        n=f"E{x}_N{y}.tif"
+        if n in in_man: _rewrite_manifest(n,None);del in_man[n];print(f"WARN {n} registered but no valid copy; manifest row dropped",flush=True)
 for x,y in present: record(x,y,loc[(x,y)],"existing" if not loc[(x,y)].startswith(f"{a.root}/tiles/") else "downloaded")
 for x,y in need: loc[(x,y)]=None
 st={};t0=time.time();done=0
