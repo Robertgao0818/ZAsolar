@@ -46,6 +46,14 @@ def _read_man(p):
         with open(p) as f: return {r[0]:r[1] for r in csv.reader(f) if len(r)>=2}  # tile -> size (last row wins)
     except FileNotFoundError: return {}
 in_man=_read_man(MAN);in_src=_read_src(SRC)
+def _rewrite_manifest(n,row):
+    """Replace (row) or drop (row=None) tile n's manifest row(s) atomically, keeping one row per tile.
+    Called under lk. Needed so legacy readers (header=None, all rows) never see stale/duplicate rows."""
+    with open(MAN) as f: rows=[r for r in csv.reader(f) if r and r[0]!=n]
+    if row: rows.append(row)
+    tmp=MAN+".tmp_rewrite"
+    with open(tmp,"w",newline="") as f: csv.writer(f).writerows(rows)
+    os.replace(tmp,MAN)
 def link_into_root(n,path):
     """Expose a valid tile from an --existing dir at ROOT/tiles/<n> (symlink) so manifest consumers that open
     ROOT/tiles/<tile> can read it. Returns the ROOT path, or None if ROOT/tiles/<n> holds an invalid real file
@@ -64,11 +72,15 @@ def record(x,y,path,source):
     with lk:
         if source=="existing":
             path=link_into_root(n,path)
-            if path is None: return
+            if path is None:  # ROOT/tiles/<n> is corrupt: drop any earlier manifest row so nobody reads it
+                if n in in_man: _rewrite_manifest(n,None);del in_man[n]
+                return
         sz=str(os.path.getsize(path))
-        if in_man.get(n)!=sz:  # new tile, or file replaced since last row: append; readers keep the last row
+        if in_man.get(n)!=sz:  # new tile, or file replaced since its row: exactly one row per tile
             row=[n,sz,hashlib.sha256(open(path,"rb").read()).hexdigest(),time.strftime("%Y-%m-%dT%H:%M:%S%z")]
-            with open(MAN,"a") as f: csv.writer(f).writerow(row)
+            if n in in_man: _rewrite_manifest(n,row)
+            else:
+                with open(MAN,"a") as f: csv.writer(f).writerow(row)
             in_man[n]=sz
         p=os.path.abspath(path)
         if in_src.get(n)!=p:  # new tile or path changed on resume: append; readers take the last row

@@ -63,3 +63,18 @@ def test_invalid_root_file_not_manifested_and_dangling_link_replaced(tmp_path):
     assert (root / "tiles/E100_N200.tif").read_bytes() == b"corrupt"
     assert (root / "tiles/E200_N200.tif").resolve() == (ext / "E200_N200.tif").resolve()
     assert int(man["E200_N200.tif"][1]) == (ext / "E200_N200.tif").stat().st_size
+
+
+def test_corrupt_after_registration_drops_row_and_resize_keeps_one_row(tmp_path):
+    root, ext = tmp_path / "root", tmp_path / "old"
+    fake_tile(ext / "E100_N200.tif", 100, 200); fake_tile(root / "tiles/E200_N200.tif", 200, 200)
+    args = [sys.executable, str(SCRIPT), "--root", str(root), "--existing", str(ext), "--only-tiles", "E100_N200,E200_N200"]
+    subprocess.run(args, check=True, capture_output=True)
+    (root / "tiles/E100_N200.tif").unlink(); (root / "tiles/E100_N200.tif").write_bytes(b"corrupt")
+    man = root / "manifest_tiles_v2.csv"
+    rows = list(csv.reader(open(man))); rows = [r if r[0] != "E200_N200.tif" else [r[0], "1", r[2], r[3]] for r in rows]
+    csv.writer(open(man, "w", newline="")).writerows(rows)          # simulate a stale size for E200
+    subprocess.run(args, check=True, capture_output=True)
+    names = [r[0] for r in csv.reader(open(man))]
+    assert names == ["E200_N200.tif"]
+    assert int(next(csv.reader(open(man)))[1]) == (root / "tiles/E200_N200.tif").stat().st_size

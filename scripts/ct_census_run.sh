@@ -136,6 +136,14 @@ infer_one(){
   # arrays across the `xargs -P ... bash -c` fork, so re-source the single source of
   # truth here (its ${VAR:-default} assignments honor the exported override scalars).
   source "$ZAS/scripts/lib/census_caliber.sh"
+  # Infer only on a COMPLETE download: a grid without dl_<g>.ok is left uninferred (the
+  # coverage gate then reports it) instead of being inferred on a partial tile set.
+  [ -f "$STATE/dl_$G.ok" ] || { echo "skip $G: download not complete" >> "$LOGS/infer_skipped.log"; return 0; }
+  # A terminal marker older than the completed download came from a partial-download
+  # pass: drop it and re-run so the late tiles are inferred.
+  for m in "$STATE/infer_$G.ok" "$STATE/infer_$G.empty"; do
+    [ -f "$m" ] && [ "$STATE/dl_$G.ok" -nt "$m" ] && rm -f "$m" "$STATE/bk_$G.ok"
+  done
   # terminal states needing no recompute: detected (.ok) OR surveyed-empty (.empty)
   { [ -f "$STATE/infer_$G.ok" ] || [ -f "$STATE/infer_$G.empty" ]; } && return 0
   local OUT="$RESULTS_DIR/$G"
@@ -205,6 +213,9 @@ export -f dl_one infer_one
 
 # ── Phase B: background downloader (stays ahead of inference) ───────────────
 echo "phaseB-download+infer" > "$STATE/PHASE"; write_status
+# Stale dl_*.fail from a previous run would let the wait loop below pass while the
+# retry download is still running. Every non-.ok grid is retried anyway, so clear them.
+rm -f "$STATE"/dl_*.fail
 log "starting background downloader (DL_WORKERS=$DL_WORKERS)"
 ( xargs -P "$DL_WORKERS" -I{} bash -c 'dl_one "$@"' _ {} < "$GLIST" ) >"$LOGS/downloader.log" 2>&1 &
 DL_PID=$!

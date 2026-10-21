@@ -65,3 +65,29 @@ def test_ct_census_run_gate_requires_complete_download(tmp_path):
     r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env={"PATH": __import__("os").environ["PATH"]})
     assert r.returncode == 2 and "GATE_PASSED" not in r.stdout
     assert (st / "coverage_gate/unscored_units.csv").read_text().split() == ["grid", "CPT2", "CPT3"]
+
+
+def _infer_one_harness(tmp_path):
+    import re
+    sh = (ROOT / "scripts/ct_census_run.sh").read_text()
+    body = re.search(r"\ninfer_one\(\)\{\n(.*?)\n  local OUT=", sh, re.S).group(1)
+    st, logs = tmp_path / "state", tmp_path / "logs"; st.mkdir(); logs.mkdir()
+    zas = tmp_path / "zas"; (zas / "scripts/lib").mkdir(parents=True); (zas / "scripts/lib/census_caliber.sh").write_text("")
+    fn = "infer_one(){\n" + body + "\n  echo RAN_INFER\n}\n"
+    return st, (f"STATE={st}; LOGS={logs}; ZAS={zas}\n" + fn)
+
+
+def test_infer_reruns_after_download_completes_and_skips_incomplete(tmp_path):
+    import os, time
+    st, pre = _infer_one_harness(tmp_path)
+    run = lambda g: subprocess.run(["bash", "-c", pre + f"infer_one {g}"], capture_output=True, text=True).stdout
+    (st / "infer_A.ok").touch(); t = time.time(); os.utime(st / "infer_A.ok", (t - 100, t - 100)); (st / "dl_A.ok").touch()
+    assert "RAN_INFER" in run("A") and not (st / "infer_A.ok").exists()      # stale marker dropped, re-run
+    (st / "dl_B.ok").touch(); (st / "infer_B.ok").touch()
+    assert "RAN_INFER" not in run("B")                                        # fresh marker kept
+    assert "RAN_INFER" not in run("C")                                        # no dl_C.ok -> not inferred
+
+
+def test_stale_dl_fail_cleared_before_downloader():
+    sh = (ROOT / "scripts/ct_census_run.sh").read_text()
+    assert sh.index('rm -f "$STATE"/dl_*.fail') < sh.index("xargs -P \"$DL_WORKERS\"")
